@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.5
 
 - Adds native expandable cards for context budgets, notes, history, and context requests, with compact previews, result counts, and visible page ranges and continuation offsets.
 - Keeps committed context-window handoffs and checkpoint reminders compact until expanded. Model-visible tool text, prompts, context policy, and stored note/history content are unchanged.
