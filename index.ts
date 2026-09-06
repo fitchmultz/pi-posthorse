@@ -20,6 +20,7 @@ import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "no
 import { createInterface } from "node:readline";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { registerPosthorseMessages, toolCards, type PosthorseDisplay } from "./ui.ts";
 
 const REMINDER_BUFFER_TOKENS = 32_000;
 /** Absolute ceiling for handoffs and read pages; pages shrink to the live remaining budget. */
@@ -86,7 +87,7 @@ type EntryLike = {
 };
 
 type WindowedEntry = { entry: EntryLike; windowId: string; text: string; images: ImageLike[] };
-type HistoryHit = { id: string; text: string; priority: 0 | 1 };
+type HistoryHit = { id: string; text: string; headerLength: number; priority: 0 | 1 };
 type RecoveryRecord = {
 	id: string;
 	timestamp: string;
@@ -159,8 +160,8 @@ function textOf(message: MessageLike): string {
 		.join("\n");
 }
 
-function textResult(text: string, images: ImageLike[] = []) {
-	return { content: [{ type: "text" as const, text }, ...images], details: undefined };
+function textResult(text: string, images: ImageLike[] = [], display?: PosthorseDisplay) {
+	return { content: [{ type: "text" as const, text }, ...images], details: display };
 }
 
 /**
@@ -263,10 +264,12 @@ function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit
 			matchIndex = text.toLowerCase().indexOf(query);
 		}
 	}
+	const header = `${source ? `${source} ` : ""}${entry.timestamp ?? ""} [window ${item.windowId}] [${entry.id}] `;
 	return {
 		id: entry.id!,
 		priority,
-		text: `${source ? `${source} ` : ""}${entry.timestamp ?? ""} [window ${item.windowId}] [${entry.id}] ${excerptAround(text, matchIndex, 100, 400)}`,
+		text: `${header}${excerptAround(text, matchIndex, 100, 400)}`,
+		headerLength: header.length,
 	};
 }
 
@@ -678,6 +681,7 @@ Automatic handoffs are emergency recovery records, not proof of current state. R
 }
 
 export default function (pi: ExtensionAPI) {
+	registerPosthorseMessages(pi);
 	const activeToolTokens = () => {
 		const active = new Set(pi.getActiveTools());
 		return pi
@@ -781,6 +785,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "new_context",
 		label: "New Context",
+		...toolCards("new_context"),
 		description:
 			"Start a genuinely fresh context window after this tool batch. Earlier conversation leaves active context without a generated summary but remains recoverable through history. Pass concise continuation state in handoff, or save richer state with notes first.",
 		promptSnippet: "start a fresh context window with an optional atomic handoff",
@@ -807,6 +812,8 @@ export default function (pi: ExtensionAPI) {
 			return {
 				...textResult(
 					"Requested a fresh Pi context after this complete tool batch succeeds. Earlier conversation stays in session history.",
+					[],
+					{ kind: "new-context" },
 				),
 				newContext: { handoff: trimmed },
 			};
@@ -816,6 +823,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "get_context_remaining",
 		label: "Context Remaining",
+		...toolCards("get_context_remaining"),
 		description:
 			"Best available native estimate of the context budget: tokens until Pi's automatic rollover line and until the model's hard limit.",
 		promptSnippet: "check the remaining context budget only when needed",
@@ -823,14 +831,20 @@ export default function (pi: ExtensionAPI) {
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			const native = nativeContext(ctx);
 			const usage = native.getContextUsage();
-			if (!usage || usage.tokens == null) return textResult("Context usage is not known until the next model response.");
+			if (!usage || usage.tokens == null) return textResult("Context usage is not known until the next model response.", [], { kind: "context" });
 			const n = (value: number) => value.toLocaleString("en-US");
 			const budget = budgetFor(native, usage.contextWindow);
+			const display: PosthorseDisplay = {
+				kind: "context", usage,
+				rollover: !budget?.enabled ? "disabled" : budget.supported ? "enabled" : "unsupported",
+				rolloverAt: budget?.rolloverAt,
+			};
 			const hard = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the hard context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate.`;
-			if (!budget?.enabled) return textResult(`Automatic rollover is disabled (Pi compaction.enabled=false). ${hard}`);
-			if (!budget.supported) return textResult(`${unsupportedMessage(budget)} ${hard}`);
+			if (!budget?.enabled) return textResult(`Automatic rollover is disabled (Pi compaction.enabled=false). ${hard}`, [], display);
+			if (!budget.supported) return textResult(`${unsupportedMessage(budget)} ${hard}`, [], display);
 			return textResult(
 				`≈${n(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until automatic rollover (line at ${n(budget.rolloverAt)}); ${hard}`,
+				[], display,
 			);
 		},
 	});
@@ -838,6 +852,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "notes",
 		label: "Notes",
+		...toolCards("notes"),
 		description:
 			"Persistent notes in .pi/notes/ that survive context resets. Ops: list, read (paged; pass offset to continue), write (create/replace; empty content clears), append, search (case-insensitive substring over note lines). Inside a Git repository, including nested directories and linked worktrees, notes belong to the main checkout.",
 		promptSnippet: "save and recall durable state that survives context resets",
@@ -874,10 +889,10 @@ export default function (pi: ExtensionAPI) {
 
 			switch (params.op) {
 				case "list": {
-					if (!existsSync(dir)) return textResult("(no notes yet)");
+					if (!existsSync(dir)) return textResult("(no notes yet)", [], { kind: "notes-list", count: 0 });
 					const files: string[] = [];
 					walk(dir, files);
-					return textResult(files.length ? files.map((file) => file.slice(dir.length + 1)).join("\n") : "(no notes yet)");
+					return textResult(files.length ? files.map((file) => file.slice(dir.length + 1)).join("\n") : "(no notes yet)", [], { kind: "notes-list", count: files.length });
 				}
 				case "read": {
 					const relative = requireValue(params.path, "path", params.op);
@@ -891,7 +906,7 @@ export default function (pi: ExtensionAPI) {
 					const end = Math.min(text.length, offset + requirePage(nativeContext(ctx), offset, 0, activeToolTokens()));
 					const more =
 						end < text.length ? `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]` : "";
-					return textResult(`${text.slice(offset, end)}${more}`);
+					return textResult(`${text.slice(offset, end)}${more}`, [], { kind: "note-read", offset, end, total: text.length });
 				}
 				case "write": {
 					const relative = requireValue(params.path, "path", params.op);
@@ -899,7 +914,7 @@ export default function (pi: ExtensionAPI) {
 					const path = safeJoin(relative);
 					mkdirSync(dirname(path), { recursive: true });
 					writeFileSync(path, params.content);
-					return textResult(`Wrote .pi/notes/${relative}`);
+					return textResult(`Wrote .pi/notes/${relative}`, [], { kind: "note-write" });
 				}
 				case "append": {
 					const relative = requireValue(params.path, "path", params.op);
@@ -912,11 +927,11 @@ export default function (pi: ExtensionAPI) {
 					const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
 					const separator = existing && !existing.endsWith("\n") ? "\n" : "";
 					appendFileSync(path, `${separator}${content.replace(/\n?$/, "\n")}`);
-					return textResult(`Appended to .pi/notes/${relative}`);
+					return textResult(`Appended to .pi/notes/${relative}`, [], { kind: "note-append" });
 				}
 				case "search": {
 					const query = requireValue(params.query, "query", params.op).toLowerCase();
-					if (!existsSync(dir)) return textResult("(no notes yet)");
+					if (!existsSync(dir)) return textResult("(no notes yet)", [], { kind: "notes-search", count: 0 });
 					const files: string[] = [];
 					walk(dir, files);
 					const hits: string[] = [];
@@ -930,7 +945,7 @@ export default function (pi: ExtensionAPI) {
 							}
 						}
 					}
-					return textResult(hits.length ? hits.join("\n") : `No notes match "${params.query}".`);
+					return textResult(hits.length ? hits.join("\n") : `No notes match "${params.query}".`, [], { kind: "notes-search", count: hits.length });
 				}
 			}
 		},
@@ -939,6 +954,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "history",
 		label: "History",
+		...toolCards("history"),
 		description:
 			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file. Within each group: newest-modified sessions first, newest entries per session. Reads return stored images and page long text with the next offset.",
 		promptSnippet: "recover earlier conversation that left the active context window",
@@ -957,13 +973,13 @@ export default function (pi: ExtensionAPI) {
 			if (params.op === "search") {
 				const query = requireValue(params.query, "query", params.op).toLowerCase();
 				const limit = params.limit ?? 10;
-				const hits: string[][] = [[], []];
+				const hits: HistoryHit[][] = [[], []];
 				// Forks copy ancestor entries under the same ids into new session files; report each id once.
 				const seen = new Set<string>();
 				const addHit = (hit: HistoryHit | undefined) => {
 					if (!hit || seen.has(hit.id) || hits[hit.priority].length >= limit) return;
 					seen.add(hit.id);
-					hits[hit.priority].push(hit.text);
+					hits[hit.priority].push(hit);
 				};
 
 				if (params.all) {
@@ -989,7 +1005,10 @@ export default function (pi: ExtensionAPI) {
 					}
 				}
 				const results = hits.flat().slice(0, limit);
-				return textResult(results.length ? results.join("\n") : `No history matches "${params.query}".`);
+				return textResult(results.length ? results.map((hit) => hit.text).join("\n") : `No history matches "${params.query}".`, [], {
+					kind: "history-search",
+					entries: results.map((hit) => ({ headerLength: hit.headerLength, length: hit.text.length })),
+				});
 			}
 
 			const id = requireValue(params.id, "id", params.op);
@@ -1003,10 +1022,12 @@ export default function (pi: ExtensionAPI) {
 					offset + requirePage(nativeContext(ctx), offset, offset === 0 ? item.images.length : 0, activeToolTokens()),
 				);
 				const more = end < item.text.length ? `\nMore remains; call history read with id "${id}" and offset ${end}.` : "";
+				const header = `${source ? `${source} ` : ""}${item.entry.timestamp ?? ""} [window ${item.windowId}] [${id}] [chars ${offset}-${end} of ${item.text.length}] `;
 				// Stored images ride along with the first page only.
 				return textResult(
-					`${source ? `${source} ` : ""}${item.entry.timestamp ?? ""} [window ${item.windowId}] [${id}] [chars ${offset}-${end} of ${item.text.length}] ${item.text.slice(offset, end)}${more}`,
+					`${header}${item.text.slice(offset, end)}${more}`,
 					offset === 0 ? item.images : [],
+					{ kind: "history-read", headerLength: header.length, offset, end, total: item.text.length },
 				);
 			};
 

@@ -14,4 +14,5 @@ target="$agent/test/posthorse-integration.test.ts"
 cp "$here/test/integration/posthorse-in-pi.test.ts" "$target"
 trap 'rm -f "$target"' EXIT
 cd "$agent"
-POSTHORSE_INDEX="$here/index.ts" npx vitest run test/posthorse-integration.test.ts
+NODE_OPTIONS="${NODE_OPTIONS:-} --import=\"$here/test/pi-loader.ts\"" \
+  POSTHORSE_INDEX="$here/index.ts" npx vitest run test/posthorse-integration.test.ts
