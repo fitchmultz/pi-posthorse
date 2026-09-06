@@ -40,7 +40,7 @@ pi -e git:github.com/fitchmultz/pi-posthorse              # try it for one run w
 
 Update with `pi update npm:pi-posthorse` or `pi update --extensions`; move a pinned Git install with `pi install git:github.com/fitchmultz/pi-posthorse@<new tag>`. Uninstall with `pi remove npm:pi-posthorse` (or the Git source you installed). Removing the package leaves `.pi/notes` and Pi's session history in place.
 
-After installing or updating Posthorse, run `/reload` in existing Pi sessions or restart them to load the new version.
+Restart Pi after installing or updating Posthorse to load the new extension code.
 
 Keep exactly one copy loaded. `pi list` shows every package source; if an older entry such as `git:github.com/fitchmultz/pi-headroom.git` or a local checkout is still listed, `pi remove` it before installing the npm package, otherwise two copies register the same tools and compete for the same rollover hook.
 
@@ -75,6 +75,10 @@ Only one automatic compaction or rollover policy extension should be enabled at 
 - `notes({ op, ... })`: `list`, `read` (paged; `offset` continues), `write` (empty content clears), `append` (one atomic newline-terminated record), `search` (excerpts centered on the match)
 - `history({ op, ... })`: `search`, `read`; results carry native window ids, reads return stored images with the first page and the next character offset when text remains
 
+In the TUI, tools use Pi's native expandable cards. Collapsed cards show the operation and target, a short content preview, and counts or page ranges with the next offset when more remains. Expand with Pi's tool-output shortcut (`Ctrl+O` by default), or click the card's header or body in fullscreen mode. Expanded cards show the complete returned page and its metadata, not content the tool has not fetched yet. Writes and context requests also show the submitted content or handoff.
+
+Committed context-window messages and checkpoint reminders are compact, expandable cards too. The `new_context` tool card describes a request; only the committed context-window message says a fresh window has started.
+
 Read pages, including returned images, shrink to the context that is actually left. Before usage is known, they reserve prompt/tool overhead and leave half the rest free. Unsafe pages are refused with the offset preserved; call `new_context` and retry.
 
 `history search` puts matching original content before recovery material: handoffs, compaction and branch summaries, checkpoint reminders, and `notes`, `new_context`, and `history` calls/results. Ordinary prose or another tool call in the same assistant entry keeps its priority when that content matches. Every entry remains searchable; `history read` returns the complete normalized entry, including any recovery content omitted from a search excerpt.
@@ -105,4 +109,4 @@ npm run check
 PI_FORK=../pi scripts/integration.sh   # loads the real extension into the fork's test harness (fork built)
 ```
 
-`npm run check` type-checks `index.ts` and the unit tests; the integration test runs inside the fork's harness. Unit tests cover reminder boundaries, skipped branch lookups, and legacy reminders; native integration tests cover rollover and history recovery. CI runs the unit tests on Node 22.19 and 24, `npm audit`, `npm pack --dry-run`, and the integration job against the pinned fork revision.
+`npm run check` type-checks the extension, renderers, and tests. Tests cover reminder policy, notes/history behavior, and real native card components, including width, expansion, and legacy results. The pinned Pi 0.85.0 SDK's unbundled entry imports an undeclared server package, so test-only resolution loads its shipped native bundle. Integration tests run inside the fork's harness and cover rollover and history recovery; use a disposable built fork checkout because the script briefly copies the test into its test directory. CI runs the unit tests on Node 22.19 and 24, `npm audit`, `npm pack --dry-run`, and the integration job against the pinned fork revision.

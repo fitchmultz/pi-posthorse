@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Adds native expandable cards for context budgets, notes, history, and context requests, with compact previews, result counts, and visible page ranges and continuation offsets.
+- Keeps committed context-window handoffs and checkpoint reminders compact until expanded. Model-visible tool text, prompts, context policy, and stored note/history content are unchanged.
+- Corrects update instructions to require restarting Pi to load new extension code.
+
 ## 0.4.4
 
 - Skips full-branch lookups outside the checkpoint reminder band and when model input contains no checkpoint reminders.
