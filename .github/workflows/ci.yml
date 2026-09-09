@@ -8,6 +8,7 @@ on:
 env:
   # Known-good fitchmultz/pi revision for the integration job; keep in step with the README.
   PI_FORK_REF: f9b06177e565f70cd243a785d088d1c491830dbd
+  CODEX_LOCAL_REF: 6c5d489f76b358ff6adedcf47211081d290b293b
 
 jobs:
   test:
@@ -97,4 +98,75 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: codex-runtime-evidence
+          path: ~/Library/Caches/pi-runs/posthorse-codex-*
+
+  codex-local-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      CODEX_REPO_ROOT: ${{ github.workspace }}/native-codex
+      CARGO_TARGET_DIR: ${{ runner.temp }}/codex-posthorse-target
+      CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: fitchmultz/codex
+          ref: ${{ env.CODEX_LOCAL_REF }}
+          path: native-codex
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: adapters/codex-posthorse/package-lock.json
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+        with:
+          components: rust-src
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
+        with:
+          tool: just@1.51.0,cargo-nextest@0.9.143
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libcap-dev libasound2-dev bubblewrap
+      - name: Resolve repository-pinned V8 artifacts
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import os
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path(os.environ["CODEX_REPO_ROOT"]) / "scripts"))
+          from codex_package.targets import TARGET_SPECS
+          from codex_package.v8 import resolve_codex_v8_cargo_env
+          overrides = resolve_codex_v8_cargo_env(
+              TARGET_SPECS["x86_64-unknown-linux-gnu"],
+              cache_root=Path(os.environ["RUNNER_TEMP"]) / "codex-v8",
+          )
+          for key, value in overrides.items():
+              print(f"{key}={value}")
+          PY
+      - name: Build matching CLI and code-mode host
+        working-directory: native-codex/codex-rs
+        run: cargo build --locked -p codex-cli --bin codex -p codex-code-mode-host --bin codex-code-mode-host
+      - name: Test native hook and feature configuration
+        working-directory: native-codex/codex-rs
+        run: just test -p codex-hooks -p codex-features
+      - run: npm ci --ignore-scripts
+        working-directory: adapters/codex-posthorse
+      - name: Enforce local recovery acceptance
+        working-directory: adapters/codex-posthorse
+        env:
+          POSTHORSE_CODEX_BIN: ${{ runner.temp }}/codex-posthorse-target/debug/codex
+        run: npm run test:local
+      - name: Save local recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-local-recovery-evidence
           path: ~/Library/Caches/pi-runs/posthorse-codex-*

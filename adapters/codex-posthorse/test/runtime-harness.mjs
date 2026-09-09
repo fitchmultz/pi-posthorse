@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { createInterface } from "node:readline";
 import { mkdir, mkdtemp, readFile, writeFile, appendFile, rename } from "node:fs/promises";
@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 
 const adapter = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const timeoutMs = 30_000;
@@ -32,13 +33,21 @@ export function contextWindow(request) {
 }
 
 export class RuntimeHarness {
-	static async create(name, { tokenBudget = true, failCheckpoint = false } = {}) {
+	static async create(name, {
+		tokenBudget = true, failCheckpoint = false, hookFailure, hintFailure, recordToolCompletions = false,
+		localRecovery = process.env.POSTHORSE_LOCAL_RECOVERY === "1", codeMode = false,
+	} = {}) {
 		const cache = join(homedir(), "Library", "Caches", "pi-runs");
 		await mkdir(cache, { recursive: true });
 		const root = await mkdtemp(join(cache, `posthorse-codex-${name}-`));
 		const harness = new RuntimeHarness(root);
 		harness.tokenBudget = tokenBudget;
 		harness.failCheckpoint = failCheckpoint;
+		harness.localRecovery = localRecovery && tokenBudget;
+		harness.hookFailure = hookFailure;
+		harness.hintFailure = hintFailure;
+		harness.recordToolCompletions = recordToolCompletions;
+		harness.codeMode = codeMode;
 		try {
 			await harness.initialize();
 			return harness;
@@ -92,7 +101,10 @@ export class RuntimeHarness {
 					} } },
 				];
 				res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
-				for (const event of events) res.write(`data: ${JSON.stringify(event)}\n\n`);
+				for (const event of events) {
+					res.write(`data: ${JSON.stringify(event)}\n\n`);
+					if (reply.betweenItemsMs && event.type === "response.output_item.done") await delay(reply.betweenItemsMs);
+				}
 				res.end();
 			} catch (error) {
 				this.providerError = error;
@@ -102,8 +114,18 @@ export class RuntimeHarness {
 		});
 		this.server.listen(0, "127.0.0.1");
 		await once(this.server, "listening");
-		const hookCommand = `${shellQuote(process.execPath)} ${shellQuote(join(adapter, "scripts", "precompact.mjs"))}`;
+		const hookCommand = this.hintFailure || ["nonzero", "timeout", "malformed"].includes(this.hookFailure)
+			? `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(import.meta.url))} --hook-fixture ${this.hintFailure ? `checkpoint-then-${this.hintFailure}-hint` : this.hookFailure}`
+			: `${shellQuote(process.execPath)} ${shellQuote(join(adapter, "scripts", "precompact.mjs"))}`;
 		const sessionCommand = `${shellQuote(process.execPath)} ${shellQuote(join(adapter, "scripts", "session-start.mjs"))}`;
+		const completionCommand = `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(import.meta.url))} --hook-fixture record-completion`;
+		const preCompactConfig = [
+			'[[hooks.PreCompact]]',
+			...(this.hookFailure === "unmatched" ? ['matcher = "manual"'] : []),
+			'[[hooks.PreCompact.hooks]]', 'type = "command"', `command = ${quote(hookCommand)}`,
+			...(this.hookFailure === "async" ? ['async = true'] : []),
+			...(this.hookFailure === "timeout" ? ['timeout = 1'] : []),
+		].join("\n") + "\n";
 		this.config = [
 			'model = "gpt-6-astra"', 'model_provider = "posthorse_fixture"',
 			'model_context_window = 50000', 'model_auto_compact_token_limit = 9000',
@@ -111,7 +133,7 @@ export class RuntimeHarness {
 			'web_search = "disabled"',
 			'[features]', 'context_management = false', 'apps = false', 'remote_plugin = false',
 			'memories = false', 'multi_agent = false', 'shell_snapshot = false', 'hooks = true',
-			'code_mode_host = false',
+			`code_mode_host = ${this.codeMode}`,
 			'[features.token_budget]', `enabled = ${this.tokenBudget}`, 'use_history_notes_extension = false',
 			'guidance_message = "Use the local notes and history tools to recover durable Posthorse state."',
 			'[model_providers.posthorse_fixture]', 'name = "Posthorse local test"',
@@ -121,10 +143,10 @@ export class RuntimeHarness {
 			'[mcp_servers.notes]', `command = ${quote(process.execPath)}`,
 			`args = [${quote(join(adapter, "server.mjs"))}]`,
 			'[mcp_servers.notes.env]', `POSTHORSE_STATE_DIR = ${quote(this.state)}`,
-			'[[hooks.PreCompact]]',
-			'[[hooks.PreCompact.hooks]]', 'type = "command"', `command = ${quote(hookCommand)}`,
+			preCompactConfig.trimEnd(),
 			'[[hooks.SessionStart]]',
 			'[[hooks.SessionStart.hooks]]', 'type = "command"', `command = ${quote(sessionCommand)}`,
+			...(this.recordToolCompletions ? ['[[hooks.PostToolUse]]', '[[hooks.PostToolUse.hooks]]', 'type = "command"', `command = ${quote(completionCommand)}`] : []),
 			`[projects.${quote(this.cwd)}]`, 'trust_level = "trusted"',
 		].join("\n") + "\n";
 		await writeFile(join(this.home, "config.toml"), this.config);
@@ -133,8 +155,16 @@ export class RuntimeHarness {
 		await writeFile(join(this.root, "hooks-list.json"), JSON.stringify(listed, null, 2));
 		const hooks = listed.data.flatMap((entry) => entry.hooks ?? []);
 		if (!hooks.length) throw new Error(`No hooks discovered: ${JSON.stringify(listed)}`);
+		const recoveryHook = hooks.find((hook) => hook.eventName === "preCompact");
+		if (!recoveryHook) throw new Error("No PreCompact hook discovered");
 		await this.stop();
-		for (const hook of hooks) this.config += `\n[hooks.state.${quote(hook.key)}]\ntrusted_hash = ${quote(hook.currentHash)}\n`;
+		if (this.localRecovery) this.config = this.config.replace('[features.token_budget]\n', `[features.token_budget]\nlocal_recovery_hook = ${quote(recoveryHook.key)}\n`);
+		if (this.hookFailure === "missing") this.config = this.config.replace(preCompactConfig, "");
+		for (const hook of hooks) {
+			if (hook.key === recoveryHook.key && this.hookFailure === "untrusted") continue;
+			this.config += `\n[hooks.state.${quote(hook.key)}]\ntrusted_hash = ${quote(hook.currentHash)}\n`;
+			if (hook.key === recoveryHook.key && this.hookFailure === "disabled") this.config += 'enabled = false\n';
+		}
 		await writeFile(join(this.home, "config.toml"), this.config);
 		await this.start();
 	}
@@ -269,5 +299,46 @@ export class RuntimeHarness {
 		await this.stop();
 		if (this.server?.listening) await new Promise((resolveClosed) => this.server.close(resolveClosed));
 		await this.logWrites;
+	}
+}
+
+if (process.argv[2] === "--hook-fixture") {
+	let input = "";
+	for await (const chunk of process.stdin) input += chunk;
+	const payload = JSON.parse(input);
+	await appendFile(join(dirname(process.env.CODEX_HOME), "hook-fixture.jsonl"), `${JSON.stringify({ recordedAt: Date.now(), ...payload })}\n`);
+	switch (process.argv[3]) {
+		case "record-completion":
+			process.stdout.write("{}\n");
+			break;
+		case "nonzero":
+			process.stderr.write("CONTROLLED_CHECKPOINT_PROCESS_FAILURE\n");
+			process.exitCode = 7;
+			break;
+		case "malformed":
+			process.stdout.write('{"continue": INVALID_JSON\n');
+			break;
+		case "timeout":
+			await delay(10_000);
+			break;
+		case "checkpoint-then-invalid-json-hint":
+		case "checkpoint-then-oversize-hint": {
+			const checkpoint = spawnSync(process.execPath, [join(adapter, "scripts", "precompact.mjs")], { input, encoding: "utf8" });
+			if (checkpoint.status !== 0 || JSON.parse(checkpoint.stdout).continue !== true) throw new Error(`Production checkpoint failed: ${checkpoint.stderr} ${checkpoint.stdout}`);
+			const manifest = join(process.env.POSTHORSE_STATE_DIR, "threads", `${payload.agent_id ?? payload.session_id}.json`);
+			if (process.argv[3] === "checkpoint-then-invalid-json-hint") {
+				await rename(manifest, `${manifest}.before-hint-failure`);
+				await writeFile(manifest, '{"CONTROLLED_INVALID_RECOVERY_HINT":');
+			} else {
+				const { checkpointPath } = JSON.parse(await readFile(manifest, "utf8"));
+				const recovery = JSON.parse(await readFile(checkpointPath, "utf8"));
+				await rename(checkpointPath, `${checkpointPath}.before-hint-failure`);
+				await writeFile(checkpointPath, JSON.stringify({ ...recovery, recovery: "😀".repeat(9_000) }));
+			}
+			process.stdout.write(checkpoint.stdout);
+			break;
+		}
+		default:
+			throw new Error(`Unknown hook fixture: ${process.argv[3]}`);
 	}
 }

@@ -9,7 +9,8 @@
   "scripts": {
     "test": "node --test test/store.test.mjs test/server.test.mjs",
     "test:runtime": "node --test test/runtime.test.mjs",
-    "test:acceptance": "POSTHORSE_ACCEPTANCE=1 node --test test/runtime.test.mjs"
+    "test:acceptance": "POSTHORSE_ACCEPTANCE=1 node --test test/runtime.test.mjs",
+    "test:local": "POSTHORSE_LOCAL_RECOVERY=1 POSTHORSE_ACCEPTANCE=1 node --test test/runtime.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0"
