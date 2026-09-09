@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 
 const MAX_HANDOFF_CHARS = 20_000;
+const MAX_HINT_BYTES = 32_000;
 const MAX_RECORD_CHARS = 4_000;
 const TOOL_CALLS = new Set(["function_call", "custom_tool_call", "local_shell_call"]);
 const TOOL_OUTPUTS = new Set(["function_call_output", "custom_tool_call_output", "local_shell_call_output"]);
@@ -154,12 +155,33 @@ function ownerLabel(record) {
 		? "direct user input" : "original user-role input";
 }
 
-function excerpt(text, limit) {
-	if (text.length <= limit) return text;
-	const marker = "\n… omitted; use history read for the original …\n";
-	if (limit <= marker.length) return text.slice(0, limit);
-	const half = Math.floor((limit - marker.length) / 2);
-	return `${text.slice(0, half)}${marker}${text.slice(text.length - (limit - marker.length - half))}`;
+function excerpt(text, limit, maxBytes) {
+	const render = (size) => {
+		if (text.length <= size) return text;
+		const marker = "\n… omitted; use history read for the original …\n";
+		if (size <= marker.length) return text.slice(0, size).replace(/\p{Surrogate}$/u, "");
+		const half = Math.floor((size - marker.length) / 2);
+		const head = text.slice(0, half).replace(/\p{Surrogate}$/u, "");
+		const tail = text.slice(text.length - (size - marker.length - half)).replace(/^\p{Surrogate}/u, "");
+		return `${head}${marker}${tail}`;
+	};
+	const initial = render(limit);
+	if (Buffer.byteLength(initial) <= maxBytes) return initial;
+	let low = 0;
+	let high = limit;
+	while (low < high) {
+		const middle = Math.ceil((low + high) / 2);
+		if (Buffer.byteLength(render(middle)) <= maxBytes) low = middle;
+		else high = middle - 1;
+	}
+	return render(low);
+}
+
+function hintGuidance(threadId) {
+	return [
+		`Posthorse task ID: ${threadId}. Pass threadId: ${JSON.stringify(threadId)} to notes and history tools.`,
+		"Keep durable decisions, current work, verification, and outstanding user requests in notes. Use notes with op list/read/write/append/search and a relative path. Use history with op list/search/read; copy a record id from list/search, then read it with offset/limit pages. Original image blocks remain in history records. Context boundaries are labeled by windowId. Save current notes before automatic rollover.",
+	].join("\n\n");
 }
 
 async function recoveryFrom(file, threadId, rootThreadId) {
@@ -222,15 +244,17 @@ async function recoveryFrom(file, threadId, rootThreadId) {
 	].join("\n\n");
 	const selected = [];
 	let available = MAX_HANDOFF_CHARS - prefix.length - 1_000;
+	let availableBytes = MAX_HINT_BYTES - Buffer.byteLength(prefix + hintGuidance(threadId)) - 1_000;
 	for (const { record, label } of chosen.values()) {
 		const header = `[${label} | ${record.id} | window ${record.windowId}]`;
-		if (available < header.length + 200) continue;
+		if (available < header.length + 200 || availableBytes < Buffer.byteLength(header) + 200) continue;
 		const call = calls.get(record.row.payload?.call_id);
 		const body = `${recordText(record.row)}${call ? `\n\nTool call ${call.id}: ${recordText(call.row)}` : ""}`;
 		const limit = Math.min(MAX_RECORD_CHARS, available);
-		const block = `${header}\n${excerpt(body, limit - header.length - 1)}`;
+		const block = `${header}\n${excerpt(body, limit - header.length - 1, availableBytes - Buffer.byteLength(header) - 1)}`;
 		selected.push({ line: record.line, id: record.id, block });
 		available -= block.length + 2;
+		availableBytes -= Buffer.byteLength(block) + 2;
 	}
 	selected.sort((a, b) => a.line - b.line);
 	const omissions = chosen.size - selected.length;
@@ -239,9 +263,13 @@ async function recoveryFrom(file, threadId, rootThreadId) {
 		boundary ? `Previous context boundary: ${boundary.id}. History read preserves its original checkpoint; summaries are not nested here.` : "",
 		`Checkpoint covers transcript through ${last.id} (line ${last.line}). Use notes list/read for durable state; use history read with an id to retrieve the original record in pages.`,
 	].filter(Boolean).join("\n\n");
+	const recovery = [prefix, ...selected.map((item) => item.block), suffix].join("\n\n");
+	if (Buffer.byteLength(`${recovery}\n\n${hintGuidance(threadId)}`) > MAX_HINT_BYTES) {
+		throw new Error("Recovery metadata exceeds the context hint limit; checkpoint was not accepted.");
+	}
 	return {
 		throughId: last.id, throughLine: last.line, throughOrdinal: last.ordinal, windowId: last.windowId,
-		recovery: [prefix, ...selected.map((item) => item.block), suffix].join("\n\n"),
+		recovery,
 	};
 }
 
@@ -315,8 +343,7 @@ export function createStore(stateDir) {
 		if (manifest?.checkpointPath && !checkpoint) throw new Error("Saved checkpoint is missing; recovery cannot be confirmed.");
 		return [
 			checkpoint?.recovery,
-			`Posthorse task ID: ${threadId}. Pass threadId: ${JSON.stringify(threadId)} to notes and history tools.`,
-			"Keep durable decisions, current work, verification, and outstanding user requests in notes. Use notes with op list/read/write/append/search and a relative path. Use history with op list/search/read; copy a record id from list/search, then read it with offset/limit pages. Original image blocks remain in history records. Context boundaries are labeled by windowId. Save current notes before automatic rollover.",
+			hintGuidance(threadId),
 		].filter(Boolean).join("\n\n");
 	}
 	async function notes(params) {
