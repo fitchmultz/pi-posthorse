@@ -8,6 +8,8 @@ Native, no-summary context windows for the [`fitchmultz/pi`](https://github.com/
 
 Pi owns the persisted boundary. Posthorse owns the policy: stable window guidance, one best-effort checkpoint reminder, `new_context`, `get_context_remaining`, durable `notes`, and window-aware `history`. A rollover removes the old window from active model context while the JSONL transcript stays append-only and complete.
 
+An isolated [Codex prototype](adapters/codex-posthorse/README.md) tests local notes and recovery with Codex's native context reset. It is not ready for everyday use and is not included in the Pi package.
+
 ## Requirements
 
 - Node `>=22.19.0`.

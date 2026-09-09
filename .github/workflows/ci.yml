@@ -49,3 +49,52 @@ jobs:
         working-directory: pi
       - run: PI_FORK=../pi scripts/integration.sh
         working-directory: pi-posthorse
+
+  codex-adapter:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ["22.19", "24"]
+    defaults:
+      run:
+        working-directory: adapters/codex-posthorse
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: adapters/codex-posthorse/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm audit
+
+  codex-runtime:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: adapters/codex-posthorse
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: adapters/codex-posthorse/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Download the pinned Codex runtime
+        run: |
+          curl --fail --location --retry 2 https://github.com/openai/codex/releases/download/rust-v0.153.4/codex-x86_64-unknown-linux-musl.tar.gz -o "$RUNNER_TEMP/codex-runtime.tar.gz"
+          mkdir -p "$RUNNER_TEMP/codex-runtime"
+          tar -xzf "$RUNNER_TEMP/codex-runtime.tar.gz" -C "$RUNNER_TEMP/codex-runtime"
+          "$RUNNER_TEMP/codex-runtime/codex-x86_64-unknown-linux-musl" --version
+      - name: Characterize real runtime behavior
+        env:
+          POSTHORSE_CODEX_BIN: ${{ runner.temp }}/codex-runtime/codex-x86_64-unknown-linux-musl
+        run: npm run test:runtime
+      - name: Save runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-runtime-evidence
+          path: ~/Library/Caches/pi-runs/posthorse-codex-*
