@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "notes": {
+      "command": "node",
+      "args": ["${CODEX_PLUGIN_ROOT}/server.mjs"]
+    }
+  }
+}

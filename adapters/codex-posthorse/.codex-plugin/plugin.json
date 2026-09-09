@@ -1,0 +1,20 @@
+{
+  "name": "codex-posthorse",
+  "version": "0.1.0",
+  "description": "Local notes, transcript history, and rollover recovery for the isolated Codex Posthorse prototype.",
+  "author": {
+    "name": "Mitch Fultz"
+  },
+  "repository": "https://github.com/fitchmultz/pi-posthorse",
+  "license": "MIT",
+  "interface": {
+    "displayName": "Codex Posthorse",
+    "shortDescription": "Prototype local context recovery for Codex.",
+    "longDescription": "An isolated prototype of Posthorse's local notes, searchable history, and deterministic rollover recovery. Native behavior is checked separately before use with real tasks.",
+    "developerName": "Mitch Fultz",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": "Save a checkpoint of the current task in Posthorse notes."
+  },
+  "mcpServers": "./.mcp.json"
+}
