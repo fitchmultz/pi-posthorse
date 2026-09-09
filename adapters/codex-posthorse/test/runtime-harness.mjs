@@ -80,16 +80,15 @@ export class RuntimeHarness {
 				if (req.url !== "/v1/responses") throw new Error(`Unexpected model endpoint: ${req.url}`);
 				const reply = this.replies.shift();
 				if (!reply) throw new Error("Unexpected model request: no controlled reply remains");
-				const chosen = typeof reply === "function" ? await reply(request) : reply;
 				const id = `fixture-response-${this.requests.length}`;
 				const events = [
 					{ type: "response.created", response: { id } },
-					...(chosen.items ?? [message("fixture complete")]).map((item, index) => ({
+					...(reply.items ?? [message("fixture complete")]).map((item, index) => ({
 						type: "response.output_item.done", item: { id: `${id}-item-${index}`, ...item },
 					})),
 					{ type: "response.completed", response: { id, usage: {
-						input_tokens: chosen.tokens ?? 100, input_tokens_details: null,
-						output_tokens: 0, output_tokens_details: null, total_tokens: chosen.tokens ?? 100,
+						input_tokens: reply.tokens ?? 100, input_tokens_details: null,
+						output_tokens: 0, output_tokens_details: null, total_tokens: reply.tokens ?? 100,
 					} } },
 				];
 				res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
