@@ -1,8 +1,8 @@
 # Codex Posthorse prototype
 
-An isolated proof of Posthorse-style context recovery using Codex's existing local context-reset path, a local tool server, and hooks. It does not replace Pi Posthorse, change the Pi package, or enable Codex's account-gated remote context-management service.
+An isolated proof of Posthorse-style context recovery using Codex's local tool server and hooks. It supports ordinary compaction on the official runtime and the companion fork's no-summary reset. It does not replace Pi Posthorse, change the Pi package, or enable Codex's account-gated remote context-management service.
 
-**Isolated testing only.** The companion local-recovery runtime patch passes the controlled recovery checks. Stock Codex does not meet all of them, and installed desktop behavior and real-model workloads have not been validated. Nothing here installs itself, changes your normal Codex configuration, or replaces the desktop runtime.
+**Isolated testing only.** The companion local-recovery runtime patch passes the controlled recovery checks. The [stock hook approach](stock-hooks.md) preserves ordinary summaries and repairs missed checkpoints from original history, but does not supply the fork's required-hook guarantees. Recovery and native task-listing calls coexisted in a user-operated signed-stock desktop trial; real-model workloads and every desktop integration have not been validated. Nothing here installs itself, changes your normal Codex configuration, or replaces the desktop runtime.
 
 ## What has been proved
 
@@ -20,7 +20,7 @@ Tests run the actual app-server, command tools, hooks, local MCP server, and mat
 
 The strict local suite has 22 passing scenarios. It also covers caught nested errors and malformed nested arguments through advertised code-mode tools, later successful reset after a handled failure, and oversized saved hints on initial context loading. Adapter tests cover Unicode byte limits and exact original-history recovery.
 
-The fixture selects the `gpt-6-astra` model identifier. This proves runtime wiring, not Astra's behavior, a 500,000-token workload, or usability inside the desktop app. The tests use a 50,000-token configured window and synthetic usage crossing a 9,000-token threshold to make rollover reproducible.
+The fixture selects the `gpt-6-astra` model identifier. This proves runtime wiring, not Astra's behavior or a 500,000-token workload. The tests use a 50,000-token configured window and synthetic usage crossing a 9,000-token threshold to make rollover reproducible. The table compares token-budget modes; ordinary stock compaction is tested separately with `test:stock`.
 
 ## How recovery works
 
@@ -45,12 +45,13 @@ The tool server does not make network requests. Returned notes and history becom
 
 ## Run the isolated tests
 
-Requirements: Node `>=22.19.0`, stock Codex `0.153.4` for the pinned comparison, or the companion patched CLI and matching code-mode host for local acceptance. From this directory:
+Requirements: Node `>=22.19.0`, stock Codex `0.153.4` and its matching code-mode host for stock tests, or the companion patched CLI and matching host for local acceptance. From this directory:
 
 ```bash
 npm ci --ignore-scripts
 npm test
 npm run test:runtime
+npm run test:stock
 npm run test:acceptance
 ```
 
