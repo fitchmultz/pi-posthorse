@@ -148,7 +148,7 @@ export class RuntimeHarness {
 			preCompactConfig.trimEnd(),
 			'[[hooks.SessionStart]]',
 			'[[hooks.SessionStart.hooks]]', 'type = "command"', `command = ${quote(sessionCommand)}`,
-			...(this.stockRecovery ? ['additional_context_limit = 10000'] : []),
+			...(this.stockRecovery ? ['additionalContextLimit = 10000'] : []),
 			...(this.recordToolCompletions ? ['[[hooks.PostToolUse]]', '[[hooks.PostToolUse.hooks]]', 'type = "command"', `command = ${quote(completionCommand)}`] : []),
 			`[projects.${quote(this.cwd)}]`, 'trust_level = "trusted"',
 		].join("\n") + "\n";
@@ -158,6 +158,10 @@ export class RuntimeHarness {
 		await writeFile(join(this.root, "hooks-list.json"), JSON.stringify(listed, null, 2));
 		const hooks = listed.data.flatMap((entry) => entry.hooks ?? []);
 		if (!hooks.length) throw new Error(`No hooks discovered: ${JSON.stringify(listed)}`);
+		if (this.stockRecovery) {
+			const limit = hooks.find((hook) => hook.eventName === "sessionStart")?.additionalContextLimit;
+			if (limit !== 10_000) throw new Error(`Stock SessionStart additionalContextLimit must be 10000; received ${limit}`);
+		}
 		const recoveryHook = hooks.find((hook) => hook.eventName === "preCompact");
 		if (!recoveryHook) throw new Error("No PreCompact hook discovered");
 		await this.stop();
