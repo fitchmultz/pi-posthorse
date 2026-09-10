@@ -184,7 +184,8 @@ function hintGuidance(threadId) {
 	].join("\n\n");
 }
 
-async function recoveryFrom(file, threadId, rootThreadId) {
+async function recoveryFrom(file, threadId, rootThreadId, source) {
+	const stockRecovery = source === "compact" || source === "resume";
 	const ownerEvents = [];
 	const userItems = [];
 	let calls = new Map();
@@ -193,22 +194,34 @@ async function recoveryFrom(file, threadId, rootThreadId) {
 	let last;
 	let sessionId;
 	let boundary;
+	let beforeCompaction;
 	for await (const record of transcriptRecords(file)) {
-		last = record;
 		const { row } = record;
 		const payload = row.payload ?? {};
 		if (row.type === "session_meta") sessionId = payload.id ?? payload.session_id;
 		if (row.type === "compacted") {
+			if (stockRecovery) beforeCompaction = {
+				ownerCount: ownerEvents.length, userCount: userItems.length,
+				calls, outputs, last, boundary, compactionId: record.id,
+			};
 			boundary = record;
 			calls = new Map();
 			outputs = [];
 			responseEnded = false;
 		}
+		last = record;
 		if (row.type === "event_msg" && payload.type === "user_message") ownerEvents.push(record);
 		if (row.type === "event_msg" && payload.type === "token_count") responseEnded = true;
+		// Stock summaries persist raw assistant messages but no normal completion event.
+		if (stockRecovery && row.type === "event_msg" && (payload.type === "agent_message"
+			|| (payload.type === "item_completed" && ["AgentMessage", "Plan"].includes(payload.item?.type)))) {
+			calls = new Map();
+			outputs = [];
+			responseEnded = false;
+		}
 		if (row.type !== "response_item") continue;
 		if (payload.type === "message" && payload.role === "user") userItems.push(record);
-		const assistantOutput = TOOL_CALLS.has(payload.type) || (payload.type === "message" && payload.role === "assistant");
+		const assistantOutput = TOOL_CALLS.has(payload.type) || (!stockRecovery && payload.type === "message" && payload.role === "assistant");
 		if (assistantOutput && payload.status !== "failed" && payload.status !== "incomplete") {
 			if (responseEnded || (payload.type === "message" && outputs.length)) {
 				calls = new Map();
@@ -218,6 +231,12 @@ async function recoveryFrom(file, threadId, rootThreadId) {
 		}
 		if (TOOL_CALLS.has(payload.type)) calls.set(payload.call_id ?? payload.id, record);
 		if (TOOL_OUTPUTS.has(payload.type)) outputs.push(record);
+	}
+	if (source === "compact" && !beforeCompaction) throw new Error("No completed compaction boundary found; recovery cannot be confirmed.");
+	if (beforeCompaction) {
+		ownerEvents.length = beforeCompaction.ownerCount;
+		userItems.length = beforeCompaction.userCount;
+		({ calls, outputs, last, boundary } = beforeCompaction);
 	}
 	if (!last) throw new Error("Cannot checkpoint an empty transcript.");
 	if (sessionId && sessionId !== threadId) throw new Error("Transcript session ID does not match threadId.");
@@ -269,6 +288,7 @@ async function recoveryFrom(file, threadId, rootThreadId) {
 	}
 	return {
 		throughId: last.id, throughLine: last.line, throughOrdinal: last.ordinal, windowId: last.windowId,
+		...(beforeCompaction ? { compactionId: beforeCompaction.compactionId } : {}),
 		recovery,
 	};
 }
@@ -322,14 +342,15 @@ export function createStore(stateDir) {
 		await atomicWrite(manifestPath(threadId), JSON.stringify(manifest, null, 2));
 		return manifest;
 	}
-	async function checkpoint(input) {
+	async function checkpoint(input, source) {
 		const threadId = threadKey(input.agent_id ?? input.session_id ?? input.threadId);
 		const rootThreadId = input.session_id ?? threadId;
 		const transcriptPath = resolve(required(input.transcript_path ?? input.transcriptPath, "transcript_path"));
-		const recovery = await recoveryFrom(transcriptPath, threadId, rootThreadId);
+		const recovery = await recoveryFrom(transcriptPath, threadId, rootThreadId, source);
 		const checkpoint = {
 			version: 1, id: randomUUID(), threadId, rootThreadId, transcriptPath, turnId: input.turn_id,
 			trigger: input.trigger, createdAt: new Date().toISOString(), ...recovery,
+			...(source ? { source } : {}),
 		};
 		const checkpointPath = join(root, "checkpoints", threadId, `${checkpoint.id}.json`);
 		await atomicWrite(checkpointPath, JSON.stringify(checkpoint, null, 2));
@@ -345,6 +366,11 @@ export function createStore(stateDir) {
 			checkpoint?.recovery,
 			hintGuidance(threadId),
 		].filter(Boolean).join("\n\n");
+	}
+	async function stockHint(input) {
+		const manifest = input.source === "compact" || input.source === "resume"
+			? await checkpoint(input, input.source) : await register(input);
+		return threadHint(manifest.threadId);
 	}
 	async function notes(params) {
 		const root = notesRoot(params.threadId);
@@ -419,5 +445,5 @@ export function createStore(stateDir) {
 		if (op === "read") throw new Error(`History record not found: ${params.id}`);
 		return { items, offset, total, nextOffset: offset + items.length < total ? offset + items.length : null };
 	}
-	return { register, checkpoint, threadHint, notes, history };
+	return { register, checkpoint, threadHint, stockHint, notes, history };
 }

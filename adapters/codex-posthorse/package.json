@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node --test test/store.test.mjs test/server.test.mjs",
     "test:runtime": "node --test test/runtime.test.mjs",
+    "test:stock": "node --test test/stock-runtime.test.mjs test/stock-v2.test.mjs",
     "test:acceptance": "POSTHORSE_ACCEPTANCE=1 node --test test/runtime.test.mjs",
     "test:local": "POSTHORSE_LOCAL_RECOVERY=1 POSTHORSE_ACCEPTANCE=1 node --test test/runtime.test.mjs"
   },

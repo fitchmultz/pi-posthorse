@@ -78,6 +78,70 @@ test("interleaved sibling tool results survive but results followed by a new mod
 	assert.doesNotMatch((await f.store.checkpoint(f.hook)).recovery, /FIRST_SIBLING|SECOND_SIBLING|Consumed all results/);
 });
 
+test("stock repair rebuilds the latest boundary without treating summary messages as acknowledgement", async () => {
+	const f = await fixture([
+		user("ORIGINAL_REQUEST"), call("first"), output("first", "OLD_UNREAD"), tokenCount,
+	]);
+	await f.store.checkpoint(f.hook);
+	const append = [
+		assistant("FIRST_SUMMARY"), { type: "compacted", payload: { message: "FIRST_SUMMARY" } },
+		{ type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage" } } },
+		assistant("Actual continuation"), user("NEW_REQUEST"),
+		call("latest"), output("latest", "LATEST_UNREAD"),
+		assistant("SUMMARY_PART_ONE"), assistant("SUMMARY_PART_TWO"),
+		{ type: "compacted", payload: { message: "SUMMARY_PART_TWO" } },
+		{ type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage" } } },
+		assistant("Continuation after latest boundary"),
+	].map((row, index) => ({ ordinal: f.rows.length + index, ...row }));
+	const original = f.original + append.map(JSON.stringify).join("\n") + "\n";
+	await writeFile(f.transcript, original);
+	for (const source of ["compact", "resume"]) {
+		const hint = await createStore(f.stateDir).stockHint({ ...f.hook, source });
+		assert.match(hint, /ORIGINAL_REQUEST/);
+		assert.match(hint, /NEW_REQUEST/);
+		assert.match(hint, /LATEST_UNREAD/);
+		assert.doesNotMatch(hint, /OLD_UNREAD|SUMMARY_PART|FIRST_SUMMARY|Actual continuation|Continuation after/);
+		const manifest = JSON.parse(await readFile(join(f.stateDir, "threads", `${threadId}.json`), "utf8"));
+		const checkpoint = JSON.parse(await readFile(manifest.checkpointPath, "utf8"));
+		assert.equal(checkpoint.compactionId, `ordinal:${f.rows.length + 9}`);
+		assert.equal(checkpoint.throughOrdinal, f.rows.length + 8);
+	}
+	assert.equal(await readFile(f.transcript, "utf8"), original);
+	assert.equal((await readdir(join(f.stateDir, "checkpoints", threadId))).length, 3);
+});
+
+test("stock recovery honors normal message and plan completion in paginated and legacy history", async () => {
+	for (const completion of [
+		{ type: "item_completed", item: { type: "AgentMessage" } },
+		{ type: "item_completed", item: { type: "Plan" } },
+		{ type: "agent_message", message: "Actual legacy continuation" },
+	]) {
+		const f = await fixture([
+			user("OWNER_REQUEST"), call("old"), output("old", "ALREADY_CONSUMED"),
+			{ type: "event_msg", payload: completion }, assistant("Normal continuation"),
+			call("new"), output("new", "STILL_UNREAD"),
+			assistant("Summary without token usage"), { type: "compacted", payload: { message: "Summary without token usage" } },
+		], { ordinals: completion.type !== "agent_message" });
+		const hint = await f.store.stockHint({ ...f.hook, source: "compact" });
+		assert.match(hint, /OWNER_REQUEST/);
+		assert.match(hint, /STILL_UNREAD/);
+		assert.doesNotMatch(hint, /ALREADY_CONSUMED|Normal continuation|Summary without token usage/);
+		assert.equal(await readFile(f.transcript, "utf8"), f.original);
+	}
+});
+
+test("stock recovery stops on missing or unreadable boundaries instead of falling back to saved notes", async () => {
+	const f = await fixture([user("OLD_CHECKPOINT"), call("old"), output("old", "OLD_RESULT")]);
+	await f.store.checkpoint(f.hook);
+	const prior = await f.store.threadHint(threadId);
+	await assert.rejects(f.store.stockHint({ ...f.hook, source: "compact" }), /No completed compaction boundary/);
+	await writeFile(f.transcript, f.original + '{"type":"compacted","payload":');
+	for (const source of ["compact", "resume"]) {
+		await assert.rejects(f.store.stockHint({ ...f.hook, source }), /incomplete or invalid JSON/);
+	}
+	assert.equal(await f.store.threadHint(threadId), prior);
+});
+
 test("an aborted response with reasoning alone does not acknowledge prior tool results", async () => {
 	const f = await fixture([
 		user("Continue until verified"), call("pending"), output("pending", "KEEP_AFTER_FAILURE"), tokenCount,

@@ -35,7 +35,7 @@ export function contextWindow(request) {
 export class RuntimeHarness {
 	static async create(name, {
 		tokenBudget = true, failCheckpoint = false, hookFailure, hintFailure, recordToolCompletions = false,
-		localRecovery = process.env.POSTHORSE_LOCAL_RECOVERY === "1", codeMode = false,
+		localRecovery = process.env.POSTHORSE_LOCAL_RECOVERY === "1", codeMode = false, stockRecovery = false,
 	} = {}) {
 		const cache = join(homedir(), "Library", "Caches", "pi-runs");
 		await mkdir(cache, { recursive: true });
@@ -48,6 +48,7 @@ export class RuntimeHarness {
 		harness.hintFailure = hintFailure;
 		harness.recordToolCompletions = recordToolCompletions;
 		harness.codeMode = codeMode;
+		harness.stockRecovery = stockRecovery;
 		try {
 			await harness.initialize();
 			return harness;
@@ -79,7 +80,7 @@ export class RuntimeHarness {
 				const chunks = [];
 				for await (const chunk of req) chunks.push(chunk);
 				const raw = Buffer.concat(chunks).toString();
-				const request = { path: req.url, body: raw ? JSON.parse(raw) : null };
+				const request = { recordedAt: Date.now(), path: req.url, body: raw ? JSON.parse(raw) : null };
 				this.requests.push(request);
 				await appendFile(join(this.root, "model-requests.jsonl"), `${JSON.stringify(request)}\n`);
 				if (this.failCheckpoint && this.requests.length === 1) {
@@ -114,10 +115,10 @@ export class RuntimeHarness {
 		});
 		this.server.listen(0, "127.0.0.1");
 		await once(this.server, "listening");
-		const hookCommand = this.hintFailure || ["nonzero", "timeout", "malformed"].includes(this.hookFailure)
+		const hookCommand = this.hintFailure || ["nonzero", "timeout", "malformed", "crash-after-checkpoint"].includes(this.hookFailure)
 			? `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(import.meta.url))} --hook-fixture ${this.hintFailure ? `checkpoint-then-${this.hintFailure}-hint` : this.hookFailure}`
 			: `${shellQuote(process.execPath)} ${shellQuote(join(adapter, "scripts", "precompact.mjs"))}`;
-		const sessionCommand = `${shellQuote(process.execPath)} ${shellQuote(join(adapter, "scripts", "session-start.mjs"))}`;
+		const sessionCommand = `${shellQuote(process.execPath)} ${shellQuote(join(adapter, "scripts", this.stockRecovery ? "stock-session-start.mjs" : "session-start.mjs"))}`;
 		const completionCommand = `${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(import.meta.url))} --hook-fixture record-completion`;
 		const preCompactConfig = [
 			'[[hooks.PreCompact]]',
@@ -131,6 +132,7 @@ export class RuntimeHarness {
 			'model_context_window = 50000', 'model_auto_compact_token_limit = 9000',
 			'approval_policy = "never"', 'sandbox_mode = "danger-full-access"',
 			'web_search = "disabled"',
+			...(this.stockRecovery ? [`sqlite_home = ${quote(join(this.home, "sqlite"))}`] : []),
 			'[features]', 'context_management = false', 'apps = false', 'remote_plugin = false',
 			'memories = false', 'multi_agent = false', 'shell_snapshot = false', 'hooks = true',
 			`code_mode_host = ${this.codeMode}`,
@@ -146,6 +148,7 @@ export class RuntimeHarness {
 			preCompactConfig.trimEnd(),
 			'[[hooks.SessionStart]]',
 			'[[hooks.SessionStart.hooks]]', 'type = "command"', `command = ${quote(sessionCommand)}`,
+			...(this.stockRecovery ? ['additional_context_limit = 10000'] : []),
 			...(this.recordToolCompletions ? ['[[hooks.PostToolUse]]', '[[hooks.PostToolUse.hooks]]', 'type = "command"', `command = ${quote(completionCommand)}`] : []),
 			`[projects.${quote(this.cwd)}]`, 'trust_level = "trusted"',
 		].join("\n") + "\n";
@@ -203,6 +206,7 @@ export class RuntimeHarness {
 					else pending.resolve(event.result);
 				}
 			} else {
+				if (this.stockRecovery) event.recordedAt = Date.now();
 				this.events.push(event);
 				for (const waiter of [...this.waiters]) if (waiter.predicate(event)) {
 					clearTimeout(waiter.timer);
@@ -321,6 +325,20 @@ if (process.argv[2] === "--hook-fixture") {
 		case "timeout":
 			await delay(10_000);
 			break;
+		case "crash-after-checkpoint": {
+			const marker = join(dirname(process.env.CODEX_HOME), "checkpoint-succeeded-once");
+			const succeededBefore = await readFile(marker, "utf8").catch((error) => { if (error.code === "ENOENT") return false; throw error; });
+			if (succeededBefore) {
+				process.stderr.write("CONTROLLED_SECOND_CHECKPOINT_PROCESS_FAILURE\n");
+				process.exitCode = 7;
+			} else {
+				const checkpoint = spawnSync(process.execPath, [join(adapter, "scripts", "precompact.mjs")], { input, encoding: "utf8" });
+				if (checkpoint.status !== 0 || JSON.parse(checkpoint.stdout).continue !== true) throw new Error(`Production checkpoint failed: ${checkpoint.stderr} ${checkpoint.stdout}`);
+				await writeFile(marker, "First real checkpoint succeeded.\n");
+				process.stdout.write(checkpoint.stdout);
+			}
+			break;
+		}
 		case "checkpoint-then-invalid-json-hint":
 		case "checkpoint-then-oversize-hint": {
 			const checkpoint = spawnSync(process.execPath, [join(adapter, "scripts", "precompact.mjs")], { input, encoding: "utf8" });
