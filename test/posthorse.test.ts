@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -893,7 +893,7 @@ test("read pages shrink to the remaining budget and refuse unsafe pages while pr
 		const note = toolText(await run(tools, "notes", { op: "read", path: "long.md" }, tight));
 		assert.match(note, /^n{2000}\n\[chars 0-2000 of 25000; continue with offset 2000\]$/);
 		// These compare independent reads at the same starting usage, not sibling calls.
-		handlers.get("turn_start")!({}, tight);
+		handlers.get("turn_start")?.({}, tight);
 		const entry = toolText(await run(tools, "history", { op: "read", id: "long" }, tight));
 		assert.match(entry, /\[chars 0-2000 of 25007\] \[user\] h{1993}\nMore remains; call history read with id "long" and offset 2000\.$/);
 
@@ -905,7 +905,7 @@ test("read pages shrink to the remaining budget and refuse unsafe pages while pr
 		const disabled = withBranch(usageContext(base, 100_000, 98_000, 16_384, false));
 		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, disabled)), /continue with offset 4000/);
 		const unknown = withBranch({ ...base, model: { contextWindow: 4096 }, getContextUsage: () => undefined });
-		handlers.get("turn_start")!({}, unknown);
+		handlers.get("turn_start")?.({}, unknown);
 		const unknownPage = toolText(await run(tools, "notes", { op: "read", path: "long.md" }, unknown));
 		const unknownOffset = unknownPage.match(/continue with offset (\d+)/)?.[1];
 		assert.ok(unknownOffset);
@@ -930,7 +930,7 @@ test("note and history pages share a batch budget without double-counting consum
 		};
 		await run(tools, "notes", { op: "write", path: "long.md", content: "n".repeat(25_000) }, context);
 		await run(tools, "notes", { op: "write", path: "short.md", content: "s".repeat(800) }, context);
-		const startTurn = () => handlers.get("turn_start")!({}, context);
+		const startTurn = () => handlers.get("turn_start")?.({}, context);
 		startTurn();
 		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, context)), /continue with offset 4000/);
 		await assert.rejects(run(tools, "history", { op: "read", id: "long", offset: 4000 }, context), /retry with offset 4000/);
@@ -984,14 +984,18 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 	}
 });
 
-test("separate Git directories share notes automatically and preserve old local notes", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-separate-git-"));
+for (const marker of ["file", "directory symlink"]) test(`separate Git directories share notes and preserve old local notes (${marker})`, async () => {
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-separate-git-")));
 	try {
 		const main = join(dir, "main");
 		const gitdir = join(dir, "git-storage");
 		const worktree = join(dir, "worktree");
 		const git = (...args: string[]) => execFileSync("git", args, { stdio: "pipe" });
 		git("init", "--separate-git-dir", gitdir, main);
+		if (marker === "directory symlink") {
+			unlinkSync(join(main, ".git"));
+			symlinkSync(gitdir, join(main, ".git"), "dir");
+		}
 		git("-C", main, "-c", "user.name=Posthorse test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-m", "fixture");
 		git("-C", main, "worktree", "add", "--detach", worktree);
 		const { tools, context } = setup();

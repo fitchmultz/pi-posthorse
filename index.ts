@@ -192,14 +192,15 @@ function notesRoot(cwd: string): string {
 	for (let dir = cwd; ; dir = dirname(dir)) {
 		const marker = join(dir, ".git");
 		if (existsSync(marker)) {
-			let gitdir: string | undefined;
-			try {
-				gitdir = readFileSync(marker, "utf8").match(/^gitdir:\s*(.+?)\s*$/m)?.[1];
-			} catch {}
-			if (!gitdir) return dir;
-			const target = resolve(dir, gitdir);
+			let target = marker;
+			if (!statSync(marker).isDirectory()) {
+				const gitdir = readFileSync(marker, "utf8").match(/^gitdir:\s*(.+?)\s*$/m)?.[1];
+				if (!gitdir) return dir;
+				target = resolve(dir, gitdir);
+			}
+			target = realpathSync(target);
 			const commonFile = join(target, "commondir");
-			const common = existsSync(commonFile) ? resolve(target, readFileSync(commonFile, "utf8").trim()) : target;
+			const common = realpathSync(existsSync(commonFile) ? resolve(target, readFileSync(commonFile, "utf8").trim()) : target);
 			const root = basename(common) === ".git" ? dirname(common) : common;
 			if (root !== dir) importLegacyNotes(join(dir, ".pi", "notes"), join(root, ".pi", "notes"));
 			return root;
@@ -325,16 +326,12 @@ function* windowEntries(entries: Iterable<EntryLike>): Generator<WindowedEntry> 
 async function* jsonlLines(file: string, signal?: AbortSignal): AsyncGenerator<string> {
 	const stream = createReadStream(file, { encoding: "utf8", signal });
 	let pending = "";
-	try {
-		for await (const chunk of stream) {
-			const lines = (pending + chunk).split("\n");
-			pending = lines.pop()!;
-			yield* lines;
-		}
-		if (pending) yield pending;
-	} finally {
-		stream.destroy();
+	for await (const chunk of stream) {
+		const lines = (pending + chunk).split("\n");
+		pending = lines.pop()!;
+		yield* lines;
 	}
+	if (pending) yield pending;
 }
 
 async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncGenerator<WindowedEntry> {
@@ -675,26 +672,13 @@ function unsupportedMessage(budget: Budget): string {
 	return `Posthorse: unsupported configuration. The model's context window (${n(budget.contextWindow)} tokens) minus Pi's compaction.reserveTokens (${n(budget.reserveTokens)}) leaves ${n(budget.usable)} usable tokens; Posthorse needs at least ${n(MIN_USABLE_TOKENS)}. Automatic rollover and checkpoint reminders are off for this model. Lower compaction.reserveTokens in Pi settings or use a larger-context model. new_context remains available with a model-aware handoff limit.`;
 }
 
-/** Characters that fit before Pi's automatic line (or the hard limit), capped at the absolute ceiling. */
-function requirePage(ctx: NativeContext, offset: number, imageCount: number, toolTokens: number, pendingTokens: number): number {
+/** Capacity before Pi's automatic line (or hard limit), including the margin for page metadata and refusals. */
+function pageCapacity(ctx: NativeContext, toolTokens: number): number {
 	const usage = ctx.getContextUsage();
-	let chars: number;
-	if (!usage || usage.tokens == null) {
-		chars = Math.max(0, freshPayloadChars(ctx, toolTokens) - pendingTokens * 4 - imageCount * ESTIMATED_IMAGE_CHARS);
-	} else {
-		const budget = budgetFor(ctx, usage.contextWindow);
-		const line = budget?.enabled && budget.supported ? budget.rolloverAt : usage.contextWindow;
-		chars = Math.min(
-			MAX_HANDOFF_CHARS,
-			Math.max(0, line - usage.tokens - PAGE_MARGIN_TOKENS - pendingTokens) * 4 - imageCount * ESTIMATED_IMAGE_CHARS,
-		);
-	}
-	if (chars < MIN_PAGE_CHARS) {
-		throw new Error(
-			`Too little context remains to read a page safely. Call new_context first, then retry with offset ${offset}.`,
-		);
-	}
-	return chars;
+	if (!usage || usage.tokens == null) return freshPayloadChars(ctx, toolTokens) / 4 + PAGE_MARGIN_TOKENS;
+	const budget = budgetFor(ctx, usage.contextWindow);
+	const line = budget?.enabled && budget.supported ? budget.rolloverAt : usage.contextWindow;
+	return line - usage.tokens;
 }
 
 function buildGuidance(ctx: NativeContext): string {
@@ -746,7 +730,20 @@ export default function (pi: ExtensionAPI) {
 			pendingPageTokens = Math.max(0, pendingPageTokens - Math.max(0, usage - previousPageUsage));
 		}
 		previousPageUsage = usage;
-		return requirePage(ctx, offset, imageCount, activeToolTokens(), pendingPageTokens);
+		const remaining = pageCapacity(ctx, activeToolTokens()) - pendingPageTokens;
+		const chars = Math.min(
+			MAX_HANDOFF_CHARS,
+			Math.max(0, remaining - PAGE_MARGIN_TOKENS) * 4 - imageCount * ESTIMATED_IMAGE_CHARS,
+		);
+		if (chars < MIN_PAGE_CHARS) {
+			const message = `Too little context remains to read a page safely. Call new_context first, then retry with offset ${offset}.`;
+			// Refusals consume context too. Once even the guidance no longer fits, omit repeated text;
+			// the failed call still carries its original offset and earlier refusals explain the retry.
+			const text = Math.ceil(message.length / 4) <= remaining ? message : "";
+			pendingPageTokens += Math.ceil(text.length / 4);
+			throw new Error(text);
+		}
+		return chars;
 	};
 	const pageResult = (text: string, images: ImageLike[], display: PosthorseDisplay) => {
 		pendingPageTokens += Math.ceil(text.length / 4) + images.length * (ESTIMATED_IMAGE_CHARS / 4);

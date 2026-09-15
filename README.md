@@ -81,7 +81,7 @@ In the TUI, tools use Pi's native expandable cards. Collapsed cards show the ope
 
 Committed context-window messages and checkpoint reminders are compact, expandable cards too. The `new_context` tool card describes a request; only the committed context-window message says a fresh window has started.
 
-Read pages, including returned images, shrink to the context that is actually left. Parallel note and history reads share that budget; pages already counted by Pi are not counted twice. Before usage is known, they reserve prompt/tool overhead and leave half the rest free. Unsafe pages are refused with the offset preserved; call `new_context` and retry.
+Read pages, including returned images, shrink to the context that is actually left. Parallel note and history reads share that budget; pages already counted by Pi are not counted twice. Before usage is known, they reserve prompt/tool overhead and leave half the rest free. Unsafe pages are refused with the offset preserved in the call; call `new_context` and retry. Refusal text uses the same budget, so later failures omit repeated guidance once no more fits.
 
 `history search` puts matching original content before recovery material: handoffs, compaction and branch summaries, checkpoint reminders, and `notes`, `new_context`, and `history` calls/results. Ordinary prose or another tool call in the same assistant entry keeps its priority when that content matches. Every entry remains searchable; `history read` returns the complete normalized entry, including any recovery content omitted from a search excerpt.
 

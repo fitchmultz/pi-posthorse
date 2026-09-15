@@ -90,16 +90,12 @@ function recordText(row) {
 async function* jsonlLines(file) {
 	const stream = createReadStream(file, { encoding: "utf8" });
 	let pending = "";
-	try {
-		for await (const chunk of stream) {
-			const lines = (pending + chunk).split("\n");
-			pending = lines.pop();
-			yield* lines;
-		}
-		if (pending) yield pending;
-	} finally {
-		stream.destroy();
+	for await (const chunk of stream) {
+		const lines = (pending + chunk).split("\n");
+		pending = lines.pop();
+		yield* lines;
 	}
+	if (pending) yield pending;
 }
 
 async function* transcriptRecords(file) {

@@ -304,7 +304,7 @@ describe("Posthorse inside the Pi fork", () => {
 		expect(resumed.getBranch().map((entry) => entry.type)).toEqual(branchTypes(harness));
 	});
 
-	it("keeps combined parallel note/history pages below the native hard budget", async () => {
+	it.each([6, 50])("keeps parallel pages and refusals below the native hard budget (%i reads)", async (count) => {
 		const harness = await createHarness({
 			models: [{ id: "pages", contextWindow: 100_000, maxTokens: 1000 }],
 			settings: { compaction: { enabled: false } },
@@ -322,8 +322,9 @@ describe("Posthorse inside the Pi fork", () => {
 			() => {
 				const user = harness.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "user")!;
 				return fauxAssistantMessage([
-					...["current.md", "decisions.md", "requests.md"].map((path) => fauxToolCall("notes", { op: "read", path })),
-					...[0, 20_000, 40_000].map((offset) => fauxToolCall("history", { op: "read", id: user.id, offset })),
+					...Array.from({ length: count }, (_, index) => index % 2 === 0
+						? fauxToolCall("notes", { op: "read", path: ["current.md", "decisions.md", "requests.md"][index % 3] })
+						: fauxToolCall("history", { op: "read", id: user.id, offset: (index % 3) * 20_000 })),
 				], { stopReason: "toolUse" });
 			},
 			(context) => {
@@ -332,7 +333,7 @@ describe("Posthorse inside the Pi fork", () => {
 				if (call.role === "assistant") startingTokens = call.usage.totalTokens;
 				afterPages = harness.session.getContextUsage()!.tokens!;
 				resultTexts = results.map(getMessageText);
-				expect(results).toHaveLength(6);
+				expect(results).toHaveLength(count);
 				expect(results.some((result) => result.isError)).toBe(true);
 				return fauxAssistantMessage("Saved pages recovered; remaining offsets can be retried after rollover.");
 			},
