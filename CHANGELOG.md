@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.6
+
+- Preserves Unicode line and paragraph separators in archived Pi history and Codex prototype checkpoints instead of treating them as JSONL record boundaries.
+- Shares the remaining context budget across parallel note and history reads, including returned images and paging metadata, without double-counting results already accounted for by Pi.
+- Shares notes automatically when Git metadata is stored separately. Those repositories use the common Git directory; conventional repositories keep their existing location. Old local notes are imported without overwriting shared files or deleting originals.
+- Preserves assistant failure status and provider error messages in searchable history.
+
 ## 0.4.5
 
 - Adds native expandable cards for context budgets, notes, history, and context requests, with compact previews, result counts, and visible page ranges and continuation offsets.

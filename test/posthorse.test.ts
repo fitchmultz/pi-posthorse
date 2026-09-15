@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -542,6 +542,49 @@ test("history ranks matching original content before recovery and lookup echoes 
 	assert.deepEqual(recovered.content.slice(1), [image]);
 });
 
+test("archived history preserves Unicode separators across chunks and an unterminated final record", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-jsonl-"));
+	try {
+		const { tools, context: base } = setup();
+		const body = `${"x".repeat(66_000)}unicode needle\u2028line\u2029paragraph`;
+		const entries = [
+			{ type: "context_window", id: "unicode-window", parentId: null, handoff: "prior\u2028checkpoint" },
+			{ type: "message", id: "unicode", parentId: "unicode-window", message: { role: "user", content: body } },
+			{ type: "message", id: "last", parentId: "unicode", message: { role: "user", content: "final needle\u2029tail" } },
+		];
+		writeFileSync(join(dir, "session.jsonl"), entries.map((entry) => JSON.stringify(entry)).join("\r\n"));
+		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const hits = toolText(await run(tools, "history", { op: "search", query: "needle", all: true }, context));
+		assert.match(hits, /\[window unicode-window\] \[unicode\]/);
+		assert.match(hits, /\[window unicode-window\] \[last\]/);
+		const read = toolText(await run(tools, "history", { op: "read", id: "unicode", offset: 66_000 }, context));
+		assert.ok(read.endsWith(body.slice(66_000 - "[user] ".length)));
+		assert.ok(toolText(await run(tools, "history", { op: "read", id: "last" }, context)).endsWith("[user] final needle\u2029tail"));
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("history preserves assistant failures and ranks them ahead of recovery echoes", async () => {
+	const { tools, context: base } = setup();
+	const branch = [
+		{ type: "message", id: "failed", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "HTTP 429 QUOTA_EXCEEDED" } },
+		{ type: "message", id: "partial", message: { role: "assistant", content: [
+			{ type: "text", text: "Partial response" },
+			{ type: "toolCall", name: "history", arguments: { op: "search", query: "prior state" } },
+		], stopReason: "aborted", errorMessage: "QUOTA_EXCEEDED while streaming" } },
+		{ type: "message", id: "echo", message: { role: "toolResult", toolName: "notes", content: "QUOTA_EXCEEDED copied into notes" } },
+	];
+	const context = { ...base, sessionManager: { getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
+	assert.ok(toolText(await run(tools, "history", { op: "read", id: "failed" }, context)).endsWith("[assistant] [error] HTTP 429 QUOTA_EXCEEDED"));
+	const partial = toolText(await run(tools, "history", { op: "read", id: "partial" }, context));
+	assert.match(partial, /Partial response/);
+	assert.match(partial, /\[aborted\] QUOTA_EXCEEDED while streaming/);
+	const hit = toolText(await run(tools, "history", { op: "search", query: "QUOTA_EXCEEDED", limit: 1 }, context));
+	assert.match(hit, /\[partial\] \[assistant\] \[aborted\] QUOTA_EXCEEDED while streaming/);
+	assert.doesNotMatch(hit, /\[echo\]/);
+});
+
 test("all-session ranking keeps older originals ahead of newer echoes before applying the result limit", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-ranking-test-"));
 	try {
@@ -840,7 +883,7 @@ test("fresh payload budgets count the system prompt, pending input, and automati
 test("read pages shrink to the remaining budget and refuse unsafe pages while preserving the offset", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-page-test-"));
 	try {
-		const { tools, context: base } = setup();
+		const { tools, handlers, context: base } = setup();
 		const branch = [{ type: "message", id: "long", parentId: null, timestamp: "1", message: { role: "user", content: "h".repeat(25_000) } }];
 		const withBranch = (context: TestContext) => ({ ...context, cwd: dir, sessionManager: { getBranch: () => branch, getSessionDir: () => dir } });
 		await run(tools, "notes", { op: "write", path: "long.md", content: "n".repeat(25_000) }, withBranch(base));
@@ -849,6 +892,8 @@ test("read pages shrink to the remaining budget and refuse unsafe pages while pr
 		const tight = withBranch(usageContext(base, 100_000, 82_117));
 		const note = toolText(await run(tools, "notes", { op: "read", path: "long.md" }, tight));
 		assert.match(note, /^n{2000}\n\[chars 0-2000 of 25000; continue with offset 2000\]$/);
+		// These compare independent reads at the same starting usage, not sibling calls.
+		handlers.get("turn_start")!({}, tight);
 		const entry = toolText(await run(tools, "history", { op: "read", id: "long" }, tight));
 		assert.match(entry, /\[chars 0-2000 of 25007\] \[user\] h{1993}\nMore remains; call history read with id "long" and offset 2000\.$/);
 
@@ -860,10 +905,45 @@ test("read pages shrink to the remaining budget and refuse unsafe pages while pr
 		const disabled = withBranch(usageContext(base, 100_000, 98_000, 16_384, false));
 		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, disabled)), /continue with offset 4000/);
 		const unknown = withBranch({ ...base, model: { contextWindow: 4096 }, getContextUsage: () => undefined });
+		handlers.get("turn_start")!({}, unknown);
 		const unknownPage = toolText(await run(tools, "notes", { op: "read", path: "long.md" }, unknown));
 		const unknownOffset = unknownPage.match(/continue with offset (\d+)/)?.[1];
 		assert.ok(unknownOffset);
 		assert.ok(Number(unknownOffset) < 8192);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("note and history pages share a batch budget without double-counting consumed pages", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-batch-pages-"));
+	try {
+		const { tools, handlers, context: base } = setup();
+		let tokens = 98_000;
+		const context = {
+			...usageContext(base, 100_000, tokens, 16_384, false), cwd: dir,
+			getContextUsage: () => ({ tokens, contextWindow: 100_000, percent: tokens / 1000 }),
+			sessionManager: {
+				getBranch: () => [{ type: "message", id: "long", message: { role: "user", content: "h".repeat(25_000) } }],
+				getSessionDir: () => dir,
+			},
+		};
+		await run(tools, "notes", { op: "write", path: "long.md", content: "n".repeat(25_000) }, context);
+		await run(tools, "notes", { op: "write", path: "short.md", content: "s".repeat(800) }, context);
+		const startTurn = () => handlers.get("turn_start")!({}, context);
+		startTurn();
+		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, context)), /continue with offset 4000/);
+		await assert.rejects(run(tools, "history", { op: "read", id: "long", offset: 4000 }, context), /retry with offset 4000/);
+		startTurn();
+		assert.match(toolText(await run(tools, "history", { op: "read", id: "long" }, context)), /offset 4000/);
+		await assert.rejects(run(tools, "notes", { op: "read", path: "long.md", offset: 4000 }, context), /retry with offset 4000/);
+
+		startTurn();
+		tokens = 97_000;
+		assert.equal(toolText(await run(tools, "notes", { op: "read", path: "short.md" }, context)), "s".repeat(800));
+		// Serial execution has already added the 800-character result to native usage.
+		tokens += 200;
+		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, context)), /continue with offset 7200/);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -879,6 +959,7 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 		mkdirSync(join(repo, ".git"), { recursive: true });
 		mkdirSync(join(repo, "packages", "app"), { recursive: true });
 		mkdirSync(join(main, ".git", "worktrees", "wt"), { recursive: true });
+		writeFileSync(join(main, ".git", "worktrees", "wt", "commondir"), "../..\n");
 		mkdirSync(join(worktree, "packages", "app"), { recursive: true });
 		writeFileSync(join(worktree, ".git"), `gitdir: ${join(main, ".git", "worktrees", "wt")}\n`);
 		mkdirSync(plain, { recursive: true });
@@ -898,6 +979,40 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 		assert.equal(existsSync(join(worktree, ".pi")), false);
 		await write(plain);
 		assert.equal(readFileSync(join(plain, ".pi", "notes", "state.md"), "utf8"), plain);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("separate Git directories share notes automatically and preserve old local notes", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-separate-git-"));
+	try {
+		const main = join(dir, "main");
+		const gitdir = join(dir, "git-storage");
+		const worktree = join(dir, "worktree");
+		const git = (...args: string[]) => execFileSync("git", args, { stdio: "pipe" });
+		git("init", "--separate-git-dir", gitdir, main);
+		git("-C", main, "-c", "user.name=Posthorse test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-m", "fixture");
+		git("-C", main, "worktree", "add", "--detach", worktree);
+		const { tools, context } = setup();
+		const notes = (cwd: string, params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd });
+		mkdirSync(join(main, ".pi", "notes"), { recursive: true });
+		writeFileSync(join(main, ".pi", "notes", "shared.md"), "original state");
+		assert.equal(toolText(await notes(main, { op: "read", path: "shared.md" })), "original state");
+		assert.equal(toolText(await notes(worktree, { op: "read", path: "shared.md" })), "original state");
+		const append = toolText(await notes(worktree, { op: "append", path: "shared.md", content: "worktree update" }));
+		assert.ok(append.includes(join(gitdir, ".pi", "notes", "shared.md")));
+		assert.equal(toolText(await notes(main, { op: "read", path: "shared.md" })), "original state\nworktree update\n");
+		assert.equal(readFileSync(join(main, ".pi", "notes", "shared.md"), "utf8"), "original state", "legacy originals stay intact");
+		assert.equal(existsSync(join(worktree, ".pi")), false, "new writes do not create a worktree-local copy");
+
+		mkdirSync(join(worktree, ".pi", "notes", "nested"), { recursive: true });
+		writeFileSync(join(worktree, ".pi", "notes", "shared.md"), "older divergent copy");
+		writeFileSync(join(worktree, ".pi", "notes", "nested", "worker.md"), "old worker note");
+		assert.equal(toolText(await notes(worktree, { op: "read", path: "nested/worker.md" })), "old worker note");
+		assert.equal(toolText(await notes(worktree, { op: "read", path: "shared.md" })), "original state\nworktree update\n");
+		await notes(main, { op: "write", path: "shared.md", content: "" });
+		assert.equal(toolText(await notes(worktree, { op: "read", path: "shared.md" })), "", "imports cannot resurrect a cleared note");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

@@ -2,7 +2,6 @@ import { createReadStream } from "node:fs";
 import { lstat, mkdir, open, readFile, readdir, rename } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
-import { createInterface } from "node:readline";
 
 const MAX_HANDOFF_CHARS = 20_000;
 const MAX_HINT_BYTES = 32_000;
@@ -87,34 +86,43 @@ function recordText(row) {
 	return JSON.stringify(payload);
 }
 
-async function* transcriptRecords(file) {
+// JSONL splits on LF; readline also splits valid string contents at U+2028/U+2029.
+async function* jsonlLines(file) {
 	const stream = createReadStream(file, { encoding: "utf8" });
-	const lines = createInterface({ input: stream, crlfDelay: Infinity });
+	let pending = "";
+	try {
+		for await (const chunk of stream) {
+			const lines = (pending + chunk).split("\n");
+			pending = lines.pop();
+			yield* lines;
+		}
+		if (pending) yield pending;
+	} finally {
+		stream.destroy();
+	}
+}
+
+async function* transcriptRecords(file) {
 	let lineNumber = 0;
 	let windowId = "initial";
 	let turnId;
-	try {
-		for await (const line of lines) {
-			lineNumber++;
-			if (!line.trim()) continue;
-			let row;
-			try {
-				row = JSON.parse(line);
-			} catch {
-				throw new Error(`Transcript contains incomplete or invalid JSON at line ${lineNumber}; checkpoint was not accepted.`);
-			}
-			if (!row || typeof row.type !== "string") throw new Error(`Invalid transcript record at line ${lineNumber}.`);
-			const id = Number.isSafeInteger(row.ordinal) ? `ordinal:${row.ordinal}` : `line:${lineNumber}`;
-			if (row.type === "session_meta") windowId = row.payload?.context_window?.window_id ?? windowId;
-			if (row.type === "compacted") windowId = row.payload?.window_id ?? id;
-			if (row.type === "turn_context" || (row.type === "event_msg" && row.payload?.type === "task_started")) {
-				turnId = row.payload?.turn_id ?? turnId;
-			}
-			yield { id, line: lineNumber, ordinal: row.ordinal, windowId, turnId, timestamp: row.timestamp, row, raw: line };
+	for await (const line of jsonlLines(file)) {
+		lineNumber++;
+		if (!line.trim()) continue;
+		let row;
+		try {
+			row = JSON.parse(line);
+		} catch {
+			throw new Error(`Transcript contains incomplete or invalid JSON at line ${lineNumber}; checkpoint was not accepted.`);
 		}
-	} finally {
-		lines.close();
-		stream.destroy();
+		if (!row || typeof row.type !== "string") throw new Error(`Invalid transcript record at line ${lineNumber}.`);
+		const id = Number.isSafeInteger(row.ordinal) ? `ordinal:${row.ordinal}` : `line:${lineNumber}`;
+		if (row.type === "session_meta") windowId = row.payload?.context_window?.window_id ?? windowId;
+		if (row.type === "compacted") windowId = row.payload?.window_id ?? id;
+		if (row.type === "turn_context" || (row.type === "event_msg" && row.payload?.type === "task_started")) {
+			turnId = row.payload?.turn_id ?? turnId;
+		}
+		yield { id, line: lineNumber, ordinal: row.ordinal, windowId, turnId, timestamp: row.timestamp, row, raw: line };
 	}
 }
 

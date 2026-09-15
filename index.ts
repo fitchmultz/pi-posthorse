@@ -8,16 +8,18 @@
 
 import {
 	appendFileSync,
+	constants,
+	copyFileSync,
 	createReadStream,
 	existsSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
-import { createInterface } from "node:readline";
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerPosthorseMessages, toolCards, type PosthorseDisplay } from "./ui.ts";
@@ -64,6 +66,7 @@ type ImageLike = { type: "image"; data: string; mimeType: string };
 type MessageLike = {
 	role?: string;
 	stopReason?: string;
+	errorMessage?: string;
 	content?: unknown;
 	toolName?: string;
 	toolCallId?: string;
@@ -164,21 +167,42 @@ function textResult(text: string, images: ImageLike[] = [], display?: PosthorseD
 	return { content: [{ type: "text" as const, text }, ...images], details: display };
 }
 
-/**
- * Notes belong to the repository root, walking up from cwd. A linked worktree's `.git` is a file
- * ("gitdir: <main>/.git/worktrees/<name>"); its notes belong to the main checkout so every worktree
- * shares them and they outlive the worktree. Outside Git, cwd is the root.
- */
+/** Import old checkout-local notes without overwriting shared notes, including concurrent writes. */
+function importLegacyNotes(source: string, target: string): void {
+	if (!existsSync(source)) return;
+	if (existsSync(target) && (!statSync(target).isDirectory() || realpathSync(source) === realpathSync(target))) return;
+	mkdirSync(target, { recursive: true });
+	for (const name of readdirSync(source)) {
+		const from = join(source, name);
+		const to = join(target, name);
+		if (statSync(from).isDirectory()) {
+			importLegacyNotes(from, to);
+		} else {
+			try {
+				copyFileSync(from, to, constants.COPYFILE_EXCL);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			}
+		}
+	}
+}
+
+/** Conventional repos use the main checkout; separate Git directories are their own shared root. */
 function notesRoot(cwd: string): string {
 	for (let dir = cwd; ; dir = dirname(dir)) {
 		const marker = join(dir, ".git");
 		if (existsSync(marker)) {
+			let gitdir: string | undefined;
 			try {
-				const gitdir = readFileSync(marker, "utf8").match(/^gitdir:\s*(.+?)\s*$/m)?.[1];
-				const main = gitdir && resolve(dir, gitdir).match(/^(.+)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/)?.[1];
-				if (main) return main;
+				gitdir = readFileSync(marker, "utf8").match(/^gitdir:\s*(.+?)\s*$/m)?.[1];
 			} catch {}
-			return dir;
+			if (!gitdir) return dir;
+			const target = resolve(dir, gitdir);
+			const commonFile = join(target, "commondir");
+			const common = existsSync(commonFile) ? resolve(target, readFileSync(commonFile, "utf8").trim()) : target;
+			const root = basename(common) === ".git" ? dirname(common) : common;
+			if (root !== dir) importLegacyNotes(join(dir, ".pi", "notes"), join(root, ".pi", "notes"));
+			return root;
 		}
 		if (dirname(dir) === dir) return cwd;
 	}
@@ -195,6 +219,12 @@ function excerptAround(text: string, index: number, before: number, length: numb
 	return `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
 }
 
+function assistantFailure(message: MessageLike): string {
+	if (message.role !== "assistant") return "";
+	if (message.stopReason !== "error" && message.stopReason !== "aborted" && !message.errorMessage) return "";
+	return `[${message.stopReason ?? "error"}]${message.errorMessage ? ` ${message.errorMessage}` : ""}`;
+}
+
 function flattenEntry(entry: EntryLike): string | undefined {
 	if (entry.type === "message") {
 		const message = entry.message ?? {};
@@ -203,7 +233,7 @@ function flattenEntry(entry: EntryLike): string | undefined {
 			if (message.excludeFromContext === true) return "[bashExecution] (excluded from model context by Pi)";
 			return `[bashExecution] $ ${message.command ?? ""}\n${message.output ?? ""}`;
 		}
-		return `[${message.role ?? "message"}] ${[textOf(message), imageSummary(imagesOf(message.content))].filter(Boolean).join("\n")}`;
+		return `[${message.role ?? "message"}] ${[textOf(message), assistantFailure(message), imageSummary(imagesOf(message.content))].filter(Boolean).join("\n")}`;
 	}
 	if (entry.type === "compaction" || entry.type === "branch_summary") {
 		return `[${entry.type}] ${entry.summary ?? ""}`;
@@ -254,8 +284,8 @@ function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit
 				if (partText) originals[originals.length - 1] += `${originals.at(-1) ? "\n" : ""}${partText}`;
 			}
 		}
-		const images = imageSummary(item.images);
-		if (images) originals[originals.length - 1] += `${originals.at(-1) ? "\n" : ""}${images}`;
+		const metadata = [assistantFailure(entry.message), imageSummary(item.images)].filter(Boolean).join("\n");
+		if (metadata) originals[originals.length - 1] += `${originals.at(-1) ? "\n" : ""}${metadata}`;
 		if (originals[0]) originals[0] = `[assistant] ${originals[0]}`;
 		const original = originals.find((part) => part.toLowerCase().includes(query));
 		priority = original ? 0 : 1;
@@ -291,25 +321,34 @@ function* windowEntries(entries: Iterable<EntryLike>): Generator<WindowedEntry> 
 	}
 }
 
+/** JSONL splits on LF, not the Unicode separators that Node's readline also recognizes. */
+async function* jsonlLines(file: string, signal?: AbortSignal): AsyncGenerator<string> {
+	const stream = createReadStream(file, { encoding: "utf8", signal });
+	let pending = "";
+	try {
+		for await (const chunk of stream) {
+			const lines = (pending + chunk).split("\n");
+			pending = lines.pop()!;
+			yield* lines;
+		}
+		if (pending) yield pending;
+	} finally {
+		stream.destroy();
+	}
+}
+
 async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncGenerator<WindowedEntry> {
 	if (!existsSync(file)) return;
-	const stream = createReadStream(file, { encoding: "utf8", signal });
-	const lines = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
 	const windows = new Map<string, string>();
-	try {
-		for await (const line of lines) {
-			let entry: EntryLike;
-			try {
-				entry = JSON.parse(line) as EntryLike;
-			} catch {
-				continue;
-			}
-			const item = toWindowedEntry(entry, windows);
-			if (item) yield item;
+	for await (const line of jsonlLines(file, signal)) {
+		let entry: EntryLike;
+		try {
+			entry = JSON.parse(line) as EntryLike;
+		} catch {
+			continue;
 		}
-	} finally {
-		lines.close();
-		stream.destroy();
+		const item = toWindowedEntry(entry, windows);
+		if (item) yield item;
 	}
 }
 
@@ -637,17 +676,17 @@ function unsupportedMessage(budget: Budget): string {
 }
 
 /** Characters that fit before Pi's automatic line (or the hard limit), capped at the absolute ceiling. */
-function requirePage(ctx: NativeContext, offset: number, imageCount: number, toolTokens: number): number {
+function requirePage(ctx: NativeContext, offset: number, imageCount: number, toolTokens: number, pendingTokens: number): number {
 	const usage = ctx.getContextUsage();
 	let chars: number;
 	if (!usage || usage.tokens == null) {
-		chars = Math.max(0, freshPayloadChars(ctx, toolTokens) - imageCount * ESTIMATED_IMAGE_CHARS);
+		chars = Math.max(0, freshPayloadChars(ctx, toolTokens) - pendingTokens * 4 - imageCount * ESTIMATED_IMAGE_CHARS);
 	} else {
 		const budget = budgetFor(ctx, usage.contextWindow);
 		const line = budget?.enabled && budget.supported ? budget.rolloverAt : usage.contextWindow;
 		chars = Math.min(
 			MAX_HANDOFF_CHARS,
-			Math.max(0, line - usage.tokens - PAGE_MARGIN_TOKENS) * 4 - imageCount * ESTIMATED_IMAGE_CHARS,
+			Math.max(0, line - usage.tokens - PAGE_MARGIN_TOKENS - pendingTokens) * 4 - imageCount * ESTIMATED_IMAGE_CHARS,
 		);
 	}
 	if (chars < MIN_PAGE_CHARS) {
@@ -698,7 +737,29 @@ export default function (pi: ExtensionAPI) {
 			);
 	};
 
+	let pendingPageTokens = 0;
+	let previousPageUsage: number | null | undefined;
+	const pageSize = (ctx: NativeContext, offset: number, imageCount: number) => {
+		const usage = ctx.getContextUsage()?.tokens;
+		// Parallel siblings are not in native usage yet; sequential results must not be counted twice.
+		if (usage != null && previousPageUsage != null) {
+			pendingPageTokens = Math.max(0, pendingPageTokens - Math.max(0, usage - previousPageUsage));
+		}
+		previousPageUsage = usage;
+		return requirePage(ctx, offset, imageCount, activeToolTokens(), pendingPageTokens);
+	};
+	const pageResult = (text: string, images: ImageLike[], display: PosthorseDisplay) => {
+		pendingPageTokens += Math.ceil(text.length / 4) + images.length * (ESTIMATED_IMAGE_CHARS / 4);
+		return textResult(text, images, display);
+	};
+	pi.on("turn_start", () => {
+		pendingPageTokens = 0;
+		previousPageUsage = undefined;
+	});
+
 	pi.on("session_start", (_event, ctx) => {
+		pendingPageTokens = 0;
+		previousPageUsage = undefined;
 		nativeContext(ctx);
 	});
 
@@ -854,7 +915,7 @@ export default function (pi: ExtensionAPI) {
 		label: "Notes",
 		...toolCards("notes"),
 		description:
-			"Persistent notes in .pi/notes/ that survive context resets. Ops: list, read (paged; pass offset to continue), write (create/replace; empty content clears), append, search (case-insensitive substring over note lines). Inside a Git repository, including nested directories and linked worktrees, notes belong to the main checkout.",
+			"Persistent notes in .pi/notes/ that survive context resets. Ops: list, read (paged; pass offset to continue), write (create/replace; empty content clears), append, search (case-insensitive substring over note lines). Git worktrees share notes: at the main checkout for conventional .git layouts, or in the common Git directory when metadata is stored separately. Old checkout-local notes are imported without overwriting shared notes.",
 		promptSnippet: "save and recall durable state that survives context resets",
 		promptGuidelines: [
 			"Use notes for durable state too large for a new_context handoff",
@@ -903,10 +964,10 @@ export default function (pi: ExtensionAPI) {
 					if (offset && offset >= text.length) {
 						throw new Error(`Offset ${offset} is past the end of ${relative} (${text.length} chars).`);
 					}
-					const end = Math.min(text.length, offset + requirePage(nativeContext(ctx), offset, 0, activeToolTokens()));
+					const end = Math.min(text.length, offset + pageSize(nativeContext(ctx), offset, 0));
 					const more =
 						end < text.length ? `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]` : "";
-					return textResult(`${text.slice(offset, end)}${more}`, [], { kind: "note-read", offset, end, total: text.length });
+					return pageResult(`${text.slice(offset, end)}${more}`, [], { kind: "note-read", offset, end, total: text.length });
 				}
 				case "write": {
 					const relative = requireValue(params.path, "path", params.op);
@@ -914,7 +975,7 @@ export default function (pi: ExtensionAPI) {
 					const path = safeJoin(relative);
 					mkdirSync(dirname(path), { recursive: true });
 					writeFileSync(path, params.content);
-					return textResult(`Wrote .pi/notes/${relative}`, [], { kind: "note-write" });
+					return textResult(`Wrote ${path}`, [], { kind: "note-write" });
 				}
 				case "append": {
 					const relative = requireValue(params.path, "path", params.op);
@@ -927,7 +988,7 @@ export default function (pi: ExtensionAPI) {
 					const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
 					const separator = existing && !existing.endsWith("\n") ? "\n" : "";
 					appendFileSync(path, `${separator}${content.replace(/\n?$/, "\n")}`);
-					return textResult(`Appended to .pi/notes/${relative}`, [], { kind: "note-append" });
+					return textResult(`Appended to ${path}`, [], { kind: "note-append" });
 				}
 				case "search": {
 					const query = requireValue(params.query, "query", params.op).toLowerCase();
@@ -1019,12 +1080,12 @@ export default function (pi: ExtensionAPI) {
 				}
 				const end = Math.min(
 					item.text.length,
-					offset + requirePage(nativeContext(ctx), offset, offset === 0 ? item.images.length : 0, activeToolTokens()),
+					offset + pageSize(nativeContext(ctx), offset, offset === 0 ? item.images.length : 0),
 				);
 				const more = end < item.text.length ? `\nMore remains; call history read with id "${id}" and offset ${end}.` : "";
 				const header = `${source ? `${source} ` : ""}${item.entry.timestamp ?? ""} [window ${item.windowId}] [${id}] [chars ${offset}-${end} of ${item.text.length}] `;
 				// Stored images ride along with the first page only.
-				return textResult(
+				return pageResult(
 					`${header}${item.text.slice(offset, end)}${more}`,
 					offset === 0 ? item.images : [],
 					{ kind: "history-read", headerLength: header.length, offset, end, total: item.text.length },

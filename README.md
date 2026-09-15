@@ -54,7 +54,7 @@ Keep exactly one copy loaded. `pi list` shows every package source; if an older 
 4. **`new_context`.** Requests an atomic rollover after the complete tool batch succeeds. An optional handoff is persisted and becomes the first state of the fresh window. If a sibling tool in the same batch fails, Pi does not commit the boundary; the checkpoint reminder still applies.
 5. **Automatic rollover without summaries.** With a supported context budget and room for a recovery record, Posthorse claims Pi's automatic threshold and overflow trigger through `session_before_auto_compact`, before Pi resolves summarization credentials or prepares a summary. Oversized first turns and tool results can then roll over even without summarization credentials. Otherwise Pi's own compaction remains in control. Manual `/compact` is unchanged.
 6. **Bounded recovery record.** The automatic handoff keeps direct user inputs, `ask_question` outcomes, visible coordination messages, and the trailing tool batch that no model has consumed yet (call arguments, bounded result text, and the entry ids to recover the rest). A clearly labeled, possibly stale older checkpoint comes last, after the current inputs and unseen results. Older assistant prose and consumed tool results are not treated as state. Newly submitted input stays separate and is saved after the boundary, not copied into the handoff.
-7. **`notes` and `history`.** Notes live with the repository root, shared across linked worktrees. History searches normalized transcript text and returns stored images for a requested entry.
+7. **`notes` and `history`.** Notes are shared across linked worktrees, at the main checkout for conventional Git layouts or inside the common Git directory when metadata is stored separately. History searches normalized transcript text and returns stored images for a requested entry.
 
 At turn end, Posthorse checks whether usage is in the reminder band before explicitly looking up the full branch. Context filtering skips its branch lookup when model input contains neither `posthorse-reminder` nor legacy `headroom-reminder` messages. History searches, reads, and recovery remain available with no new limits.
 
@@ -81,20 +81,20 @@ In the TUI, tools use Pi's native expandable cards. Collapsed cards show the ope
 
 Committed context-window messages and checkpoint reminders are compact, expandable cards too. The `new_context` tool card describes a request; only the committed context-window message says a fresh window has started.
 
-Read pages, including returned images, shrink to the context that is actually left. Before usage is known, they reserve prompt/tool overhead and leave half the rest free. Unsafe pages are refused with the offset preserved; call `new_context` and retry.
+Read pages, including returned images, shrink to the context that is actually left. Parallel note and history reads share that budget; pages already counted by Pi are not counted twice. Before usage is known, they reserve prompt/tool overhead and leave half the rest free. Unsafe pages are refused with the offset preserved; call `new_context` and retry.
 
 `history search` puts matching original content before recovery material: handoffs, compaction and branch summaries, checkpoint reminders, and `notes`, `new_context`, and `history` calls/results. Ordinary prose or another tool call in the same assistant entry keeps its priority when that content matches. Every entry remains searchable; `history read` returns the complete normalized entry, including any recovery content omitted from a search excerpt.
 
 Within each group, current-branch matches are newest first. With `all: true`, Posthorse searches every session file in the active Pi session directory, newest-modified sessions first and newest entries within each session; this is not a global timestamp sort. The result limit applies after priority, so newer echoes cannot displace older original matches. Entries copied by a fork are reported once.
 
-Notes live in `.pi/notes/` at the repository root (the main checkout for a linked worktree, the current directory outside Git). Add the directory to `.gitignore` when the project should not track it.
+Notes live in `.pi/notes/` at the main checkout for conventional Git layouts, or the current directory outside Git. When Git metadata is stored separately, all checkouts use `.pi/notes/` inside Git's common directory instead; no configuration is needed. Old checkout-local notes are imported when that checkout is accessed, without overwriting shared files or deleting the originals. Writes report the actual storage path. Add `.pi/notes/` to `.gitignore` when the project should not track it.
 
 ## Data and privacy
 
 - Posthorse makes no network requests.
 - Notes are plaintext files under `.pi/notes`. They survive package removal and may be committed unless ignored.
 - `history` with `all: true` scans nested JSONL files in the active Pi session directory, including subagent sessions.
-- History can return user text, assistant text and thinking, tool arguments and results, handoffs, custom messages, and images. Direct shell entries Pi marked `excludeFromContext` come back as a placeholder only.
+- History can return user text, assistant text and thinking, assistant failure status and error messages, tool arguments and results, handoffs, custom messages, and images. Direct shell entries Pi marked `excludeFromContext` come back as a placeholder only.
 - Returned history content enters the currently selected model and provider context.
 - Removing Posthorse does not remove notes or Pi session history.
 
