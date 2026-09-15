@@ -979,6 +979,14 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 		assert.equal(existsSync(join(worktree, ".pi")), false);
 		await write(plain);
 		assert.equal(readFileSync(join(plain, ".pi", "notes", "state.md"), "utf8"), plain);
+
+		// A copied or orphaned worktree must still be able to keep local notes.
+		const orphan = join(dir, "orphan");
+		mkdirSync(join(orphan, "nested"), { recursive: true });
+		writeFileSync(join(orphan, ".git"), "gitdir: ../missing/.git/worktrees/orphan\n");
+		await write(join(orphan, "nested"));
+		assert.equal(readFileSync(join(orphan, ".pi", "notes", "state.md"), "utf8"), join(orphan, "nested"));
+		assert.equal(toolText(await notes(orphan, { op: "read", path: "state.md" })), join(orphan, "nested"));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

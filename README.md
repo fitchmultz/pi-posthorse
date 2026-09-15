@@ -87,7 +87,7 @@ Read pages, including returned images, shrink to the context that is actually le
 
 Within each group, current-branch matches are newest first. With `all: true`, Posthorse searches every session file in the active Pi session directory, newest-modified sessions first and newest entries within each session; this is not a global timestamp sort. The result limit applies after priority, so newer echoes cannot displace older original matches. Entries copied by a fork are reported once.
 
-Notes live in `.pi/notes/` at the main checkout for conventional Git layouts, or the current directory outside Git. When Git metadata is stored separately, all checkouts use `.pi/notes/` inside Git's common directory instead; no configuration is needed. Old checkout-local notes are imported when that checkout is accessed, without overwriting shared files or deleting the originals. Writes report the actual storage path. Add `.pi/notes/` to `.gitignore` when the project should not track it.
+Notes live in `.pi/notes/` at the main checkout for conventional Git layouts, or the current directory outside Git. When Git metadata is stored separately, including in submodules, all checkouts use `.pi/notes/` inside Git's common directory instead; no configuration is needed. If that metadata is unavailable, notes stay local to the checkout. Old checkout-local notes are imported when that checkout is accessed, without overwriting shared files or deleting the originals. Writes report the actual storage path. Add `.pi/notes/` to `.gitignore` when the project should not track it.
 
 ## Data and privacy
 

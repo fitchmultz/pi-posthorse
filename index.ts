@@ -192,16 +192,22 @@ function notesRoot(cwd: string): string {
 	for (let dir = cwd; ; dir = dirname(dir)) {
 		const marker = join(dir, ".git");
 		if (existsSync(marker)) {
-			let target = marker;
-			if (!statSync(marker).isDirectory()) {
-				const gitdir = readFileSync(marker, "utf8").match(/^gitdir:\s*(.+?)\s*$/m)?.[1];
-				if (!gitdir) return dir;
-				target = resolve(dir, gitdir);
+			let root: string;
+			try {
+				let target = marker;
+				if (!statSync(marker).isDirectory()) {
+					const gitdir = readFileSync(marker, "utf8").match(/^gitdir:\s*(.+?)\s*$/m)?.[1];
+					if (!gitdir) return dir;
+					target = resolve(dir, gitdir);
+				}
+				target = realpathSync(target);
+				const commonFile = join(target, "commondir");
+				const common = realpathSync(existsSync(commonFile) ? resolve(target, readFileSync(commonFile, "utf8").trim()) : target);
+				root = basename(common) === ".git" ? dirname(common) : common;
+			} catch {
+				// Orphaned/copied worktrees can outlive their Git metadata; local notes still work.
+				return dir;
 			}
-			target = realpathSync(target);
-			const commonFile = join(target, "commondir");
-			const common = realpathSync(existsSync(commonFile) ? resolve(target, readFileSync(commonFile, "utf8").trim()) : target);
-			const root = basename(common) === ".git" ? dirname(common) : common;
 			if (root !== dir) importLegacyNotes(join(dir, ".pi", "notes"), join(root, ".pi", "notes"));
 			return root;
 		}
