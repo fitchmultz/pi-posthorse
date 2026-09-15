@@ -3,7 +3,7 @@
  * Run with scripts/integration.sh, which copies this file into the fork's packages/coding-agent/test directory
  * so every import below resolves against the fork; POSTHORSE_INDEX points at the extension entry point.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -302,6 +302,48 @@ describe("Posthorse inside the Pi fork", () => {
 		const resumedTexts = resumed.buildSessionContext().messages.map(getMessageText);
 		expect(resumedTexts).toEqual([expect.stringContaining("carry this forward"), "fresh"]);
 		expect(resumed.getBranch().map((entry) => entry.type)).toEqual(branchTypes(harness));
+	});
+
+	it.each([6, 50])("keeps parallel pages and refusals below the native hard budget (%i reads)", async (count) => {
+		const harness = await createHarness({
+			models: [{ id: "pages", contextWindow: 100_000, maxTokens: 1000 }],
+			settings: { compaction: { enabled: false } },
+			extensionFactories: [posthorse],
+		});
+		harnesses.push(harness);
+		mkdirSync(join(harness.tempDir, ".pi", "notes"), { recursive: true });
+		for (const path of ["current.md", "decisions.md", "requests.md"]) {
+			writeFileSync(join(harness.tempDir, ".pi", "notes", path), "n".repeat(25_000));
+		}
+		let startingTokens = 0;
+		let afterPages = 0;
+		let resultTexts: string[] = [];
+		harness.setResponses([
+			() => {
+				const user = harness.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "user")!;
+				return fauxAssistantMessage([
+					...Array.from({ length: count }, (_, index) => index % 2 === 0
+						? fauxToolCall("notes", { op: "read", path: ["current.md", "decisions.md", "requests.md"][index % 3] })
+						: fauxToolCall("history", { op: "read", id: user.id, offset: (index % 3) * 20_000 })),
+				], { stopReason: "toolUse" });
+			},
+			(context) => {
+				const results = context.messages.filter((message) => message.role === "toolResult");
+				const call = context.messages.find((message) => message.role === "assistant")!;
+				if (call.role === "assistant") startingTokens = call.usage.totalTokens;
+				afterPages = harness.session.getContextUsage()!.tokens!;
+				resultTexts = results.map(getMessageText);
+				expect(results).toHaveLength(count);
+				expect(results.some((result) => result.isError)).toBe(true);
+				return fauxAssistantMessage("Saved pages recovered; remaining offsets can be retried after rollover.");
+			},
+		]);
+		// A real large input lets the faux provider compute usage, with no mocked budget or page sizing.
+		await harness.session.prompt("p".repeat(300_000));
+		expect(startingTokens).toBeGreaterThan(75_000);
+		expect(afterPages).toBeLessThan(100_000);
+		expect(resultTexts.some((result) => result.includes("continue with offset 20000"))).toBe(true);
+		expect(resultTexts.some((result) => result.includes("retry with offset 40000"))).toBe(true);
 	});
 
 	it("leaves Pi alone when compaction is disabled but keeps new_context available", async () => {

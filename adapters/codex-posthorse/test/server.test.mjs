@@ -21,7 +21,7 @@ async function fixture(t) {
   const records = [
     { ordinal: 0, type: "session_meta", payload: { id: sessionId, cwd: dir } },
     { ordinal: 1, type: "turn_context", payload: { turn_id: "turn-1", model: "fixture-model" } },
-    { ordinal: 2, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Keep unique-input in the recovery record." }] } },
+    { ordinal: 2, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Keep unique-input\u2028in the recovery record.\u2029" }] } },
   ];
   await writeFile(transcript, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
   return { dir, sessionId, transcript, stateDir: join(dir, "state") };

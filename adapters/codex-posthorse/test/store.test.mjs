@@ -177,14 +177,19 @@ test("bounded checkpoints point back to complete paged originals and retain old 
 });
 
 test("Unicode recovery fits the native byte limit without breaking characters or original history", async () => {
-	const original = "FIRST_UNICODE_REQUEST " + "漢字😀".repeat(12_000);
+	const original = "FIRST_UNICODE_REQUEST " + "漢字😀\u2028\u2029".repeat(12_000);
 	const f = await fixture([
 		user(original),
 		...Array.from({ length: 6 }, (_, index) => user(`OTHER_REQUEST_${index} ` + "漢字😀".repeat(4_000))),
 		user("LATEST_UNICODE_REQUEST " + "漢字😀".repeat(4_000)),
 		call("unicode-output"), output("unicode-output", "UNREAD_UNICODE_RESULT " + "漢字😀".repeat(4_000)),
 	]);
+	const stored = f.original.replaceAll("\n", "\r\n").trimEnd();
+	await writeFile(f.transcript, stored);
 	await f.store.checkpoint(f.hook);
+	assert.equal((await f.store.history({ threadId, op: "list" })).total, f.rows.length);
+	const hit = await f.store.history({ threadId, op: "search", query: "FIRST_UNICODE_REQUEST" });
+	assert.equal(hit.items[0].line, 2);
 	const hint = await createStore(f.stateDir).threadHint(threadId);
 	assert.ok(Buffer.byteLength(hint) <= 32_000);
 	assert.ok(hint.length <= 20_000);
@@ -192,7 +197,7 @@ test("Unicode recovery fits the native byte limit without breaking characters or
 	for (const marker of ["FIRST_UNICODE_REQUEST", "LATEST_UNICODE_REQUEST", "UNREAD_UNICODE_RESULT"]) assert.ok(hint.includes(marker));
 	const read = await f.store.history({ threadId, op: "read", id: "ordinal:1", limit: 200_000 });
 	assert.equal(JSON.parse(read.content).payload.content[0].text, original);
-	assert.equal(await readFile(f.transcript, "utf8"), f.original);
+	assert.equal(await readFile(f.transcript, "utf8"), stored);
 });
 
 test("history pages, searches, window labels, and image records survive restart exactly", async () => {
