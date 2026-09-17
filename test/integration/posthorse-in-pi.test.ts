@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import * as ai from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
@@ -89,7 +90,7 @@ describe("Posthorse inside the Pi fork", () => {
 		harness.setResponses([
 			fauxAssistantMessage([{ type: "text", text: "OLD ASSISTANT PROSE" }, fauxToolCall("dump", {})], { stopReason: "toolUse" }),
 			(context) => {
-				freshTexts = context.messages.map(getMessageText);
+				freshTexts = context.messages.filter((message) => message.role !== "system").map(getMessageText);
 				return fauxAssistantMessage(fauxToolCall("history", { op: "read", id: lastToolResultId(harness) }), { stopReason: "toolUse" });
 			},
 			fauxAssistantMessage("recovered"),
@@ -151,7 +152,7 @@ describe("Posthorse inside the Pi fork", () => {
 				errorMessage: "prompt is too long: 300000 tokens > 128000 maximum",
 			}),
 			(context) => {
-				freshTexts = context.messages.map(getMessageText);
+				freshTexts = context.messages.filter((message) => message.role !== "system").map(getMessageText);
 				return fauxAssistantMessage("continued");
 			},
 		]);
@@ -176,7 +177,7 @@ describe("Posthorse inside the Pi fork", () => {
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("snap", {}), { stopReason: "toolUse" }),
 			(context) => {
-				handoff = getMessageText(context.messages[0]);
+				handoff = getMessageText(context.messages.find((message) => message.role !== "system"));
 				return fauxAssistantMessage(fauxToolCall("history", { op: "read", id: lastToolResultId(harness) }), { stopReason: "toolUse" });
 			},
 			fauxAssistantMessage("recovered"),
@@ -200,7 +201,7 @@ describe("Posthorse inside the Pi fork", () => {
 		harness.setResponses([
 			fauxAssistantMessage("", { stopReason: "error", errorMessage: "prompt is too long: 300000 tokens > 128000 maximum" }),
 			(context) => {
-				retryTexts = context.messages.map(getMessageText);
+				retryTexts = context.messages.filter((message) => message.role !== "system").map(getMessageText);
 				return fauxAssistantMessage("continued");
 			},
 		]);
@@ -210,7 +211,7 @@ describe("Posthorse inside the Pi fork", () => {
 		expect(contextWindows(harness)).toBe(1);
 		expect(retryTexts).toHaveLength(1);
 		expect(retryTexts[0]).toMatch(/\[owner input \|[^\]]+\]\nOWNER HEAD x+\n… middle omitted …\nx+ OWNER TAIL/);
-		expect(harness.session.messages.map((message) => message.role)).toEqual(["custom", "assistant"]);
+		expect(harness.session.messages.filter((message) => message.role !== "system").map((message) => message.role)).toEqual(["custom", "assistant"]);
 	});
 
 	it("retains newly submitted input across preflight without copying it into the handoff", async () => {
@@ -221,7 +222,7 @@ describe("Posthorse inside the Pi fork", () => {
 		harness.setResponses([
 			fauxAssistantMessage("ready"),
 			(context) => {
-				freshTexts = context.messages.map(getMessageText);
+				freshTexts = context.messages.filter((message) => message.role !== "system").map(getMessageText);
 				return fauxAssistantMessage("done");
 			},
 		]);
@@ -257,7 +258,7 @@ describe("Posthorse inside the Pi fork", () => {
 				});
 			},
 			(context) => {
-				freshTexts = context.messages.map(getMessageText);
+				freshTexts = context.messages.filter((message) => message.role !== "system").map(getMessageText);
 				return fauxAssistantMessage("fresh");
 			},
 		]);
@@ -282,11 +283,11 @@ describe("Posthorse inside the Pi fork", () => {
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("new_context", { handoff: "not yet" }), fauxToolCall("fail", {})], { stopReason: "toolUse" }),
 			(context) => {
-				afterFailure = context.messages.map((message) => message.role);
+				afterFailure = context.messages.filter((message) => message.role !== "system").map((message) => message.role);
 				return fauxAssistantMessage(fauxToolCall("new_context", { handoff: "carry this forward" }), { stopReason: "toolUse" });
 			},
 			(context) => {
-				afterRollover = context.messages.map(getMessageText);
+				afterRollover = context.messages.filter((message) => message.role !== "system").map(getMessageText);
 				return fauxAssistantMessage("fresh");
 			},
 		]);
@@ -296,12 +297,51 @@ describe("Posthorse inside the Pi fork", () => {
 		expect(contextWindows(harness)).toBe(1);
 		expect(afterFailure).toEqual(["user", "assistant", "toolResult", "toolResult"]);
 		expect(afterRollover).toEqual([expect.stringContaining("carry this forward")]);
-		expect(harness.session.messages.map((message) => message.role)).toEqual(["custom", "assistant"]);
+		expect(harness.session.messages.filter((message) => message.role !== "system").map((message) => message.role)).toEqual(["custom", "assistant"]);
 
 		const resumed = SessionManager.open(harness.sessionManager.getSessionFile()!, sessionDir);
-		const resumedTexts = resumed.buildSessionContext().messages.map(getMessageText);
+		const resumedTexts = resumed.buildSessionContext().messages.filter((message) => message.role !== "system").map(getMessageText);
 		expect(resumedTexts).toEqual([expect.stringContaining("carry this forward"), "fresh"]);
 		expect(resumed.getBranch().map((entry) => entry.type)).toEqual(branchTypes(harness));
+	});
+
+	it.skipIf(typeof ai.getCurrentSystemPrompt !== "function")("preserves replacement prompt and active tools through rollover and transcript resume", async () => {
+		let turn = 0;
+		const harness = await createHarness({
+			tools: [medium],
+			settings: { compaction: { enabled: false } },
+			extensionFactories: [posthorse, (pi) => {
+				pi.on("before_agent_start", () => ++turn === 2 ? { systemPrompt: "Replacement policy." } : undefined);
+			}],
+		});
+		harnesses.push(harness);
+		const requests: ai.TranscriptContext[] = [];
+		harness.setResponses([fauxAssistantMessage("old answer")]);
+		await harness.session.prompt("old input");
+		harness.session.setActiveToolsByName(["new_context", "medium"]);
+		harness.setResponses([
+			(context) => {
+				requests.push(context);
+				return fauxAssistantMessage(fauxToolCall("new_context", { handoff: "continue here" }), { stopReason: "toolUse" });
+			},
+			(context) => {
+				requests.push(context);
+				return fauxAssistantMessage(fauxToolCall("medium", {}), { stopReason: "toolUse" });
+			},
+			fauxAssistantMessage("fresh answer"),
+		]);
+		await harness.session.prompt("replace then roll over");
+		expect(contextWindows(harness)).toBe(1);
+		expect(requests).toHaveLength(2);
+		expect(requests[0].messages.filter((message) => message.role === "system").at(-1)).toMatchObject({ replace: true });
+		for (const messages of [...requests.map((request) => request.messages), harness.sessionManager.buildSessionContext().messages]) {
+			expect(ai.getCurrentSystemPrompt(messages)).toBe("Replacement policy.");
+			expect(ai.getCurrentTools(messages).map((tool) => tool.name).sort()).toEqual(["medium", "new_context"]);
+		}
+		expect(JSON.stringify(requests[1].messages)).not.toContain("old input");
+		expect(JSON.stringify(requests[1].messages)).toContain("continue here");
+		expect(harness.session.messages.find((message) => message.role === "toolResult" && message.toolName === "medium")).toMatchObject({ isError: false });
+		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
 	it.each([6, 50])("keeps parallel pages and refusals below the native hard budget (%i reads)", async (count) => {
@@ -361,7 +401,9 @@ describe("Posthorse inside the Pi fork", () => {
 
 		await harness.session.prompt("dump everything");
 
-		expect(harness.session.messages.map((message) => message.role)).toEqual(["custom", "assistant"]);
-		expect(branchTypes(harness)).toEqual(["message", "message", "message", "message", "message", "context_window", "message"]);
+		expect(harness.session.messages.filter((message) => message.role !== "system").map((message) => message.role)).toEqual(["custom", "assistant"]);
+		expect(harness.sessionManager.getBranch()
+			.filter((entry) => entry.type !== "message" || entry.message.role !== "system")
+			.map((entry) => entry.type)).toEqual(["message", "message", "message", "message", "message", "context_window", "message"]);
 	});
 });
