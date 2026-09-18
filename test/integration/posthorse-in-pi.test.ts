@@ -3,7 +3,7 @@
  * Run with scripts/integration.sh, which copies this file into the fork's packages/coding-agent/test directory
  * so every import below resolves against the fork; POSTHORSE_INDEX points at the extension entry point.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -271,7 +271,7 @@ describe("Posthorse inside the Pi fork", () => {
 
 	it("commits an explicit new_context only after a fully successful tool batch; resume stays inside the new window", async () => {
 		const sessionDir = mkdtempSync(join(tmpdir(), "posthorse-resume-"));
-		harnesses.push({ cleanup: () => rmSync(sessionDir, { recursive: true, force: true }) } as Harness);
+		// Keep the real Pi resume journal outside the harness's disposable workspace.
 		const harness = await createHarness({
 			tools: [dump, fail],
 			extensionFactories: [posthorse],
@@ -305,7 +305,7 @@ describe("Posthorse inside the Pi fork", () => {
 		expect(resumed.getBranch().map((entry) => entry.type)).toEqual(branchTypes(harness));
 	});
 
-	it.skipIf(typeof ai.getCurrentSystemPrompt !== "function")("preserves replacement prompt and active tools through rollover and transcript resume", async () => {
+	it("preserves the run-only forced prompt through rollover and structured tools through resume", async () => {
 		let turn = 0;
 		const harness = await createHarness({
 			tools: [medium],
@@ -316,12 +316,14 @@ describe("Posthorse inside the Pi fork", () => {
 		});
 		harnesses.push(harness);
 		const requests: ai.TranscriptContext[] = [];
+		let structuredPrompt = "";
 		harness.setResponses([fauxAssistantMessage("old answer")]);
 		await harness.session.prompt("old input");
 		harness.session.setActiveToolsByName(["new_context", "medium"]);
 		harness.setResponses([
 			(context) => {
 				requests.push(context);
+				structuredPrompt = ai.getCurrentSystemPrompt(harness.sessionManager.buildSessionContext().messages);
 				return fauxAssistantMessage(fauxToolCall("new_context", { handoff: "continue here" }), { stopReason: "toolUse" });
 			},
 			(context) => {
@@ -333,9 +335,14 @@ describe("Posthorse inside the Pi fork", () => {
 		await harness.session.prompt("replace then roll over");
 		expect(contextWindows(harness)).toBe(1);
 		expect(requests).toHaveLength(2);
-		expect(requests[0].messages.filter((message) => message.role === "system").at(-1)).toMatchObject({ replace: true });
-		for (const messages of [...requests.map((request) => request.messages), harness.sessionManager.buildSessionContext().messages]) {
-			expect(ai.getCurrentSystemPrompt(messages)).toBe("Replacement policy.");
+		for (const request of requests) {
+			expect(ai.getCurrentSystemPrompt(request.messages)).toBe("Replacement policy.");
+		}
+		const resumedMessages = harness.sessionManager.buildSessionContext().messages;
+		expect(structuredPrompt).not.toBe("");
+		expect(structuredPrompt).not.toContain("Replacement policy.");
+		expect(ai.getCurrentSystemPrompt(resumedMessages)).toBe(structuredPrompt);
+		for (const messages of [...requests.map((request) => request.messages), resumedMessages]) {
 			expect(ai.getCurrentTools(messages).map((tool) => tool.name).sort()).toEqual(["medium", "new_context"]);
 		}
 		expect(JSON.stringify(requests[1].messages)).not.toContain("old input");
