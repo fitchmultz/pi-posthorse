@@ -13,7 +13,7 @@ An isolated [Codex prototype](adapters/codex-posthorse/README.md) tests local no
 ## Requirements
 
 - Node `>=22.19.0`.
-- The `fitchmultz/pi` fork. The CI baseline is `b10a8c236df2ae366ec04bc07aa65f76f512397b` (Pi `0.85.1`, incorporating official source `e4ce7b449`). Posthorse needs the fork's native `context_window` entries, its `session_before_auto_compact` hook, and `ctx.getCompactionSettings()`.
+- The `fitchmultz/pi` fork. The CI baseline is `323afc8223cf841eeeddc33432c44a3e63c20c4e` (fork package version `0.85.1`). Posthorse needs the fork's native `context_window` entries, its `session_before_auto_compact` hook, and `ctx.getCompactionSettings()`.
 - Official, unpatched Pi is unsupported. Posthorse reports a clear extension error at session start and cannot operate; Pi itself keeps running.
 
 ## Install
@@ -23,7 +23,7 @@ Build the fork:
 ```bash
 git clone https://github.com/fitchmultz/pi.git
 cd pi
-git checkout b10a8c236df2ae366ec04bc07aa65f76f512397b
+git checkout 323afc8223cf841eeeddc33432c44a3e63c20c4e
 npm install --ignore-scripts
 npm run build
 ```
