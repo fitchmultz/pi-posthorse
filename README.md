@@ -13,7 +13,7 @@ An isolated [Codex prototype](adapters/codex-posthorse/README.md) tests local no
 ## Requirements
 
 - Node `>=22.19.0`.
-- The `fitchmultz/pi` fork. The CI baseline is `050750c5e3118f8a2083d8f2a12cdaa93ca68241` (fork package version `0.85.1`). Posthorse needs the fork's native `context_window` entries, its `session_before_auto_compact` hook, and `ctx.getCompactionSettings()`.
+- The `fitchmultz/pi` fork. The native qualification target is `f371064864ef239d66a81ee645a6774dc525be40` (fork package version `0.86.1`). Posthorse needs the fork's native `context_window` entries, its `session_before_auto_compact` hook, and `ctx.getCompactionSettings()`.
 - Official, unpatched Pi is unsupported. Posthorse reports a clear extension error at session start and cannot operate; Pi itself keeps running.
 
 ## Install
@@ -23,7 +23,7 @@ Build the fork:
 ```bash
 git clone https://github.com/fitchmultz/pi.git
 cd pi
-git checkout 050750c5e3118f8a2083d8f2a12cdaa93ca68241
+git checkout f371064864ef239d66a81ee645a6774dc525be40
 npm install --ignore-scripts
 npm run build
 ```
@@ -105,10 +105,16 @@ Reminders persisted by pi-headroom (`headroom-reminder`) are recognized alongsid
 ## Develop
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm test
 npm run check
-PI_FORK=../pi scripts/integration.sh   # loads the real extension into the fork's test harness (fork built)
+# After the compatibility runner installs the selected fork SDK/types cohort:
+PI_COMPAT_HOST=fork npm run check:compat
+PI_FORK=../pi scripts/integration.sh   # additional full source-harness integration (disposable fork built)
 ```
 
-`npm run check` type-checks the extension, renderers, and tests. Tests cover reminder policy, notes/history behavior, and real native card components, including width, expansion, and legacy results. The pinned Pi 0.85.0 SDK's unbundled entry imports an undeclared server package, so test-only resolution loads its shipped native bundle. Integration tests run inside the fork's harness and cover rollover and history recovery; use a disposable built fork checkout because the script briefly copies the test into its test directory. CI runs the unit tests on Node 22.19 and 24, `npm audit`, `npm pack --dry-run`, and the integration job against the pinned fork revision.
+`npm run check` type-checks the extension, renderers, and tests. `npm test` covers reminder policy, notes/history behavior, and real native card components, including width, expansion, and legacy results. The exact 0.86.1 npm dev baseline is useful for these checks but does **not** make official Pi an operating target. The stale 0.85.0 bundle redirect is gone: tests use the public SDK entry.
+
+`check:compat` adds `test:native`: real SDK loading, oversized-result rollover without summary compaction, history recovery, explicit `new_context`, and checkpoint restore without provider replay. It requires native fork capabilities; it never substitutes synthetic windows or silently skips on official. The runner must install the fork cohort in this checkout's `node_modules` so both `tsc` and SDK imports resolve that graph. `PI_HOST_INDEX` and `PI_COMPAT_EXPECTED_PACKAGE_DIR` are verified against it, and `PI_COMPAT_EXPECTED_VERSION` verifies the version. A same-version official graph is not a fork. Official qualification is a separate actual CLI startup/refusal probe, not `check:compat`.
+
+For a focused read-only SDK diagnostic only, `PI_HOST_INDEX=/absolute/fork/dist/index.js node --test test/native.test.mjs` can inspect an immutable host; this does not qualify this checkout's types. The larger source integration suite remains available through `scripts/integration.sh`; use a disposable built fork checkout because it briefly copies a test into that host. All native fixtures must use an isolated HOME/agent directory with offline mode and no provider credentials. These checks do not claim native Windows support.

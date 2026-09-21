@@ -5,51 +5,77 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: product-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  # Known-good fitchmultz/pi revision for the integration job; keep in step with the README.
-  PI_FORK_REF: 050750c5e3118f8a2083d8f2a12cdaa93ca68241
+  # This distinct suite imports Pi's source test harness (not in npm artifacts).
+  # Ordinary types/unit/native checkpoint qualification lives in shared CI.
+  PI_AUTOMATION_REF: fe049ea97a8c91d1a4c3a0958a85b37c7759dcc6 # v1.0.0
   CODEX_LOCAL_REF: 6c5d489f76b358ff6adedcf47211081d290b293b
 
 jobs:
-  test:
+  audit:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: ["22.19", "24"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: ${{ matrix.node }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
           cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm run check
+      - run: npm ci --ignore-scripts
       - run: npm audit
-      - run: npm pack --dry-run
 
   integration:
+    name: Full source-harness rollover and history contract
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PI_OFFLINE: '1'
+      PI_TELEMETRY: '0'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: pi-posthorse
-      - uses: actions/checkout@v5
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fitchmultz/.github
+          ref: ${{ env.PI_AUTOMATION_REF }}
+          path: automation
+          persist-credentials: false
+      - name: Select the reviewed shared fork target
+        run: echo "PI_FORK_REF=$(node -p 'require("./automation/host-targets.json").forkRef')" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/pi
           ref: ${{ env.PI_FORK_REF }}
           path: pi
-      - uses: actions/setup-node@v5
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22.19"
-      - run: npm ci
+          node-version: '24'
+      - run: npm ci --ignore-scripts
         working-directory: pi-posthorse
       - run: npm ci --ignore-scripts
         working-directory: pi
-      - run: npm run build
+      - run: npm run hydrate:model-data && npm run build:offline
         working-directory: pi
-      - run: PI_FORK=../pi scripts/integration.sh
+      - name: Run the distinct source-harness cases without credentials
         working-directory: pi-posthorse
+        shell: bash
+        run: |
+          fixture="$(mktemp -d /tmp/posthorse-source.XXXXXX)"
+          mkdir -p "$fixture/home" "$fixture/agent" "$fixture/tmp"
+          env -i PATH="$PATH" HOME="$fixture/home" TMPDIR="$fixture/tmp" \
+            PI_CODING_AGENT_DIR="$fixture/agent" PI_OFFLINE=1 PI_TELEMETRY=0 \
+            PI_FORK=../pi bash scripts/integration.sh
 
   codex-adapter:
     runs-on: ubuntu-latest
