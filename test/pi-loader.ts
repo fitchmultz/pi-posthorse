@@ -1,14 +1,17 @@
-import { readFileSync } from "node:fs";
-import { registerHooks } from "node:module";
+import assert from "node:assert/strict";
+import { readFileSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-// Pi 0.85.0's unbundled entry imports an undeclared pi-server package. Test its
-// shipped native bundle; remove this workaround when updating the pinned SDK.
+// Use the selected graph's public SDK, not the old 0.85.0 bundle workaround.
+// Runtime imports and tsc must resolve the same installed package.
 const entry = import.meta.resolve("@earendil-works/pi-coding-agent");
+const packageDir = fileURLToPath(new URL("..", entry));
 const { version } = JSON.parse(readFileSync(new URL("../package.json", entry), "utf8"));
-if (version !== "0.85.0") throw new Error("Recheck Pi's native test entry before updating the SDK baseline.");
-registerHooks({
-	resolve(specifier, context, nextResolve) {
-		const resolved = nextResolve(specifier, context);
-		return resolved.url === entry ? { ...resolved, url: new URL("bundle/index.js", entry).href } : resolved;
-	},
-});
+if (process.env.PI_HOST_INDEX) {
+	assert.equal(realpathSync(process.env.PI_HOST_INDEX), realpathSync(fileURLToPath(entry)), "PI_HOST_INDEX must select the installed SDK/types graph");
+}
+if (process.env.PI_COMPAT_EXPECTED_PACKAGE_DIR) {
+	assert.equal(realpathSync(packageDir), realpathSync(process.env.PI_COMPAT_EXPECTED_PACKAGE_DIR));
+}
+if (process.env.PI_COMPAT_EXPECTED_VERSION) assert.equal(version, process.env.PI_COMPAT_EXPECTED_VERSION);
+console.log(JSON.stringify({ host: process.env.PI_COMPAT_HOST ?? "local", version, sdk: entry, packageDir }));
