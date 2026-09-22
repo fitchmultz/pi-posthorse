@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   verify:
+    name: Codex stock recovery
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     defaults:

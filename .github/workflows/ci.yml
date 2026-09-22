@@ -27,6 +27,7 @@ env:
 
 jobs:
   verify:
+    name: Pi fork and official refusal
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
