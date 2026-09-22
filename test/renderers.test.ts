@@ -13,6 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, visibleWidth, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import posthorse from "../index.ts";
+import type { PosthorseDisplay } from "../ui.ts";
 
 initTheme("dark");
 
@@ -181,6 +182,49 @@ test("history searches lead with content and retain every entry and recovery ide
 	assert.ok(JSON.stringify(output.details).length < 2000, "search display data is numeric boundaries, not copied bodies");
 });
 
+test("paginated searches retain accurate counts, spans, identifiers and continuation in native cards", async () => {
+	const branch = Array.from({ length: 60 }, (_, index) => ({
+		type: "message", id: `entry-${index}`, timestamp: "2026-09-06T17:43:46.741Z",
+		message: { role: "user", content: `needle station ${index} ${"r".repeat(500)}` },
+	}));
+	const args = { op: "search", query: "needle", limit: 50 };
+	const output = await execute("history", args, context(tmpdir(), branch));
+	const display = output.details as PosthorseDisplay;
+	assert.equal(display.kind, "history-search");
+	if (display.kind !== "history-search") throw new Error("missing search spans");
+	assert.ok(display.entries.length < 50);
+	assert.ok(display.footerLength);
+	const raw = output.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+	assert.ok(raw.length <= 20_000);
+	assert.equal(display.entries.reduce((sum, span) => sum + span.length + 1, -1), raw.length - display.footerLength);
+	const component = card("history", args);
+	component.updateResult({ ...output, isError: false });
+	assert.match(text(component), new RegExp(`${display.entries.length} matches`));
+	assert.match(text(component), /More results; continue with cursor/);
+	component.setExpanded(true);
+	assert.match(text(component, 196), /\[entry-59\]/);
+	assert.match(text(component, 196), /\[More results; continue with cursor/);
+	assert.match(text(component, 196), new RegExp(raw.slice(-display.footerLength).match(/cursor "([^"]+)"/)![1]));
+
+	const cwd = mkdtempSync(`${tmpdir()}/posthorse-list-render-`);
+	try {
+		const ctx = context(cwd);
+		await execute("notes", { op: "write", path: "ledger.md", content: Array.from({ length: 30 }, (_, index) => `needle ${index} ${"n".repeat(150)}`).join("\n") }, ctx);
+		Object.assign(ctx, { getContextUsage: () => ({ tokens: 98_700, contextWindow: 100_000, percent: 98.7 }), getCompactionSettings: () => ({ enabled: false, reserveTokens: 16_384 }) });
+		const result = await execute("notes", { op: "search", query: "needle" }, ctx);
+		const details = result.details as PosthorseDisplay;
+		assert.equal(details.kind, "notes-search");
+		if (details.kind !== "notes-search") throw new Error("missing notes count");
+		assert.ok(details.page && details.page.end < details.page.total);
+		const notes = card("notes", { op: "search", query: "needle" });
+		notes.updateResult({ ...result, isError: false });
+		assert.match(text(notes), new RegExp(`${details.count} matches returned`));
+		assert.match(text(notes), /Next offset/);
+		notes.setExpanded(true);
+		assert.match(text(notes), new RegExp(`continue with offset ${details.page.end}`));
+	} finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
 test("context summaries preserve approximation and native disabled, unsupported, unknown states", async () => {
 	for (const [tokens, window, enabled, expected] of [
 		[1000, 100_000, true, /≈.*rollover/],
@@ -197,7 +241,8 @@ test("context summaries preserve approximation and native disabled, unsupported,
 		const component = card("get_context_remaining");
 		component.updateResult({ ...output, isError: false });
 		assert.match(text(component, 80), expected);
-		assert.doesNotMatch(text(component, 80), /0%/);
+		assert.doesNotMatch(text(component, 80), /0%|hard limit/);
+		if (tokens !== null) assert.match(text(component, 80), /configured context limit/);
 		component.setExpanded(true);
 		assert.ok(text(component, 196).includes("native estimate") || tokens === null);
 	}

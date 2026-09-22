@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- Requires a fork build exposing native `publishLocalFile`. Note replacements now preserve the previous content when publication fails; note locations and append behavior are unchanged.
+- Shares the remaining context budget across notes list/search, history search, and read pages, including continuation metadata and no-match responses. Notes use character offsets; history search uses a query-bound cursor that progresses despite newly appended lookup echoes.
+- Uses native system-prompt sections while preserving custom prompts and earlier full-prompt overrides.
+- Removes checkpoint reminders from active input when compaction is disabled, while retaining their history entries.
+- Labels carried tool results as a trailing batch without a later complete response; interrupted requests may already have received them.
+- Describes the configured context limit accurately instead of claiming it is a measured provider hard limit.
+
 ## 0.4.6
 
 - Preserves Unicode line and paragraph separators in archived Pi history and Codex prototype checkpoints instead of treating them as JSONL record boundaries.

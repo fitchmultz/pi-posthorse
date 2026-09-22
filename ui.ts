@@ -4,10 +4,10 @@ import { Box, MouseRegion, Text, stripTerminalSequences, truncateToWidth, type C
 /** Display-only facts and offsets into content, never a second copy of a note or history page. */
 export type PosthorseDisplay =
 	| { kind: "context"; usage?: { tokens: number | null; contextWindow: number; percent: number | null }; rollover?: "enabled" | "disabled" | "unsupported"; rolloverAt?: number }
-	| { kind: "notes-list" | "notes-search"; count: number }
+	| { kind: "notes-list" | "notes-search"; count: number; page?: { offset: number; end: number; total: number } }
 	| { kind: "note-read"; offset: number; end: number; total: number }
 	| { kind: "note-write" | "note-append" | "new-context" }
-	| { kind: "history-search"; entries: Array<{ headerLength: number; length: number }> }
+	| { kind: "history-search"; entries: Array<{ headerLength: number; length: number }>; footerLength?: number }
 	| { kind: "history-read"; headerLength: number; offset: number; end: number; total: number };
 
 type ToolName = "notes" | "history" | "get_context_remaining" | "new_context";
@@ -43,14 +43,17 @@ function pageSummary(page: { offset: number; end: number; total: number }): stri
 function historySections(raw: string, display: PosthorseDisplay | undefined): Array<{ body: string; header: string }> | undefined {
 	const spans = display?.kind === "history-search" ? display.entries : display?.kind === "history-read" ? [{ headerLength: display.headerLength, length: raw.length }] : undefined;
 	if (!Array.isArray(spans) || !spans.length) return undefined;
+	const footerLength = display?.kind === "history-search" ? display.footerLength ?? 0 : 0;
+	if (!Number.isInteger(footerLength) || footerLength < 0 || footerLength > raw.length) return undefined;
+	const bodyLength = raw.length - footerLength;
 	let start = 0;
 	const sections: Array<{ body: string; header: string }> = [];
 	for (const span of spans) {
-		if (!Number.isInteger(span.headerLength) || !Number.isInteger(span.length) || span.headerLength < 0 || span.headerLength > span.length || start + span.length > raw.length) return undefined;
+		if (!Number.isInteger(span.headerLength) || !Number.isInteger(span.length) || span.headerLength < 0 || span.headerLength > span.length || start + span.length > bodyLength) return undefined;
 		sections.push({ header: raw.slice(start, start + span.headerLength).trimEnd(), body: raw.slice(start + span.headerLength, start + span.length) });
 		start += span.length + 1;
 	}
-	return start === raw.length + 1 ? sections : undefined;
+	return start === bodyLength + 1 ? sections : undefined;
 }
 
 export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "renderResult"> {
@@ -88,22 +91,23 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 					case "context": {
 						const usage = display.usage;
 						if (!usage || usage.tokens == null) { summary = "Context usage unknown"; break; }
-						const hard = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens to hard limit`;
+						const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens to configured context limit`;
 						const rollover = display.rollover === "enabled" && display.rolloverAt !== undefined ? `≈${n(Math.max(0, display.rolloverAt - usage.tokens))} tokens to rollover` : `Automatic rollover ${display.rollover ?? "unknown"}`;
-						summary = `${rollover}\n${hard}\n≈${n(usage.tokens)} / ${n(usage.contextWindow)} used${usage.percent == null ? "" : ` (≈${Math.round(usage.percent)}%)`}`;
+						summary = `${rollover}\n${configured}\n≈${n(usage.tokens)} / ${n(usage.contextWindow)} used${usage.percent == null ? "" : ` (≈${Math.round(usage.percent)}%)`}`;
 						if (display.rollover === "unsupported") color = "warning";
 						break;
 					}
-					case "notes-list": summary = display.count ? `${n(display.count)} note${display.count === 1 ? "" : "s"}` : "No notes yet"; break;
+					case "notes-list": summary = display.count ? `${n(display.count)} note${display.count === 1 ? "" : "s"} returned` : "No notes yet"; break;
 					case "notes-search": summary = display.count ? `${n(display.count)} matches returned` : "No matches"; break;
 					case "note-read": summary = pageSummary(display); break;
 					case "note-write": summary = args.content === "" ? "Cleared note" : "Saved note"; break;
 					case "note-append": summary = "Appended to note"; break;
-					case "history-search": if (Array.isArray(display.entries) && (!display.entries.length || sections)) summary = `${display.entries.length ? `${n(display.entries.length)} matches` : "No matches"} · ${args.all === true ? "all sessions" : "current branch"}`; break;
+					case "history-search": if (Array.isArray(display.entries) && (!display.entries.length || sections)) summary = `${display.entries.length ? `${n(display.entries.length)} matches` : "No matches"} · ${args.all === true ? "all sessions" : "current branch"}${display.footerLength ? "\nMore results; continue with cursor" : ""}`; break;
 					case "history-read": summary = pageSummary(display); break;
 					case "new-context": summary = "Requested for after the whole tool batch succeeds."; break;
 				}
 			}
+			if (!context.isError && !isPartial && (display?.kind === "notes-list" || display?.kind === "notes-search") && display.page && (display.page.offset || display.page.end < display.page.total)) summary += `\n${pageSummary(display.page)}`;
 			if (!body.trim()) body = context.isError ? "No error details returned." : isPartial ? "Running…" : name === "notes" && args.op === "read" ? "Empty note" : "No text returned.";
 			const submitted = name === "new_context" && typeof args.handoff === "string" ? `Handoff supplied:\n${args.handoff}` : name === "notes" && (args.op === "write" || args.op === "append") && typeof args.content === "string" ? `Submitted content:\n${args.content || "(empty)"}` : "";
 			const images = Array.isArray(result.content) ? result.content.filter((part) => part.type === "image") : [];
@@ -121,7 +125,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 				invalidate() {},
 				render(width) {
 					if (expanded) {
-						return [...fullText.render(width), ...attachmentText.render(width), ...(submitted ? ["", ...submittedText.render(width)] : [])];
+						return [...fullText.render(width), ...attachmentText.render(width), ...(sections && display?.kind === "history-search" && display.footerLength ? textBlock(raw.slice(-display.footerLength), theme, "muted").render(width) : []), ...(submitted ? ["", ...submittedText.render(width)] : [])];
 					}
 					const summaryRows = summaryText.render(width).slice(0, 5);
 					const previewRows = summaryOnly && !context.isError && !isPartial ? [] : searchPreviews
