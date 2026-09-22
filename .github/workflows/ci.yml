@@ -57,8 +57,7 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fd-find ripgrep zstd attr acl libcap2-bin build-essential
-          sudo ln -sf "$(command -v fdfind)" /usr/local/bin/fd
+          sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
       - name: Build the pinned fork
         working-directory: fork
         run: |
