@@ -1,48 +1,38 @@
-name: CI
+name: Pi
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/ci.yml
+      - index.ts
+      - ui.ts
+      - package.json
+      - package-lock.json
+      - tsconfig.json
+      - scripts/**
+      - test/**
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: product-ci-${{ github.workflow }}-${{ github.ref }}
+  group: pi-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # This distinct suite imports Pi's source test harness (not in npm artifacts).
-  # Ordinary types/unit/native checkpoint qualification lives in shared CI.
-  PI_AUTOMATION_REF: bfe47007194178fdda46c3fc4a0be32113371d53 # reviewed Pi 0.87.0 fork
-  CODEX_LOCAL_REF: 6c5d489f76b358ff6adedcf47211081d290b293b
+  PI_AUTOMATION_REF: bfe47007194178fdda46c3fc4a0be32113371d53 # reviewed Pi 0.87.0 automation
+  PI_FORK_REF: 8fb7886130ff1fedc415bdd6fea03aef8a8957d8 # reviewed native fork
 
 jobs:
-  audit:
-    runs-on: ubuntu-latest
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm audit
-
-  integration:
-    name: Full source-harness rollover and history contract
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      PI_OFFLINE: '1'
-      PI_TELEMETRY: '0'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: pi-posthorse
+          path: extension
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,156 +40,50 @@ jobs:
           ref: ${{ env.PI_AUTOMATION_REF }}
           path: automation
           persist-credentials: false
-      - name: Select the reviewed shared fork target
-        run: echo "PI_FORK_REF=$(node -p 'require("./automation/host-targets.json").forkRef')" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: fitchmultz/pi
           ref: ${{ env.PI_FORK_REF }}
-          path: pi
+          path: fork
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
-      - run: npm ci --ignore-scripts
-        working-directory: pi-posthorse
-      - run: npm ci --ignore-scripts
-        working-directory: pi
-      - run: npm run hydrate:model-data && npm run build:offline
-        working-directory: pi
-      - name: Run the distinct source-harness cases without credentials
-        working-directory: pi-posthorse
-        shell: bash
+          node-version: '22.19.0'
+          package-manager-cache: false
+      - name: Use the reviewed npm version
+        run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
+      - name: Install native test prerequisites
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fd-find ripgrep zstd attr acl libcap2-bin build-essential
+          sudo ln -sf "$(command -v fdfind)" /usr/local/bin/fd
+      - name: Build the pinned fork
+        working-directory: fork
+        run: |
+          npm ci --ignore-scripts --no-audit
+          npm run hydrate:model-data
+          PI_OFFLINE=1 PI_TELEMETRY=0 npm run build:offline
+          git diff --exit-code
+      - run: npm ci --ignore-scripts --no-audit
+        working-directory: extension
+      - name: Qualify fork behavior and installation
+        run: |
+          node automation/scripts/pack-fork.mjs fork "$RUNNER_TEMP/fork-package" "$PI_FORK_REF"
+          env -u GITHUB_STEP_SUMMARY PI_COMPAT_FORK_REF="$PI_FORK_REF" node automation/scripts/qualify.mjs \
+            --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
+            --host fork --target "$RUNNER_TEMP/fork-package" --output "$RUNNER_TEMP/posthorse-fork"
+      - name: Verify source-harness integration without credentials
+        working-directory: extension
         run: |
           fixture="$(mktemp -d /tmp/posthorse-source.XXXXXX)"
           mkdir -p "$fixture/home" "$fixture/agent" "$fixture/tmp"
           env -i PATH="$PATH" HOME="$fixture/home" TMPDIR="$fixture/tmp" \
             PI_CODING_AGENT_DIR="$fixture/agent" PI_OFFLINE=1 PI_TELEMETRY=0 \
-            PI_FORK=../pi bash scripts/integration.sh
-
-  codex-adapter:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: ["22.19", "24"]
-    defaults:
-      run:
-        working-directory: adapters/codex-posthorse
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-          cache-dependency-path: adapters/codex-posthorse/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npm test
-      - run: npm audit
-
-  codex-runtime:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: adapters/codex-posthorse
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: adapters/codex-posthorse/package-lock.json
-      - run: npm ci --ignore-scripts
-      - name: Download the pinned Codex runtime
+            PI_FORK="$GITHUB_WORKSPACE/fork" bash scripts/integration.sh
+      - name: Verify official Pi clearly refuses Posthorse
         run: |
-          curl --fail --location --retry 2 https://github.com/openai/codex/releases/download/rust-v0.153.4/codex-x86_64-unknown-linux-musl.tar.gz -o "$RUNNER_TEMP/codex-runtime.tar.gz"
-          mkdir -p "$RUNNER_TEMP/codex-runtime"
-          tar -xzf "$RUNNER_TEMP/codex-runtime.tar.gz" -C "$RUNNER_TEMP/codex-runtime"
-          curl --fail --location --retry 2 https://github.com/openai/codex/releases/download/rust-v0.153.4/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz -o "$RUNNER_TEMP/codex-code-mode-host.tar.gz"
-          tar -xzf "$RUNNER_TEMP/codex-code-mode-host.tar.gz" -C "$RUNNER_TEMP/codex-runtime"
-          mv "$RUNNER_TEMP/codex-runtime/codex-code-mode-host-x86_64-unknown-linux-musl" "$RUNNER_TEMP/codex-runtime/codex-code-mode-host"
-          "$RUNNER_TEMP/codex-runtime/codex-x86_64-unknown-linux-musl" --version
-      - name: Characterize real runtime behavior
-        env:
-          POSTHORSE_CODEX_BIN: ${{ runner.temp }}/codex-runtime/codex-x86_64-unknown-linux-musl
-        run: npm run test:runtime
-      - name: Verify ordinary compaction with stock recovery hooks
-        env:
-          POSTHORSE_CODEX_BIN: ${{ runner.temp }}/codex-runtime/codex-x86_64-unknown-linux-musl
-        run: npm run test:stock
-      - name: Save runtime evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-runtime-evidence
-          path: ~/Library/Caches/pi-runs/posthorse-codex-*
-
-  codex-local-recovery:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    env:
-      CODEX_REPO_ROOT: ${{ github.workspace }}/native-codex
-      CARGO_BUILD_JOBS: 2
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_DEV_DEBUG: 0
-      CARGO_PROFILE_TEST_DEBUG: 0
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
-        with:
-          repository: fitchmultz/codex
-          ref: ${{ env.CODEX_LOCAL_REF }}
-          path: native-codex
-          persist-credentials: false
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: adapters/codex-posthorse/package-lock.json
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
-        with:
-          components: rust-src
-      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
-        with:
-          tool: just@1.51.0,cargo-nextest@0.9.143
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config libcap-dev libasound2-dev bubblewrap
-      - name: Prepare native build environment
-        run: |
-          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/codex-posthorse-target" >> "$GITHUB_ENV"
-          python3 - <<'PY' >> "$GITHUB_ENV"
-          import os
-          import sys
-          from pathlib import Path
-          sys.path.insert(0, str(Path(os.environ["CODEX_REPO_ROOT"]) / "scripts"))
-          from codex_package.targets import TARGET_SPECS
-          from codex_package.v8 import resolve_codex_v8_cargo_env
-          overrides = resolve_codex_v8_cargo_env(
-              TARGET_SPECS["x86_64-unknown-linux-gnu"],
-              cache_root=Path(os.environ["RUNNER_TEMP"]) / "codex-v8",
-          )
-          for key, value in overrides.items():
-              print(f"{key}={value}")
-          PY
-      - name: Build matching CLI and code-mode host
-        working-directory: native-codex/codex-rs
-        run: cargo build --locked -p codex-cli --bin codex -p codex-code-mode-host --bin codex-code-mode-host
-      - name: Test native hook and feature configuration
-        working-directory: native-codex/codex-rs
-        run: just test -p codex-hooks -p codex-features
-      - run: npm ci --ignore-scripts
-        working-directory: adapters/codex-posthorse
-      - name: Enforce local recovery acceptance
-        working-directory: adapters/codex-posthorse
-        env:
-          POSTHORSE_CODEX_BIN: ${{ runner.temp }}/codex-posthorse-target/debug/codex
-        run: npm run test:local
-      - name: Save local recovery evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-local-recovery-evidence
-          path: ~/Library/Caches/pi-runs/posthorse-codex-*
+          version="$(node -p 'require("./extension/package.json").devDependencies["@earendil-works/pi-coding-agent"]')"
+          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
+            --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
+            --host official --target "$version" --output "$RUNNER_TEMP/posthorse-official"
