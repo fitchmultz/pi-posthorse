@@ -67,7 +67,7 @@ POSTHORSE_CODEX_BIN=/absolute/path/to/codex npm run test:local
 
 `test:runtime` characterizes stock behavior and prints `UNMET ACCEPTANCE` for its known gaps. Local acceptance enforces the stronger requirements without skips or TODOs. A passing controlled suite does not establish desktop compatibility or real-model quality.
 
-CI keeps the stock comparison and builds a pinned companion runtime for a separate local-acceptance job. That job builds the matching code-mode host, runs native hook/feature tests, and exercises the full local runtime suite. The Codex reference fork's inherited GitHub Actions remain disabled; these consumer checks do not depend on its upstream-specific runners.
+CI checks adapter unit/MCP behavior, stock recovery hooks, and production dependencies against the pinned Codex release. Patched local-recovery acceptance remains a local pre-release check: build the companion CLI and matching code-mode host, then run `POSTHORSE_CODEX_BIN=/absolute/path/to/codex npm run test:local`. CI does not build the companion fork.
 
 Each runtime case creates a separate `CODEX_HOME`, workspace, and state directory under `~/Library/Caches/pi-runs/posthorse-codex-*`, even on Linux. It never imports the normal Codex configuration or credentials. The harness trusts only its own test hooks, uses a loopback model endpoint, and terminates only processes it started. Transcripts, model requests, runtime events, errors, and `acceptance.json` results remain there for inspection; tests do not remove them. Unit and MCP test scratch data is retained under the same cache root.
 
