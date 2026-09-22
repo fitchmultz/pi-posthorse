@@ -6,6 +6,7 @@
  * notes, and history recovery.
  */
 
+import { createHash } from "node:crypto";
 import {
 	appendFileSync,
 	constants,
@@ -17,15 +18,15 @@ import {
 	readFileSync,
 	realpathSync,
 	statSync,
-	writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import * as codingAgent from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerPosthorseMessages, toolCards, type PosthorseDisplay } from "./ui.ts";
 
 const REMINDER_BUFFER_TOKENS = 32_000;
-/** Absolute ceiling for handoffs and read pages; pages shrink to the live remaining budget. */
+/** Absolute ceiling for handoffs and recovery pages; pages shrink to the live remaining budget. */
 const MAX_HANDOFF_CHARS = 20_000;
 const MAX_RECOVERY_RECORD_CHARS = 4_000;
 const HANDOFF_OVERHEAD_RESERVE = 1_000;
@@ -43,6 +44,11 @@ const LEGACY_AUTO_HANDOFF_PREFIX =
 
 type CompactionPolicy = { enabled: boolean; reserveTokens: number };
 type ContextUsage = { tokens: number | null; contextWindow: number; percent: number | null };
+/** Fork-only SDK export; the public npm declarations do not include it. */
+const { publishLocalFile } = codingAgent as typeof codingAgent & {
+	publishLocalFile(absolutePath: string, content: string | Uint8Array, signal?: AbortSignal): Promise<void>;
+};
+
 /** Fork-only ExtensionContext members; the published Pi types do not declare them. */
 type NativeContext = {
 	model?: { contextWindow: number };
@@ -113,9 +119,10 @@ function nativeContext<T>(ctx: T): T & NativeContext {
 	if (
 		typeof candidate.newContext !== "function" ||
 		typeof candidate.getCompactionSettings !== "function" ||
-		typeof candidate.getSystemPrompt !== "function"
+		typeof candidate.getSystemPrompt !== "function" ||
+		typeof publishLocalFile !== "function"
 	) {
-		throw new Error("Posthorse requires the fitchmultz/pi fork with native context windows (see README).");
+		throw new Error("Posthorse requires the fitchmultz/pi fork with native context windows and publishLocalFile (see README).");
 	}
 	return candidate as T & NativeContext;
 }
@@ -441,12 +448,8 @@ function formatPriorCheckpoint(entry: EntryLike | undefined, limit: number): str
 	return boundedBlock(header, handoff, limit);
 }
 
-/**
- * The trailing tool batch no model has consumed yet: an assistant tool-call message followed only by
- * its completed results (and non-message entries). Pi can roll over right after tools finish, so the
- * result that triggered the rollover would otherwise vanish before any model saw it.
- */
-function unconsumedToolBatch(
+/** Trailing results without a later complete assistant response; interrupted requests may have received them. */
+function trailingToolBatch(
 	entries: readonly EntryLike[],
 ): { callId: string; blocks: Array<{ header: string; text: string }> } | undefined {
 	const results: EntryLike[] = [];
@@ -520,9 +523,9 @@ function buildAutoHandoff(entries: readonly EntryLike[], maxChars: number): stri
 	const joinedLength = (parts: Array<string | undefined>) =>
 		parts.filter((part): part is string => Boolean(part)).join("\n\n").length;
 
-	const toolBatch = unconsumedToolBatch(current);
+	const toolBatch = trailingToolBatch(current);
 	const batchHeader = toolBatch
-		? `Unconsumed tool batch (completed after the last assistant response; no model has seen these results). Tool-call entry ${toolBatch.callId}:`
+		? `Trailing tool batch without a later complete assistant response (failed or interrupted requests may already have received these results). Tool-call entry ${toolBatch.callId}:`
 		: undefined;
 	const minimumParts = [
 		preamble,
@@ -678,7 +681,7 @@ function unsupportedMessage(budget: Budget): string {
 	return `Posthorse: unsupported configuration. The model's context window (${n(budget.contextWindow)} tokens) minus Pi's compaction.reserveTokens (${n(budget.reserveTokens)}) leaves ${n(budget.usable)} usable tokens; Posthorse needs at least ${n(MIN_USABLE_TOKENS)}. Automatic rollover and checkpoint reminders are off for this model. Lower compaction.reserveTokens in Pi settings or use a larger-context model. new_context remains available with a model-aware handoff limit.`;
 }
 
-/** Capacity before Pi's automatic line (or hard limit), including the margin for page metadata and refusals. */
+/** Capacity before Pi's automatic line (or configured context limit), including page metadata and refusals. */
 function pageCapacity(ctx: NativeContext, toolTokens: number): number {
 	const usage = ctx.getContextUsage();
 	if (!usage || usage.tokens == null) return freshPayloadChars(ctx, toolTokens) / 4 + PAGE_MARGIN_TOKENS;
@@ -729,7 +732,7 @@ export default function (pi: ExtensionAPI) {
 
 	let pendingPageTokens = 0;
 	let previousPageUsage: number | null | undefined;
-	const pageSize = (ctx: NativeContext, offset: number, imageCount: number) => {
+	const pageSize = (ctx: NativeContext, offset: number, imageCount: number, cursor?: string) => {
 		const usage = ctx.getContextUsage()?.tokens;
 		// Parallel siblings are not in native usage yet; sequential results must not be counted twice.
 		if (usage != null && previousPageUsage != null) {
@@ -742,7 +745,7 @@ export default function (pi: ExtensionAPI) {
 			Math.max(0, remaining - PAGE_MARGIN_TOKENS) * 4 - imageCount * ESTIMATED_IMAGE_CHARS,
 		);
 		if (chars < MIN_PAGE_CHARS) {
-			const message = `Too little context remains to read a page safely. Call new_context first, then retry with offset ${offset}.`;
+			const message = `Too little context remains to read a page safely. Call new_context first, then retry ${cursor ? "with the same cursor" : `with offset ${offset}`}.`;
 			// Refusals consume context too. Once even the guidance no longer fits, omit repeated text;
 			// the failed call still carries its original offset and earlier refusals explain the retry.
 			const text = Math.ceil(message.length / 4) <= remaining ? message : "";
@@ -755,6 +758,30 @@ export default function (pi: ExtensionAPI) {
 		pendingPageTokens += Math.ceil(text.length / 4) + images.length * (ESTIMATED_IMAGE_CHARS / 4);
 		return textResult(text, images, display);
 	};
+	const pageError = (ctx: NativeContext, message: string, cursor?: string): never => {
+		pageSize(ctx, 0, 0, cursor);
+		pendingPageTokens += Math.ceil(message.length / 4);
+		throw new Error(message);
+	};
+	const notesPage = (ctx: NativeContext, rows: string[], offset: number, kind: "notes-list" | "notes-search", empty: string) => {
+		const text = rows.length ? rows.join("\n") : empty;
+		const chars = pageSize(ctx, offset, 0);
+		if (offset && offset >= text.length) pageError(ctx, "Offset is past the end; restart with offset 0.");
+		// Reserve the complete continuation, even when one path or excerpt needs several pages.
+		const footer = (end: number) => `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]`;
+		let end = Math.min(text.length, offset + chars);
+		let start = 0;
+		const starts: number[] = [];
+		for (const row of rows) {
+			if (start >= end) break;
+			if (start + row.length > offset) starts.push(start);
+			start += row.length + 1;
+			if (kind === "notes-search" && starts.length === 20) { end = Math.min(end, start - 1); break; }
+		}
+		// A result-count cap can require continuation even when the character cap did not.
+		if (end < text.length) end = Math.min(end, offset + chars - footer(text.length).length);
+		return pageResult(text.slice(offset, end) + (end < text.length ? footer(end) : ""), [], { kind, count: starts.filter((start) => start < end).length, page: { offset, end, total: text.length } });
+	};
 	pi.on("turn_start", () => {
 		pendingPageTokens = 0;
 		previousPageUsage = undefined;
@@ -766,9 +793,14 @@ export default function (pi: ExtensionAPI) {
 		nativeContext(ctx);
 	});
 
-	pi.on("before_agent_start", (event, ctx) => ({
-		systemPrompt: `${event.systemPrompt}\n\n${buildGuidance(nativeContext(ctx))}`,
-	}));
+	pi.on("before_agent_start", (event, ctx) => {
+		const guidance = buildGuidance(nativeContext(ctx));
+		// An earlier full-prompt override makes section edits invisible to Pi.
+		if (event.systemPromptOptions.forceSystemPrompt !== undefined) {
+			return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };
+		}
+		event.systemPromptOptions.sections.posthorse = guidance;
+	});
 
 	pi.on("turn_end", (event, ctx) => {
 		const native = nativeContext(ctx);
@@ -810,7 +842,7 @@ export default function (pi: ExtensionAPI) {
 		);
 	});
 
-	// Drop reminders from another window or computed for another context size/reserve from model input.
+	// Filter active input only; raw reminders remain in history for deduplication and recovery.
 	pi.on("context", (event, ctx) => {
 		const marker = event.messages.find(
 			(message) => message.role === "custom" && message.customType === "context-window",
@@ -829,7 +861,7 @@ export default function (pi: ExtensionAPI) {
 		const stale = (message: (typeof event.messages)[number]) =>
 			message.role === "custom" &&
 			isReminderType(message.customType) &&
-			reminderIsStale(message.customType, message.details, fingerprint, branch);
+			(!native.getCompactionSettings().enabled || reminderIsStale(message.customType, message.details, fingerprint, branch));
 		if (event.messages.some(stale)) return { messages: event.messages.filter((message) => !stale(message)) };
 	});
 
@@ -889,7 +921,7 @@ export default function (pi: ExtensionAPI) {
 		label: "Context Remaining",
 		...toolCards("get_context_remaining"),
 		description:
-			"Best available native estimate of the context budget: tokens until Pi's automatic rollover line and until the model's hard limit.",
+			"Best available native estimate of the context budget: tokens until Pi's automatic rollover line and until the configured context limit.",
 		promptSnippet: "check the remaining context budget only when needed",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
@@ -903,11 +935,11 @@ export default function (pi: ExtensionAPI) {
 				rollover: !budget?.enabled ? "disabled" : budget.supported ? "enabled" : "unsupported",
 				rolloverAt: budget?.rolloverAt,
 			};
-			const hard = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the hard context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate.`;
-			if (!budget?.enabled) return textResult(`Automatic rollover is disabled (Pi compaction.enabled=false). ${hard}`, [], display);
-			if (!budget.supported) return textResult(`${unsupportedMessage(budget)} ${hard}`, [], display);
+			const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate.`;
+			if (!budget?.enabled) return textResult(`Automatic rollover is disabled (Pi compaction.enabled=false). ${configured}`, [], display);
+			if (!budget.supported) return textResult(`${unsupportedMessage(budget)} ${configured}`, [], display);
 			return textResult(
-				`≈${n(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until automatic rollover (line at ${n(budget.rolloverAt)}); ${hard}`,
+				`≈${n(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until automatic rollover (line at ${n(budget.rolloverAt)}); ${configured}`,
 				[], display,
 			);
 		},
@@ -918,7 +950,7 @@ export default function (pi: ExtensionAPI) {
 		label: "Notes",
 		...toolCards("notes"),
 		description:
-			"Persistent notes in .pi/notes/ that survive context resets. Ops: list, read (paged; pass offset to continue), write (create/replace; empty content clears), append, search (case-insensitive substring over note lines). Git worktrees share notes: at the main checkout for conventional .git layouts, or in the common Git directory when metadata is stored separately. Old checkout-local notes are imported without overwriting shared notes.",
+			"Persistent notes in .pi/notes/ that survive context resets. Ops: list/read/search (paged; repeat with offset to continue), write (create/replace; empty content clears), append. Search matches case-insensitive substrings over note lines. Git worktrees share notes: at the main checkout for conventional .git layouts, or in the common Git directory when metadata is stored separately. Old checkout-local notes are imported without overwriting shared notes.",
 		promptSnippet: "save and recall durable state that survives context resets",
 		promptGuidelines: [
 			"Use notes for durable state too large for a new_context handoff",
@@ -932,9 +964,9 @@ export default function (pi: ExtensionAPI) {
 			path: Type.Optional(Type.String({ description: "Note path relative to .pi/notes/ (read/write/append)" })),
 			content: Type.Optional(Type.String({ description: "Full file content (write) or text to add (append)" })),
 			query: Type.Optional(Type.String({ description: "Substring to find in notes (search)" })),
-			offset: Type.Optional(Type.Integer({ description: "Character offset for read (default 0)", minimum: 0 })),
+			offset: Type.Optional(Type.Integer({ description: "Character offset for list/read/search (default 0)", minimum: 0 })),
 		}),
-		async execute(_id, params, _signal, _onUpdate, ctx) {
+		async execute(_id, params, signal, _onUpdate, ctx) {
 			const dir = join(notesRoot(ctx.cwd), ".pi", "notes");
 			const safeJoin = (path: string) => {
 				const relative = normalize(path.replace(/^[/\\]+/, ""));
@@ -953,10 +985,9 @@ export default function (pi: ExtensionAPI) {
 
 			switch (params.op) {
 				case "list": {
-					if (!existsSync(dir)) return textResult("(no notes yet)", [], { kind: "notes-list", count: 0 });
 					const files: string[] = [];
-					walk(dir, files);
-					return textResult(files.length ? files.map((file) => file.slice(dir.length + 1)).join("\n") : "(no notes yet)", [], { kind: "notes-list", count: files.length });
+					if (existsSync(dir)) walk(dir, files);
+					return notesPage(nativeContext(ctx), files.map((file) => file.slice(dir.length + 1)), params.offset ?? 0, "notes-list", "(no notes yet)");
 				}
 				case "read": {
 					const relative = requireValue(params.path, "path", params.op);
@@ -977,7 +1008,7 @@ export default function (pi: ExtensionAPI) {
 					if (params.content === undefined) throw new Error(`"content" is required for op "write" (use "" to clear a note).`);
 					const path = safeJoin(relative);
 					mkdirSync(dirname(path), { recursive: true });
-					writeFileSync(path, params.content);
+					await publishLocalFile(path, params.content, signal);
 					return textResult(`Wrote ${path}`, [], { kind: "note-write" });
 				}
 				case "append": {
@@ -995,13 +1026,11 @@ export default function (pi: ExtensionAPI) {
 				}
 				case "search": {
 					const query = requireValue(params.query, "query", params.op).toLowerCase();
-					if (!existsSync(dir)) return textResult("(no notes yet)", [], { kind: "notes-search", count: 0 });
 					const files: string[] = [];
-					walk(dir, files);
+					if (existsSync(dir)) walk(dir, files);
 					const hits: string[] = [];
 					for (const file of files) {
 						for (const [index, line] of readFileSync(file, "utf8").split("\n").entries()) {
-							if (hits.length >= 20) break;
 							const trimmed = line.trim();
 							const match = trimmed.toLowerCase().indexOf(query);
 							if (match !== -1) {
@@ -1009,7 +1038,7 @@ export default function (pi: ExtensionAPI) {
 							}
 						}
 					}
-					return textResult(hits.length ? hits.join("\n") : `No notes match "${params.query}".`, [], { kind: "notes-search", count: hits.length });
+					return notesPage(nativeContext(ctx), hits, params.offset ?? 0, "notes-search", `No notes match "${excerpt(params.query!, 200)}".`);
 				}
 			}
 		},
@@ -1020,7 +1049,7 @@ export default function (pi: ExtensionAPI) {
 		label: "History",
 		...toolCards("history"),
 		description:
-			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file. Within each group: newest-modified sessions first, newest entries per session. Reads return stored images and page long text with the next offset.",
+			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads return stored images and page long text with the next offset.",
 		promptSnippet: "recover earlier conversation that left the active context window",
 		promptGuidelines: ["Use history search first, then history read with the returned entry id"],
 		parameters: Type.Object({
@@ -1028,7 +1057,8 @@ export default function (pi: ExtensionAPI) {
 			query: Type.Optional(Type.String({ description: "Case-insensitive text to find (search)" })),
 			id: Type.Optional(Type.String({ description: "Entry id returned by search (read)" })),
 			all: Type.Optional(Type.Boolean({ description: "Search all project sessions instead of the current branch" })),
-			limit: Type.Optional(Type.Integer({ description: "Maximum results (default 10, max 50)", minimum: 1, maximum: 50 })),
+			limit: Type.Optional(Type.Integer({ description: "Maximum search results per page (default 10, max 50)", minimum: 1, maximum: 50 })),
+			cursor: Type.Optional(Type.String({ description: "Search continuation returned by the previous page; keep query and all unchanged", maxLength: 512 })),
 			offset: Type.Optional(Type.Integer({ description: "Character offset for read (default 0)", minimum: 0 })),
 		}),
 		async execute(_id, params, signal, _onUpdate, ctx) {
@@ -1037,42 +1067,91 @@ export default function (pi: ExtensionAPI) {
 			if (params.op === "search") {
 				const query = requireValue(params.query, "query", params.op).toLowerCase();
 				const limit = params.limit ?? 10;
+				const searchKey = createHash("sha256").update(JSON.stringify([query, params.all === true])).digest("base64url");
+				let cursor: [string, 0 | 1, number, string] | undefined;
+				if (params.cursor) {
+					try {
+						const value = JSON.parse(Buffer.from(params.cursor, "base64url").toString());
+						if (!Array.isArray(value) || value.length !== 4 || typeof value[0] !== "string" || !value[0] || ![0, 1].includes(value[1]) || !Number.isSafeInteger(value[2]) || value[2] < 0 || value[3] !== searchKey) throw new Error();
+						cursor = value as typeof cursor;
+					} catch { pageError(nativeContext(ctx), "Invalid history cursor or changed query/scope; restart the search without it.", params.cursor); }
+				}
 				const hits: HistoryHit[][] = [[], []];
-				// Forks copy ancestor entries under the same ids into new session files; report each id once.
+				// Mark skipped ids too: fork copies must not reappear on subsequent pages.
 				const seen = new Set<string>();
+				let found = !cursor;
 				const addHit = (hit: HistoryHit | undefined) => {
-					if (!hit || seen.has(hit.id) || hits[hit.priority].length >= limit) return;
+					if (!hit || seen.has(hit.id)) return;
 					seen.add(hit.id);
-					hits[hit.priority].push(hit);
+					if (cursor && hit.priority < cursor[1]) return;
+					if (cursor && hit.priority === cursor[1] && !found) {
+						if (hit.id !== cursor[0]) return;
+						found = true;
+						if (cursor[2] > hit.text.length) pageError(nativeContext(ctx), "History cursor is past the entry; restart the search without it.", params.cursor);
+						if (cursor[2] === hit.text.length) return;
+					}
+					if (hits[hit.priority].length <= limit) hits[hit.priority].push(hit);
 				};
 
 				if (params.all) {
 					for (const file of sessionFiles(manager.getSessionDir())) {
 						const recent: HistoryHit[][] = [[], []];
+						const matchedIds = new Set<string>();
+						let anchorHere = false;
 						const source = relative(manager.getSessionDir(), file);
 						for await (const item of sessionWindowEntries(file, signal)) {
 							if (seen.has(item.entry.id!)) continue;
 							const hit = historyHit(item, query, source);
 							if (!hit) continue;
+							matchedIds.add(hit.id);
+							const seeking = cursor && !found && hit.priority === cursor[1];
+							if (seeking && anchorHere) continue;
+							if (seeking && hit.id === cursor?.[0]) anchorHere = true;
 							const group = recent[hit.priority];
 							group.push(hit);
-							if (group.length > limit - hits[hit.priority].length) group.shift();
+							// Keep one page plus its anchor and lookahead, not every matching excerpt.
+							if (group.length > limit + 2) group.shift();
 						}
+						if (cursor && !found && !anchorHere) recent[cursor[1]] = [];
 						for (const group of recent) for (const hit of group.reverse()) addHit(hit);
-						if (hits[0].length >= limit) break;
+						for (const id of matchedIds) seen.add(id);
+						if (hits[0].length > limit) break;
 					}
 				} else {
 					const current = [...windowEntries(manager.getBranch() as EntryLike[])];
 					for (const item of current.reverse()) {
 						addHit(historyHit(item, query));
-						if (hits[0].length >= limit) break;
+						if (hits[0].length > limit) break;
 					}
 				}
-				const results = hits.flat().slice(0, limit);
-				return textResult(results.length ? results.map((hit) => hit.text).join("\n") : `No history matches "${params.query}".`, [], {
-					kind: "history-search",
-					entries: results.map((hit) => ({ headerLength: hit.headerLength, length: hit.text.length })),
-				});
+				const chars = pageSize(nativeContext(ctx), 0, 0, params.cursor);
+				if (!found) pageError(nativeContext(ctx), "History cursor entry no longer matches; restart the search without it.", params.cursor);
+				const results = hits.flat();
+				const cursorFor = (hit: HistoryHit, offset: number) => Buffer.from(JSON.stringify([hit.id, hit.priority, offset, searchKey])).toString("base64url");
+				const footer = (next: string) => `\n[More results; continue with cursor "${next}" and the same query/scope.]`;
+				const reserve = Math.max(0, ...results.map((hit) => footer(cursorFor(hit, hit.text.length)).length));
+				if (reserve >= chars) pageError(nativeContext(ctx), "History entry id is too large for pagination.", params.cursor);
+				const parts: string[] = [];
+				const spans: Array<{ headerLength: number; length: number }> = [];
+				let available = chars - reserve;
+				let next: string | undefined;
+				for (const hit of results) {
+					const offset = cursor?.[0] === hit.id ? cursor[2] : 0;
+					if (parts.length && hit.text.length - offset > available) break;
+					// A split header or excerpt must still identify the native entry on every page.
+					const prefix = offset || hit.text.length > available ? `[entry ${hit.id}; from char ${offset}] ` : "";
+					if (prefix.length >= available) break;
+					const end = Math.min(hit.text.length, offset + available - prefix.length);
+					const part = prefix + hit.text.slice(offset, end);
+					parts.push(part);
+					spans.push({ headerLength: prefix.length + Math.max(0, Math.min(hit.headerLength - offset, end - offset)), length: part.length });
+					available -= part.length + 1;
+					next = end < hit.text.length || parts.length < results.length ? cursorFor(hit, end) : undefined;
+					if (available <= 0 || parts.length >= limit) break;
+				}
+				const body = parts.length ? parts.join("\n") : `No history matches "${excerpt(params.query!, 200)}".`;
+				const more = next ? footer(next) : "";
+				return pageResult(body + more, [], { kind: "history-search", entries: spans, footerLength: more.length });
 			}
 
 			const id = requireValue(params.id, "id", params.op);

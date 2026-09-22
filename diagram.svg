@@ -120,8 +120,8 @@
     </g>
     <text class="sans cardtitle" x="132" y="301">Signal</text>
     <text class="sans cardbody" x="96" y="344">Stable guidance in the system</text>
-    <text class="sans cardbody" x="96" y="366">prompt, no changing meter, so</text>
-    <text class="sans cardbody" x="96" y="388">the prefix stays cacheable.</text>
+    <text class="sans cardbody" x="96" y="366">prompt; no per-request meter</text>
+    <text class="sans cardbody" x="96" y="388">or repeated budget updates.</text>
     <text class="sans cardbody" x="96" y="410">One best-effort reminder before</text>
     <text class="sans cardbody" x="96" y="432">the line, never at or past it.</text>
     <text class="sans cardbody" x="96" y="454">Native estimate on request.</text>
@@ -174,7 +174,7 @@
     <text class="sans cardtitle" x="484" y="625">Recovery record</text>
     <text class="sans cardbody" x="448" y="668">Owner inputs, ask_question</text>
     <text class="sans cardbody" x="448" y="690">answers, visible coordination,</text>
-    <text class="sans cardbody" x="448" y="712">unconsumed tool batch: labeled,</text>
+    <text class="sans cardbody" x="448" y="712">trailing tool batch: labeled,</text>
     <text class="sans cardbody" x="448" y="734">chronological, ≤ 20k chars.</text>
     <text class="sans cardbody" x="448" y="756">Older checkpoint marked stale.</text>
     <text class="sans cardbody" x="448" y="778">Assistant prose is not state.</text>

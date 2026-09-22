@@ -13,7 +13,7 @@ An isolated [Codex prototype](adapters/codex-posthorse/README.md) tests local no
 ## Requirements
 
 - Node `>=22.19.0`.
-- The `fitchmultz/pi` fork. The native qualification target is `afed789dded723566b6ecb1c77a06e8561504f7a` (fork package version `0.87.0`). Posthorse needs the fork's native `context_window` entries, its `session_before_auto_compact` hook, and `ctx.getCompactionSettings()`.
+- The `fitchmultz/pi` fork. The native qualification target is `8fb7886130ff1fedc415bdd6fea03aef8a8957d8` (fork package version `0.87.0`). Posthorse needs the fork's native `context_window` entries, its `session_before_auto_compact` hook, `ctx.getCompactionSettings()`, and the coding-agent SDK's `publishLocalFile` export.
 - Official, unpatched Pi is unsupported. Posthorse reports a clear extension error at session start and cannot operate; Pi itself keeps running.
 
 ## Install
@@ -23,7 +23,7 @@ Build the fork:
 ```bash
 git clone https://github.com/fitchmultz/pi.git
 cd pi
-git checkout afed789dded723566b6ecb1c77a06e8561504f7a
+git checkout 8fb7886130ff1fedc415bdd6fea03aef8a8957d8
 npm install --ignore-scripts
 npm run build
 ```
@@ -48,15 +48,15 @@ Keep exactly one copy loaded. `pi list` shows every package source; if an older 
 
 ## How it works
 
-1. **Stable guidance.** Window behavior is part of the system prompt. There is no per-request meter to churn the prompt.
-2. **One best-effort checkpoint.** While Pi compaction is enabled, one reminder may appear shortly before Pi's rollover line. A large turn, overflow, restart, or smaller model can reach rollover without it. Reminders are fingerprinted by window, context size, and reserve, so switching to a different context size gets a fresh reminder and stale ones are filtered from model input.
-3. **`get_context_remaining`.** Reports the best available native estimate of tokens until Pi's automatic rollover line and until the model's hard limit. Pi's value is an estimate until the active model reports usage.
+1. **Stable guidance.** Window behavior lives in a native system-prompt section. There is no per-request meter. Posthorse preserves custom prompts and falls back to appending guidance when an earlier extension replaces the full prompt; that compatibility path can prevent Pi from preserving an additive prompt prefix.
+2. **One best-effort checkpoint.** While Pi compaction is enabled, one reminder may appear shortly before Pi's rollover line. A large turn, overflow, restart, or smaller model can reach rollover without it. Reminders are fingerprinted by window, context size, and reserve, so switching to a different context size gets a fresh reminder. Stale reminders and reminders left after disabling compaction are filtered from model input while remaining in history.
+3. **`get_context_remaining`.** Reports the best available native estimate of tokens until Pi's automatic rollover line and until the configured context limit. That configured limit is not a measured provider rejection boundary. Pi's value is an estimate until the active model reports usage.
 4. **`new_context`.** Requests an atomic rollover after the complete tool batch succeeds. An optional handoff is persisted and becomes the first state of the fresh window. If a sibling tool in the same batch fails, Pi does not commit the boundary; the checkpoint reminder still applies.
 5. **Automatic rollover without summaries.** With a supported context budget and room for a recovery record, Posthorse claims Pi's automatic threshold and overflow trigger through `session_before_auto_compact`, before Pi resolves summarization credentials or prepares a summary. Oversized first turns and tool results can then roll over even without summarization credentials. Otherwise Pi's own compaction remains in control. Manual `/compact` is unchanged.
-6. **Bounded recovery record.** The automatic handoff keeps direct user inputs, `ask_question` outcomes, visible coordination messages, and the trailing tool batch that no model has consumed yet (call arguments, bounded result text, and the entry ids to recover the rest). A clearly labeled, possibly stale older checkpoint comes last, after the current inputs and unseen results. Older assistant prose and consumed tool results are not treated as state. Newly submitted input stays separate and is saved after the boundary, not copied into the handoff.
+6. **Bounded recovery record.** The automatic handoff keeps direct user inputs, `ask_question` outcomes, visible coordination messages, and the trailing tool batch without a later complete assistant response: call arguments, bounded result text, and entry ids to recover the rest. Failed or interrupted requests may already have received those results. A clearly labeled, possibly stale older checkpoint comes last. Older assistant prose and earlier tool batches are not treated as current state. Newly submitted input stays separate and is saved after the boundary, not copied into the handoff.
 7. **`notes` and `history`.** Notes are shared across linked worktrees, at the main checkout for conventional Git layouts or inside the common Git directory when metadata is stored separately. History searches normalized transcript text and returns stored images for a requested entry.
 
-At turn end, Posthorse checks whether usage is in the reminder band before explicitly looking up the full branch. Context filtering skips its branch lookup when model input contains neither `posthorse-reminder` nor legacy `headroom-reminder` messages. History searches, reads, and recovery remain available with no new limits.
+At turn end, Posthorse checks whether usage is in the reminder band before explicitly looking up the full branch. Context filtering skips its branch lookup when model input contains neither `posthorse-reminder` nor legacy `headroom-reminder` messages. Complete history remains available through paged searches and reads.
 
 Automatic recovery is an emergency input record, not proof of progress. The fresh model is told to restore notes and todo state, inspect history when needed, and verify live state before taking stateful or external action.
 
@@ -74,20 +74,22 @@ Only one automatic compaction or rollover policy extension should be enabled at 
 
 - `new_context({ handoff? })`
 - `get_context_remaining()`
-- `notes({ op, ... })`: `list`, `read` (paged; `offset` continues), `write` (empty content clears), `append` (one atomic newline-terminated record), `search` (excerpts centered on the match)
-- `history({ op, ... })`: `search`, `read`; results carry native window ids, reads return stored images with the first page and the next character offset when text remains
+- `notes({ op, ... })`: `list`, `read`, and `search` are paged; continue with the returned character `offset`. Search excerpts center on the match. `write` replaces content (empty content clears); `append` adds one newline-terminated record.
+- `history({ op, ... })`: `search` continues with the returned `cursor` and the same `query` and `all` scope; `limit` is the maximum results per page. `read` returns stored images with the first page and the next character `offset` when text remains. Results keep native entry and window ids.
 
 In the TUI, tools use Pi's native expandable cards. Collapsed cards show the operation and target, a short content preview, and counts or page ranges with the next offset when more remains. Expand with Pi's tool-output shortcut (`Ctrl+O` by default), or click the card's header or body in fullscreen mode. Expanded cards show the complete returned page and its metadata, not content the tool has not fetched yet. Writes and context requests also show the submitted content or handoff.
 
 Committed context-window messages and checkpoint reminders are compact, expandable cards too. The `new_context` tool card describes a request; only the committed context-window message says a fresh window has started.
 
-Read pages, including returned images, shrink to the context that is actually left. Parallel note and history reads share that budget; pages already counted by Pi are not counted twice. Before usage is known, they reserve prompt/tool overhead and leave half the rest free. Unsafe pages are refused with the offset preserved in the call; call `new_context` and retry. Refusal text uses the same budget, so later failures omit repeated guidance once no more fits.
+Notes list/search and history search share the remaining context budget with read pages and returned images. Search/list headers, continuation text, no-match responses, and parallel sibling results count toward that budget; pages already counted by Pi are not counted twice. Before usage is known, pages reserve prompt/tool overhead and leave half the rest free. Unsafe pages are refused with the offset or cursor preserved in the call; call `new_context` and retry. Refusal text uses the same budget, so later failures omit repeated guidance once no more fits.
 
 `history search` puts matching original content before recovery material: handoffs, compaction and branch summaries, checkpoint reminders, and `notes`, `new_context`, and `history` calls/results. Ordinary prose or another tool call in the same assistant entry keeps its priority when that content matches. Every entry remains searchable; `history read` returns the complete normalized entry, including any recovery content omitted from a search excerpt.
 
-Within each group, current-branch matches are newest first. With `all: true`, Posthorse searches every session file in the active Pi session directory, newest-modified sessions first and newest entries within each session; this is not a global timestamp sort. The result limit applies after priority, so newer echoes cannot displace older original matches. Entries copied by a fork are reported once.
+Within each group, current-branch matches are newest first. With `all: true`, Posthorse searches every session file in the active Pi session directory, newest-modified sessions first and newest entries within each session; this is not a global timestamp sort. The per-page result limit applies after priority, so newer echoes cannot displace older original matches. Entries copied by a fork are reported once. Search cursors advance past the previous entry, including partial headers or excerpts, so appending lookup calls and results does not keep pagination alive forever. Searches are live: external session edits or file reordering can change results; start a new search to include newer sources.
 
 Notes live in `.pi/notes/` at the main checkout for conventional Git layouts, or the current directory outside Git. When Git metadata is stored separately, including in submodules, all checkouts use `.pi/notes/` inside Git's common directory instead; no configuration is needed. If that metadata is unavailable, notes stay local to the checkout. Old checkout-local notes are imported when that checkout is accessed, without overwriting shared files or deleting the originals. Writes report the actual storage path. Add `.pi/notes/` to `.gitignore` when the project should not track it.
+
+`write` uses Pi's native complete-file replacement: a failed write before publication leaves the previous note intact. It follows symlink targets and preserves ordinary permissions and ownership, or fails before publication. Hardlink aliases and already-open handles keep the previous file; ACLs, extended attributes, and power-loss durability are not guaranteed. Full replacements do not merge concurrent appends or other replacements. `append` retains one `O_APPEND` write per newline-terminated record.
 
 ## Data and privacy
 
@@ -106,15 +108,14 @@ Reminders persisted by pi-headroom (`headroom-reminder`) are recognized alongsid
 
 ```bash
 npm ci --ignore-scripts
-npm test
-npm run check
+npm run check  # public npm declarations can check types, but cannot run Posthorse
 # After the compatibility runner installs the selected fork SDK/types cohort:
 PI_COMPAT_HOST=fork npm run check:compat
 PI_FORK=../pi scripts/integration.sh   # additional full source-harness integration (disposable fork built)
 ```
 
-`npm run check` type-checks the extension, renderers, and tests. `npm test` covers reminder policy, notes/history behavior, and real native card components, including width, expansion, and legacy results. The exact 0.87.0 npm dev baseline is useful for these checks but does **not** make official Pi an operating target. The stale 0.85.0 bundle redirect is gone: tests use the public SDK entry.
+`npm run check` type-checks the extension, renderers, and tests against the exact 0.87.0 npm declaration baseline. Runtime tests require the qualified fork SDK, including `publishLocalFile`, installed in this checkout's dependency graph. `npm test` covers reminder policy, notes/history behavior, failed note replacement, and real native card components, including width, expansion, and legacy results. Tests use the public SDK entry; official Pi is not an operating target.
 
-`check:compat` adds `test:native`: real SDK loading, oversized-result rollover without summary compaction, history recovery, explicit `new_context`, and checkpoint restore without provider replay. It requires native fork capabilities; it never substitutes synthetic windows or silently skips on official. The runner must install the fork cohort in this checkout's `node_modules` so both `tsc` and SDK imports resolve that graph. `PI_HOST_INDEX` and `PI_COMPAT_EXPECTED_PACKAGE_DIR` are verified against it, and `PI_COMPAT_EXPECTED_VERSION` verifies the version. A same-version official graph is not a fork. Official qualification is a separate actual CLI startup/refusal probe, not `check:compat`.
+`check:compat` adds `test:native`: real SDK loading, prompt composition, mixed recovery-output budgets, cursor progress, reminder filtering, interrupted-response recovery, oversized-result rollover without summary compaction, explicit `new_context`, and checkpoint restore without provider replay. It requires native fork capabilities; it never substitutes synthetic windows or silently skips on official. The runner must install the fork cohort in this checkout's `node_modules` so both `tsc` and SDK imports resolve that graph. `PI_HOST_INDEX` and `PI_COMPAT_EXPECTED_PACKAGE_DIR` are verified against it, and `PI_COMPAT_EXPECTED_VERSION` verifies the version. A same-version official graph is not a fork. Official qualification is a separate actual CLI startup/refusal probe, not `check:compat`.
 
 For a focused read-only SDK diagnostic only, `PI_HOST_INDEX=/absolute/fork/dist/index.js node --test test/native.test.mjs` can inspect an immutable host; this does not qualify this checkout's types. The larger source integration suite remains available through `scripts/integration.sh`; use a disposable built fork checkout because it briefly copies a test into that host. All native fixtures must use an isolated HOME/agent directory with offline mode and no provider credentials. These checks do not claim native Windows support.

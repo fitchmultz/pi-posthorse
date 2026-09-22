@@ -11,7 +11,23 @@ agent="$fork/packages/coding-agent"
 [ -d "$fork/packages/ai/src/providers/data" ] || { echo "Model data missing; run 'npm run build' in $fork first" >&2; exit 1; }
 
 target="$agent/test/posthorse-integration.test.ts"
+configDir=$(mktemp -d "$agent/.posthorse-vitest.XXXXXX")
+trap 'rm -f "$target" "$configDir/vitest.config.ts"; rmdir "$configDir"' EXIT
+# Posthorse lives outside the fork, so pin its SDK import to the same source graph as the harness.
+cat > "$configDir/vitest.config.ts" <<'EOF'
+import { fileURLToPath } from "node:url";
+import { defineConfig, mergeConfig } from "vitest/config";
+import baseConfig from "../vitest.config.ts";
+
+export default mergeConfig(baseConfig, defineConfig({
+	resolve: {
+		alias: [{
+			find: /^@earendil-works\/pi-coding-agent$/,
+			replacement: fileURLToPath(new URL("../src/index.ts", import.meta.url)),
+		}],
+	},
+}));
+EOF
 cp "$here/test/integration/posthorse-in-pi.test.ts" "$target"
-trap 'rm -f "$target"' EXIT
 cd "$agent"
-POSTHORSE_INDEX="$here/index.ts" npx vitest run test/posthorse-integration.test.ts
+POSTHORSE_INDEX="$here/index.ts" npx --no-install vitest run --config "$configDir/vitest.config.ts" test/posthorse-integration.test.ts

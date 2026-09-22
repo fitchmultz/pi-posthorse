@@ -15,7 +15,7 @@ concurrency:
 env:
   # This distinct suite imports Pi's source test harness (not in npm artifacts).
   # Ordinary types/unit/native checkpoint qualification lives in shared CI.
-  PI_AUTOMATION_REF: fe049ea97a8c91d1a4c3a0958a85b37c7759dcc6 # v1.0.0
+  PI_AUTOMATION_REF: bfe47007194178fdda46c3fc4a0be32113371d53 # reviewed Pi 0.87.0 fork
   CODEX_LOCAL_REF: 6c5d489f76b358ff6adedcf47211081d290b293b
 
 jobs:

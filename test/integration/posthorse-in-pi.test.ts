@@ -77,7 +77,7 @@ describe("Posthorse inside the Pi fork", () => {
 		while (harnesses.length) harnesses.pop()?.cleanup();
 	});
 
-	it("rolls over an oversized text tool result, carries the unconsumed batch, and recovers it through history", async () => {
+	it("rolls over an oversized text tool result, carries the trailing batch, and recovers it through history", async () => {
 		const harness = await createHarness({ tools: [dump], extensionFactories: [posthorse] });
 		harnesses.push(harness);
 		forbidSummarizationAuth(harness);
@@ -104,10 +104,10 @@ describe("Posthorse inside the Pi fork", () => {
 		const handoff = freshTexts[0];
 		expect(handoff).toContain("Automatic context rollover recovery record.");
 		expect(handoff).toContain("dump everything");
-		expect(handoff).toContain("Unconsumed tool batch");
+		expect(handoff).toContain("Trailing tool batch");
 		expect(handoff).toMatch(/\[result entry [^\]]+\]\nDUMP HEAD r+\n… middle omitted …\nr+ DUMP TAIL/);
 		expect(handoff).not.toContain("OLD ASSISTANT PROSE");
-		expect(handoff.indexOf("dump everything")).toBeLessThan(handoff.indexOf("Unconsumed tool batch"));
+		expect(handoff.indexOf("dump everything")).toBeLessThan(handoff.indexOf("Trailing tool batch"));
 		expect(handoff.indexOf("DUMP TAIL")).toBeLessThan(handoff.indexOf("older checkpoint"));
 		expect(handoff).toContain("FIRST read obsolete-checkpoint.md");
 		expect(handoff.length).toBeLessThanOrEqual(20_000);
@@ -161,7 +161,7 @@ describe("Posthorse inside the Pi fork", () => {
 
 		expect(contextWindows(harness)).toBe(1);
 		expect(freshTexts).toHaveLength(1);
-		expect(freshTexts[0]).toContain("Unconsumed tool batch");
+		expect(freshTexts[0]).toContain("Trailing tool batch");
 		expect(freshTexts[0]).toMatch(/MEDIUM HEAD m+[\s\S]*MEDIUM TAIL/);
 		expect(freshTexts[0]).toContain(`entry ${lastToolResultId(harness)}`);
 	});
@@ -351,7 +351,7 @@ describe("Posthorse inside the Pi fork", () => {
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
-	it.each([6, 50])("keeps parallel pages and refusals below the native hard budget (%i reads)", async (count) => {
+	it.each([6, 50])("keeps parallel pages and refusals below the native configured context budget (%i reads)", async (count) => {
 		const harness = await createHarness({
 			models: [{ id: "pages", contextWindow: 100_000, maxTokens: 1000 }],
 			settings: { compaction: { enabled: false } },
