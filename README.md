@@ -13,7 +13,7 @@ An isolated [Codex prototype](adapters/codex-posthorse/README.md) tests local no
 ## Requirements
 
 - Node `>=22.19.0`.
-- The `fitchmultz/pi` fork. The native qualification target is `f371064864ef239d66a81ee645a6774dc525be40` (fork package version `0.86.1`). Posthorse needs the fork's native `context_window` entries, its `session_before_auto_compact` hook, and `ctx.getCompactionSettings()`.
+- The `fitchmultz/pi` fork. The native qualification target is `afed789dded723566b6ecb1c77a06e8561504f7a` (fork package version `0.87.0`). Posthorse needs the fork's native `context_window` entries, its `session_before_auto_compact` hook, and `ctx.getCompactionSettings()`.
 - Official, unpatched Pi is unsupported. Posthorse reports a clear extension error at session start and cannot operate; Pi itself keeps running.
 
 ## Install
@@ -23,7 +23,7 @@ Build the fork:
 ```bash
 git clone https://github.com/fitchmultz/pi.git
 cd pi
-git checkout f371064864ef239d66a81ee645a6774dc525be40
+git checkout afed789dded723566b6ecb1c77a06e8561504f7a
 npm install --ignore-scripts
 npm run build
 ```
@@ -113,7 +113,7 @@ PI_COMPAT_HOST=fork npm run check:compat
 PI_FORK=../pi scripts/integration.sh   # additional full source-harness integration (disposable fork built)
 ```
 
-`npm run check` type-checks the extension, renderers, and tests. `npm test` covers reminder policy, notes/history behavior, and real native card components, including width, expansion, and legacy results. The exact 0.86.1 npm dev baseline is useful for these checks but does **not** make official Pi an operating target. The stale 0.85.0 bundle redirect is gone: tests use the public SDK entry.
+`npm run check` type-checks the extension, renderers, and tests. `npm test` covers reminder policy, notes/history behavior, and real native card components, including width, expansion, and legacy results. The exact 0.87.0 npm dev baseline is useful for these checks but does **not** make official Pi an operating target. The stale 0.85.0 bundle redirect is gone: tests use the public SDK entry.
 
 `check:compat` adds `test:native`: real SDK loading, oversized-result rollover without summary compaction, history recovery, explicit `new_context`, and checkpoint restore without provider replay. It requires native fork capabilities; it never substitutes synthetic windows or silently skips on official. The runner must install the fork cohort in this checkout's `node_modules` so both `tsc` and SDK imports resolve that graph. `PI_HOST_INDEX` and `PI_COMPAT_EXPECTED_PACKAGE_DIR` are verified against it, and `PI_COMPAT_EXPECTED_VERSION` verifies the version. A same-version official graph is not a fork. Official qualification is a separate actual CLI startup/refusal probe, not `check:compat`.
 
