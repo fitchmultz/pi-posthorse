@@ -1357,12 +1357,12 @@ test("all-session search reports fork-copied entries once, from the newest-modif
 		const forkNew = JSON.stringify({ type: "message", id: "fork-new", parentId: "shared", timestamp: new Date(1_500).toISOString(), message: { role: "user", content: "fork needle newer" } });
 		writeFileSync(original, [JSON.stringify({ type: "session", version: 3, id: "session-original", timestamp: new Date(0).toISOString(), cwd: dir }), shared].join("\n"));
 		writeFileSync(fork, [
-			JSON.stringify({ type: "session", version: 3, id: "session-fork", parentSession: original, timestamp: new Date(1_000).toISOString(), cwd: dir }),
+			JSON.stringify({ type: "session", version: 3, id: "session-fork", parentSession: original, timestamp: new Date(500).toISOString(), cwd: dir }),
 			shared,
 			forkNew,
 		].join("\n"));
 		writeFileSync(grandchild, [
-			JSON.stringify({ type: "session", version: 3, id: "session-grandchild", parentSession: fork, timestamp: new Date(2_000).toISOString(), cwd: dir }),
+			JSON.stringify({ type: "session", version: 3, id: "session-grandchild", parentSession: fork, timestamp: new Date(1_500).toISOString(), cwd: dir }),
 			shared,
 			forkNew,
 			JSON.stringify({ type: "message", id: "grand-new", parentId: "fork-new", timestamp: new Date(2_500).toISOString(), message: { role: "user", content: "fork needle latest" } }),
@@ -1430,11 +1430,9 @@ test("all-session history keeps identical entries from unrelated sessions separa
 	try {
 		for (const [name, time] of [["first", 1_000], ["second", 2_000]] as const) {
 			const file = join(dir, `${name}.jsonl`);
-			const parentId = `parent-${name}`;
 			writeFileSync(file, [
 				{ type: "session", version: 3, id: `session-${name}`, timestamp: new Date(time).toISOString(), cwd: dir },
-				{ type: "message", id: parentId, parentId: null, timestamp: new Date(time).toISOString(), message: { role: "user", content: "setup" } },
-				{ type: "message", id: "deadbeef", parentId, timestamp: new Date(3_000).toISOString(), message: { role: "user", content: "needle repeated request" } },
+				{ type: "message", id: "deadbeef", parentId: null, timestamp: new Date(3_000).toISOString(), message: { role: "user", content: "needle repeated request" } },
 			].map((entry) => JSON.stringify(entry)).join("\n"));
 			utimesSync(file, new Date(time), new Date(time));
 		}

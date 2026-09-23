@@ -375,22 +375,19 @@ async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncG
 	}
 }
 
-async function sessionHeader(file: string, signal?: AbortSignal): Promise<{ parent?: string; startedAt: number }> {
+async function sessionParent(file: string, signal?: AbortSignal): Promise<string | undefined> {
 	for await (const line of jsonlLines(file, signal)) {
 		try {
-			const header = JSON.parse(line) as { type?: string; parentSession?: unknown; timestamp?: unknown };
-			if (header.type === "session") {
-				return {
-					parent: typeof header.parentSession === "string" ? resolve(dirname(file), header.parentSession) : undefined,
-					startedAt: typeof header.timestamp === "string" ? Date.parse(header.timestamp) : NaN,
-				};
+			const header = JSON.parse(line) as { type?: string; parentSession?: unknown };
+			if (header.type === "session" && typeof header.parentSession === "string") {
+				return resolve(dirname(file), header.parentSession);
 			}
 		} catch {
 			// A file without a valid Pi header has no known parent session.
 		}
 		break;
 	}
-	return { startedAt: NaN };
+	return undefined;
 }
 
 function sessionFiles(dir: string): string[] {
@@ -1129,43 +1126,57 @@ export default function (pi: ExtensionAPI) {
 				if (params.all) {
 					const files = sessionFiles(manager.getSessionDir());
 					const knownFiles = new Set(files);
-					const headers = new Map<string, { parent?: string; startedAt: number }>();
-					// ponytail: Pi timestamps copied entries before a fork's header. Clock rollback can blur
-					// this boundary; native per-entry origin metadata would make it exact.
-					const originFor = async (file: string, timestamp?: string): Promise<string> => {
-						const time = timestamp ? Date.parse(timestamp) : NaN;
-						if (!Number.isFinite(time)) return file;
-						const visited = new Set<string>();
-						let source = file;
-						while (knownFiles.has(source) && !visited.has(source)) {
-							visited.add(source);
-							let header = headers.get(source);
-							if (!header) {
-								header = await sessionHeader(source, signal);
-								headers.set(source, header);
-							}
-							if (!header.parent || !(time < header.startedAt)) return source;
-							source = header.parent;
-						}
-						return source;
+					const parents = new Map<string, string | undefined>();
+					const parentOf = async (file: string) => {
+						if (!parents.has(file)) parents.set(file, await sessionParent(file, signal));
+						return parents.get(file);
 					};
 					for (const file of files) {
 						const recent: HistoryHit[][] = [[], []];
 						const matchedCopies = new Set<string>();
 						let anchorHere = false;
 						const source = relative(manager.getSessionDir(), file);
-						for await (const item of sessionWindowEntries(file, signal)) {
-							const hit = historyHit(item, query, source);
-							if (hit) hit.copyKey = `${historyFileKey(await originFor(file, item.entry.timestamp))}:${hit.copyKey}`;
-							if (!hit || seen.has(hit.copyKey)) continue;
-							matchedCopies.add(hit.copyKey);
-							const seeking = cursor && !found && hit.priority === cursor[1];
-							if (seeking && anchorHere) continue;
-							if (seeking && hit.id === cursor?.[0]) anchorHere = true;
-							const group = recent[hit.priority];
-							group.push(hit);
-							// Keep one page plus its anchor and lookahead, not every matching excerpt.
-							if (group.length > limit + 2) group.shift();
+						const ancestorStreams = new Map<string, AsyncGenerator<WindowedEntry>>();
+						const copiedFrom = async (parent: string, key: string): Promise<boolean> => {
+							let stream = ancestorStreams.get(parent);
+							if (!stream) {
+								stream = sessionWindowEntries(parent, signal);
+								ancestorStreams.set(parent, stream);
+							}
+							for (;;) {
+								const next = await stream.next();
+								if (next.done) return false;
+								if (historyHit(next.value, query)?.copyKey === key) return true;
+							}
+						};
+						const originFor = async (key: string): Promise<string> => {
+							let current = file;
+							const visited = new Set<string>();
+							while (knownFiles.has(current) && !visited.has(current)) {
+								visited.add(current);
+								const parent = await parentOf(current);
+								if (!parent || !knownFiles.has(parent) || !(await copiedFrom(parent, key))) break;
+								current = parent;
+							}
+							return current;
+						};
+						try {
+							for await (const item of sessionWindowEntries(file, signal)) {
+								const hit = historyHit(item, query, source);
+								if (!hit) continue;
+								hit.copyKey = `${historyFileKey(await originFor(hit.copyKey))}:${hit.copyKey}`;
+								if (seen.has(hit.copyKey)) continue;
+								matchedCopies.add(hit.copyKey);
+								const seeking = cursor && !found && hit.priority === cursor[1];
+								if (seeking && anchorHere) continue;
+								if (seeking && hit.id === cursor?.[0]) anchorHere = true;
+								const group = recent[hit.priority];
+								group.push(hit);
+								// Keep one page plus its anchor and lookahead, not every matching excerpt.
+								if (group.length > limit + 2) group.shift();
+							}
+						} finally {
+							for (const stream of ancestorStreams.values()) await stream.return(undefined);
 						}
 						if (cursor && !found && !anchorHere) recent[cursor[1]] = [];
 						for (const group of recent) for (const hit of group.reverse()) addHit(hit);
