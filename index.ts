@@ -504,14 +504,9 @@ function formatPriorCheckpoint(entry: EntryLike | undefined, limit: number): str
 	return boundedBlock(header, handoff, limit);
 }
 
-function toolCallsOf(content: unknown): Array<{ id?: string; name?: string; arguments?: unknown }> {
-	return Array.isArray(content) ? content.filter((block) => block?.type === "toolCall") : [];
-}
-
 /** Trailing results without a later complete assistant response; interrupted requests may have received them. */
 function trailingToolBatch(
 	entries: readonly EntryLike[],
-	rawCallIds: Set<string>,
 ): { callId?: string; blocks: Array<{ header: string; text: string }> } | undefined {
 	const results: EntryLike[] = [];
 	let call: EntryLike | undefined;
@@ -533,12 +528,15 @@ function trailingToolBatch(
 		}
 	}
 	if (!results.length) return undefined;
-	const calls = toolCallsOf(call?.message?.content);
+	const calls = Array.isArray(call?.message?.content)
+		? (call.message.content as Array<{ type?: string; id?: string; name?: string; arguments?: unknown }>).filter(
+				(block) => block?.type === "toolCall",
+			)
+		: [];
 	const linked = results.some((result) => calls.some((block) => block.id === result.message?.toolCallId));
-	const batchResults = linked ? results : results.filter((result) => !!result.message?.toolCallId && rawCallIds.has(result.message.toolCallId));
+	const batchResults = linked ? results : results.filter((result) => typeof result.message?.toolCallId === "string");
 	if (!batchResults.length) return undefined;
 	const allLinked = !!call && batchResults.every((result) => calls.some((block) => block.id === result.message?.toolCallId));
-	if (!linked) call = undefined;
 	const blocks = batchResults.map((result) => {
 		const message = result.message ?? {};
 		const matching = call && calls.find((block) => block.id === message.toolCallId);
@@ -600,13 +598,6 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 	const joinedLength = (parts: Array<string | undefined>) =>
 		parts.filter((part): part is string => Boolean(part)).join("\n\n").length;
 
-	const rawCallIds = new Set(
-		current.flatMap((entry) =>
-			entry.type === "message" && entry.message?.role === "assistant"
-				? toolCallsOf(entry.message.content).flatMap((block) => typeof block.id === "string" ? [block.id] : [])
-				: [],
-		),
-	);
 	const toolEntries = projected.flatMap(({ sourceEntry, messages }) =>
 		messages
 			.filter((message) => message.role === "assistant" || message.role === "toolResult")
@@ -616,7 +607,7 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 				message,
 			})),
 	);
-	const toolBatch = trailingToolBatch(toolEntries, rawCallIds);
+	const toolBatch = trailingToolBatch(toolEntries);
 	const batchHeader = toolBatch
 		? `Trailing tool batch without a later complete assistant response (failed or interrupted requests may already have received these results). ${toolBatch.callId ? `Tool-call entry ${toolBatch.callId}` : "No matching trailing tool call"}:`
 		: undefined;

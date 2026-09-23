@@ -217,6 +217,23 @@ test("a projected orphan result is not attributed to an older assistant", async 
 	assert.doesNotMatch(handoff, new RegExp(`Tool-call entry ${olderId}`));
 });
 
+test("recovery keeps a projected result whose call predates the window", async (t) => {
+	const h = await fixture(t, { seed(manager) {
+		const call = { ...fauxToolCall("work", {}), async: true };
+		manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+		manager.appendContextWindow("Fresh window", null);
+		manager.appendMessage(fauxAssistantMessage("Unrelated response"));
+		manager.appendMessage({
+			role: "toolResult", toolName: "work", toolCallId: call.id,
+			content: [{ type: "text", text: "CROSS_WINDOW_RESULT" }], isError: false, timestamp: Date.now(),
+		});
+	} });
+	assert.match(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /CROSS_WINDOW_RESULT/);
+	const handoff = automaticRecovery(h);
+	assert.match(handoff, /CROSS_WINDOW_RESULT/);
+	assert.match(handoff, /No matching trailing tool call/);
+});
+
 test("mixed projected results retain their own call provenance", async (t) => {
 	let otherCallEntry;
 	const h = await fixture(t, { seed(manager) {
