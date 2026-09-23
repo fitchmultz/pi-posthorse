@@ -1292,6 +1292,32 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 	}
 });
 
+test("legacy note migration does not copy the shared destination back through a symlink", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-migration-"));
+	try {
+		const main = join(dir, "main");
+		const worktree = join(dir, "worktree");
+		mkdirSync(join(main, ".git", "worktrees", "wt"), { recursive: true });
+		writeFileSync(join(main, ".git", "worktrees", "wt", "commondir"), "../..\n");
+		mkdirSync(join(main, ".pi"));
+		writeFileSync(join(main, ".pi", "context.md"), "linked state");
+		mkdirSync(join(worktree, ".pi", "notes"), { recursive: true });
+		writeFileSync(join(worktree, ".git"), `gitdir: ${join(main, ".git", "worktrees", "wt")}\n`);
+		writeFileSync(join(worktree, ".pi", "notes", "local.md"), "local state");
+		symlinkSync(join(main, ".pi"), join(worktree, ".pi", "notes", "projectState"), "dir");
+		const { tools, context } = setup();
+		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: worktree });
+
+		assert.equal(toolText(await notes({ op: "list" })), "local.md\nprojectState/context.md");
+		assert.equal(toolText(await notes({ op: "read", path: "projectState/context.md" })), "linked state");
+		await notes({ op: "write", path: "checkpoint.md", content: "current checkpoint" });
+		assert.equal(toolText(await notes({ op: "read", path: "checkpoint.md" })), "current checkpoint");
+		assert.equal(toolText(await notes({ op: "list" })), "checkpoint.md\nlocal.md\nprojectState/context.md");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 for (const marker of ["file", "directory symlink"]) test(`separate Git directories share notes and preserve old local notes (${marker})`, async () => {
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-separate-git-")));
 	try {

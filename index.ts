@@ -178,15 +178,21 @@ function textResult(text: string, images: ImageLike[] = [], display?: PosthorseD
 }
 
 /** Import old checkout-local notes without overwriting shared notes, including concurrent writes. */
-function importLegacyNotes(source: string, target: string): void {
+function importLegacyNotes(source: string, target: string, sharedRoot?: string): void {
 	if (!existsSync(source)) return;
+	if (sharedRoot) {
+		// A directory symlink can lead back into the destination being populated.
+		const path = relative(sharedRoot, realpathSync(source));
+		if (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`)) return;
+	}
 	if (existsSync(target) && (!statSync(target).isDirectory() || realpathSync(source) === realpathSync(target))) return;
 	mkdirSync(target, { recursive: true });
+	sharedRoot ??= realpathSync(target);
 	for (const name of readdirSync(source)) {
 		const from = join(source, name);
 		const to = join(target, name);
 		if (statSync(from).isDirectory()) {
-			importLegacyNotes(from, to);
+			importLegacyNotes(from, to, sharedRoot);
 		} else {
 			try {
 				copyFileSync(from, to, constants.COPYFILE_EXCL);
@@ -350,13 +356,18 @@ function* windowEntries(entries: Iterable<EntryLike>): Generator<WindowedEntry> 
 /** JSONL splits on LF, not the Unicode separators that Node's readline also recognizes. */
 async function* jsonlLines(file: string, signal?: AbortSignal): AsyncGenerator<string> {
 	const stream = createReadStream(file, { encoding: "utf8", signal });
-	let pending = "";
+	let pending: string[] = [];
 	for await (const chunk of stream) {
-		const lines = (pending + chunk).split("\n");
-		pending = lines.pop()!;
-		yield* lines;
+		const lines = chunk.split("\n");
+		pending.push(lines[0]);
+		if (lines.length > 1) {
+			yield pending.join("");
+			yield* lines.slice(1, -1);
+			pending = [lines.at(-1)!];
+		}
 	}
-	if (pending) yield pending;
+	const last = pending.join("");
+	if (last) yield last;
 }
 
 async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncGenerator<WindowedEntry> {
