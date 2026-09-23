@@ -128,6 +128,48 @@ test("history recovers every image across pages and fresh contexts", async (t) =
 	assert.deepEqual(recovered, images);
 });
 
+test("automatic rollover respects context edits in its recovery handoff", async (t) => {
+	const { session, faux, sessionManager } = await fixture(t, {
+		contextWindow: 128_000,
+		seed(manager) {
+			const omitted = manager.appendMessage({ role: "user", content: "PRIVATE_EDIT_MARKER", timestamp: Date.now() });
+			manager.appendContextEdit(omitted, null);
+			const revised = manager.appendMessage({ role: "user", content: "OBSOLETE_EDIT_MARKER", timestamp: Date.now() });
+			manager.appendContextEdit(revised, { content: "APPROVED_EDIT_MARKER" });
+		},
+		extension(pi) {
+			pi.registerTool({
+				name: "dump", label: "dump", description: "Large local result",
+				parameters: { type: "object", properties: {} },
+				async execute() { return { content: [{ type: "text", text: `PRIVATE_TOOL_MARKER ${"x".repeat(600_000)}` }], details: {} }; },
+			});
+			pi.on("turn_end", (event, ctx) => {
+				if (!event.toolResults.some((result) => result.toolName === "dump")) return;
+				const result = ctx.sessionManager.getBranch().findLast((entry) =>
+					entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "dump");
+				ctx.sessionManager.appendContextEdit(result.id, { content: [{ type: "text", text: `APPROVED_TOOL_MARKER ${"x".repeat(600_000)}` }] });
+			});
+		},
+	});
+	const requests = [];
+	faux.setResponses([
+		(ctx) => { requests.push(JSON.stringify(ctx.messages)); return fauxAssistantMessage(fauxToolCall("dump", {}), { stopReason: "toolUse" }); },
+		(ctx) => { requests.push(JSON.stringify(ctx.messages)); return fauxAssistantMessage("done"); },
+	]);
+	await session.prompt("Run the local dump tool.");
+	const windows = sessionManager.getBranch().filter((entry) => entry.type === "context_window");
+	assert.equal(windows.length, 1);
+	assert.equal(requests.length, 2);
+	for (const text of [...requests, windows[0].handoff]) {
+		assert.equal(/PRIVATE_EDIT_MARKER|OBSOLETE_EDIT_MARKER/.test(text), false);
+		assert.equal(text.includes("APPROVED_EDIT_MARKER"), true);
+	}
+	for (const text of [requests[1], windows[0].handoff]) {
+		assert.equal(text.includes("PRIVATE_TOOL_MARKER"), false);
+		assert.equal(text.includes("APPROVED_TOOL_MARKER"), true);
+	}
+});
+
 test("native fork rollover retains recovery history and survives a checkpoint restore", async (t) => {
 	const evidence = process.env.PI_COMPAT_EVIDENCE_DIR ?? tmpdir();
 	mkdirSync(evidence, { recursive: true });

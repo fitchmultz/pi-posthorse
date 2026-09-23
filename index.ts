@@ -93,6 +93,8 @@ type EntryLike = {
 	details?: unknown;
 	display?: boolean;
 	handoff?: string;
+	targetId?: string;
+	replacement?: { content: unknown } | null;
 };
 
 type WindowedEntry = { entry: EntryLike; windowId: string; text: string; images: ImageLike[] };
@@ -556,7 +558,19 @@ function buildAutoHandoff(entries: readonly EntryLike[], maxChars: number): stri
 	}
 
 	const current = entries.slice(windowStart);
-	const records = current
+	const edits = new Map<string, EntryLike["replacement"]>();
+	for (const entry of current) {
+		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry.replacement);
+	}
+	const edited = current.flatMap((entry) => {
+		const replacement = entry.id ? edits.get(entry.id) : undefined;
+		if (replacement === null) return [];
+		if (!replacement) return [entry];
+		if (entry.type === "message") return [{ ...entry, message: { ...entry.message, content: replacement.content } }];
+		if (entry.type === "custom_message") return [{ ...entry, content: replacement.content }];
+		return [entry];
+	});
+	const records = edited
 		.map((entry) => recoveryRecord(entry))
 		.filter((record): record is RecoveryRecord => record !== undefined);
 	const firstOwnerRequest = records.find((record) => record.label === "owner input") ?? records[0];
@@ -572,7 +586,7 @@ function buildAutoHandoff(entries: readonly EntryLike[], maxChars: number): stri
 	const joinedLength = (parts: Array<string | undefined>) =>
 		parts.filter((part): part is string => Boolean(part)).join("\n\n").length;
 
-	const toolBatch = trailingToolBatch(current);
+	const toolBatch = trailingToolBatch(edited);
 	const batchHeader = toolBatch
 		? `Trailing tool batch without a later complete assistant response (failed or interrupted requests may already have received these results). Tool-call entry ${toolBatch.callId}:`
 		: undefined;

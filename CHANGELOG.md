@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Honor Pi context edits in automatic recovery handoffs, so omitted content stays out of fresh model context and replacements supersede original text.
 - Keep `history` searches and reads within the current project's session files and their nested subagents, even when distinct projects share a session directory.
 - Qualify all-session history IDs by source file so search, pagination, and read distinguish entries that reuse a native ID. Fork copies now appear once per file rather than hiding unrelated matches.
 - Count active namespaced tools when sizing handoffs and recovery pages.
