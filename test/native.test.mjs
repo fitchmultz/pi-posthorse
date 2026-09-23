@@ -588,12 +588,12 @@ for (const all of [false, true]) test(`native search cursors finish despite appe
 	t.diagnostic(JSON.stringify({ all, originals: originals.length, returned: returned.length }));
 });
 
-for (const stopReason of ["error", "aborted"]) test(`completed native async results survive ${stopReason} and rollover`, async (t) => {
+for (const stopReason of ["error", "aborted", "length"]) test(`completed native async results survive ${stopReason} and rollover`, async (t) => {
 	let executions = 0, recovery = "";
 	const h = await fixture(t, { nativeAsync: true, extension(pi) {
 		pi.registerTool({ name: "receipt", async: true, label: "Receipt", description: "Local receipt", parameters: { type: "object", properties: {} }, async execute() {
 			executions++;
-			return { content: [{ type: "text", text: `COMPLETED_ACTION_RECEIPT ${stopReason === "aborted" ? "r".repeat(600_000) : ""}` }], details: {} };
+			return { content: [{ type: "text", text: `COMPLETED_ACTION_RECEIPT ${stopReason === "error" ? "" : "r".repeat(600_000)}` }], details: {} };
 		} });
 	} });
 	const call = { ...fauxToolCall("receipt", {}), async: true };
