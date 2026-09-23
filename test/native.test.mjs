@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { findPackageJSON } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const hostIndex = process.env.PI_HOST_INDEX ? pathToFileURL(process.env.PI_HOST_INDEX).href : import.meta.resolve("@earendil-works/pi-coding-agent");
@@ -48,6 +49,50 @@ async function fixture(t, options = {}) {
 	return { cwd, session, faux, sessionManager, settingsManager, resourceLoader };
 }
 
+
+test("all-session history scopes project sessions and their nested subagents", async (t) => {
+	let foreignId, ownId, foreignChildId, ownChildId;
+	const { session, faux, sessionManager } = await fixture(t, {
+		seed(manager) {
+			const archive = (cwd, content, dir = manager.getSessionDir()) => {
+				mkdirSync(cwd, { recursive: true });
+				mkdirSync(dir, { recursive: true });
+				const other = SessionManager.create(cwd, dir);
+				const id = other.appendMessage({ role: "user", content, timestamp: Date.now() });
+				other.appendCustomEntry("persist-fixture");
+				const source = relative(manager.getSessionDir(), other.getSessionFile());
+				return { id: `${id}@${createHash("sha256").update(source).digest("base64url")}`, file: other.getSessionFile() };
+			};
+			const foreignCwd = join(manager.getCwd(), "..", "foreign-project");
+			const foreign = archive(foreignCwd, "SCOPE_NEEDLE foreign");
+			const own = archive(manager.getCwd(), "SCOPE_NEEDLE own");
+			const childDir = (file) => join(dirname(file), basename(file, ".jsonl"), "run-1", "run-0");
+			foreignId = foreign.id;
+			ownId = own.id;
+			foreignChildId = archive(manager.getCwd(), "SCOPE_NEEDLE foreign child", childDir(foreign.file)).id;
+			ownChildId = archive(foreignCwd, "SCOPE_NEEDLE own child", childDir(own.file)).id;
+		},
+	});
+	const search = fauxToolCall("history", { op: "search", query: "SCOPE_NEEDLE", all: true });
+	const foreignRead = fauxToolCall("history", { op: "read", id: foreignId });
+	const foreignChildRead = fauxToolCall("history", { op: "read", id: foreignChildId });
+	const ownRead = fauxToolCall("history", { op: "read", id: ownId });
+	const ownChildRead = fauxToolCall("history", { op: "read", id: ownChildId });
+	faux.setResponses([
+		fauxAssistantMessage([search, foreignRead, foreignChildRead, ownRead, ownChildRead], { stopReason: "toolUse" }),
+		fauxAssistantMessage("done"),
+	]);
+	await session.prompt("Check archived history.");
+	const result = (call) => sessionManager.getBranch().find((entry) =>
+		entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === call.id)?.message;
+	assert.match(textOf(result(search)), /\[user\] SCOPE_NEEDLE own/);
+	assert.match(textOf(result(search)), /\[user\] SCOPE_NEEDLE own child/);
+	assert.doesNotMatch(textOf(result(search)), /\[user\] SCOPE_NEEDLE foreign/);
+	assert.equal(result(foreignRead)?.isError, true);
+	assert.equal(result(foreignChildRead)?.isError, true);
+	assert.match(textOf(result(ownRead)), /\[user\] SCOPE_NEEDLE own/);
+	assert.match(textOf(result(ownChildRead)), /\[user\] SCOPE_NEEDLE own child/);
+});
 
 test("history recovers every image across pages and fresh contexts", async (t) => {
 	const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0ioAAAAASUVORK5CYII=" };

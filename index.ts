@@ -362,6 +362,7 @@ async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncG
 		} catch {
 			continue;
 		}
+		if (!entry) continue;
 		const item = toWindowedEntry(entry, windows);
 		if (item) yield item;
 	}
@@ -377,6 +378,49 @@ function sessionFiles(dir: string): string[] {
 		.map((file) => ({ file, mtime: statSync(file).mtimeMs }))
 		.sort((a, b) => b.mtime - a.mtime)
 		.map(({ file }) => file);
+}
+
+async function* scopedSessionFiles(
+	dir: string, cwd: string, currentFile: string | undefined, signal?: AbortSignal, fileKey?: string,
+): AsyncGenerator<string> {
+	const files = sessionFiles(dir);
+	const fileSet = new Set(files);
+	const visible = new Map<string, boolean>();
+	const belongs = async (file: string): Promise<boolean> => {
+		const known = visible.get(file);
+		if (known !== undefined) return known;
+		let header: { cwd?: string } | null = null;
+		for await (const line of jsonlLines(file, signal)) {
+			try {
+				const entry = JSON.parse(line) as { type?: string; id?: unknown; cwd?: unknown } | null;
+				if (!entry) continue;
+				if (entry.type === "session" && typeof entry.id === "string") header = { cwd: typeof entry.cwd === "string" ? entry.cwd : undefined };
+				break;
+			} catch {
+				// Pi also skips malformed lines before the first parsed entry.
+			}
+		}
+		if (!header) {
+			visible.set(file, false);
+			return false;
+		}
+		const parts = relative(dir, file).split(sep);
+		let parent: string | undefined;
+		for (let i = parts.length - 1; i > 0; i--) {
+			const candidate = `${join(dir, ...parts.slice(0, i))}.jsonl`;
+			if (fileSet.has(candidate)) {
+				parent = candidate;
+				break;
+			}
+		}
+		const allowed = file === currentFile || (parent ? await belongs(parent) : !!header.cwd && resolve(header.cwd) === cwd);
+		visible.set(file, allowed);
+		return allowed;
+	};
+	for (const file of files) {
+		if (fileKey && historyFileKey(relative(dir, file)) !== fileKey) continue;
+		if (await belongs(file)) yield file;
+	}
 }
 
 function currentWindowId(entries: readonly EntryLike[]): string {
@@ -1055,7 +1099,7 @@ export default function (pi: ExtensionAPI) {
 		label: "History",
 		...toolCards("history"),
 		description:
-			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file, including fork copies, and returns file-qualified entry ids for unambiguous reads. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads page text and stored images; continue with the returned offset and imageOffset.",
+			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches sessions from this working directory and their nested subagents, including fork copies, and returns file-qualified entry ids for unambiguous reads. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads page text and stored images; continue with the returned offset and imageOffset.",
 		promptSnippet: "recover earlier conversation that left the active context window",
 		promptGuidelines: ["Use history search first, then history read with the returned entry id"],
 		parameters: Type.Object({
@@ -1070,6 +1114,8 @@ export default function (pi: ExtensionAPI) {
 		}),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const manager = ctx.sessionManager;
+			const cwd = resolve(ctx.cwd);
+			const currentFile = manager.getSessionFile?.();
 
 			if (params.op === "search") {
 				const query = requireValue(params.query, "query", params.op).toLowerCase();
@@ -1098,7 +1144,7 @@ export default function (pi: ExtensionAPI) {
 				};
 
 				if (params.all) {
-					for (const file of sessionFiles(manager.getSessionDir())) {
+					for await (const file of scopedSessionFiles(manager.getSessionDir(), cwd, currentFile, signal)) {
 						const recent: HistoryHit[][] = [[], []];
 						let anchorHere = false;
 						const source = relative(manager.getSessionDir(), file);
@@ -1191,9 +1237,8 @@ export default function (pi: ExtensionAPI) {
 					if (item.entry.id === entryId) return formatEntry(item);
 				}
 			}
-			for (const file of sessionFiles(manager.getSessionDir())) {
+			for await (const file of scopedSessionFiles(manager.getSessionDir(), cwd, currentFile, signal, fileKey)) {
 				const fileSource = relative(manager.getSessionDir(), file);
-				if (fileKey !== undefined && historyFileKey(fileSource) !== fileKey) continue;
 				for await (const item of sessionWindowEntries(file, signal)) {
 					if (item.entry.id === entryId) return formatEntry(item, fileSource);
 				}
