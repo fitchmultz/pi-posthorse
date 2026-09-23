@@ -75,7 +75,7 @@ Only one automatic compaction or rollover policy extension should be enabled at 
 - `new_context({ handoff? })`
 - `get_context_remaining()`
 - `notes({ op, ... })`: `list`, `read`, and `search` are paged; continue with the returned character `offset`. Search excerpts center on the match. `write` replaces content (empty content clears); `append` adds one newline-terminated record.
-- `history({ op, ... })`: `search` continues with the returned `cursor` and the same `query` and `all` scope; `limit` is the maximum results per page. `read` returns stored images with the first page and the next character `offset` when text remains. Results keep native entry and window ids.
+- `history({ op, ... })`: `search` continues with the returned `cursor` and the same `query` and `all` scope; `limit` is the maximum results per page. `read` pages text and stored images; continue with the returned character `offset` and `imageOffset`. An image-only continuation can use an `offset` equal to the text length. If a page needs fresh context, retry with both offsets unchanged. Results keep native entry and window ids.
 
 In the TUI, tools use Pi's native expandable cards. Collapsed cards show the operation and target, a short content preview, and counts or page ranges with the next offset when more remains. Expand with Pi's tool-output shortcut (`Ctrl+O` by default), or click the card's header or body in fullscreen mode. Expanded cards show the complete returned page and its metadata, not content the tool has not fetched yet. Writes and context requests also show the submitted content or handoff.
 

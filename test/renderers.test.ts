@@ -338,6 +338,17 @@ test("history pages keep paging, metadata, and native image attachments without 
 	assert.match(expanded, /More remains; call history read/);
 	const continuation = await execute("history", { ...args, offset: 20_000 }, context(tmpdir(), branch));
 	assert.equal(continuation.content.length, 1);
+
+	const manyImages = [{ ...branch[0], message: { role: "user", content: Array.from({ length: 13 }, () => image) } }];
+	const imagePage = await execute("history", args, context(tmpdir(), manyImages));
+	const imageDetails = imagePage.details as PosthorseDisplay;
+	assert.equal(imageDetails?.kind, "history-read");
+	if (imageDetails?.kind !== "history-read") throw new Error("Missing image page metadata");
+	component.setExpanded(false);
+	component.updateResult({ ...imagePage, isError: false });
+	assert.match(text(component, 100), new RegExp(`Next offset ${imageDetails.end} · imageOffset ${imageDetails.imageEnd}`));
+	component.setExpanded(true);
+	assert.match(text(component, 196), new RegExp(`and offset ${imageDetails.end} and imageOffset ${imageDetails.imageEnd}`));
 });
 
 test("legacy history and malformed display spans fall back to the complete returned text", () => {

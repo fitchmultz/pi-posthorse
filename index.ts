@@ -732,7 +732,7 @@ export default function (pi: ExtensionAPI) {
 
 	let pendingPageTokens = 0;
 	let previousPageUsage: number | null | undefined;
-	const pageSize = (ctx: NativeContext, offset: number, imageCount: number, cursor?: string) => {
+	const pageSize = (ctx: NativeContext, offset: number, imageCount: number, cursor?: string, imageOffset?: number) => {
 		const usage = ctx.getContextUsage()?.tokens;
 		// Parallel siblings are not in native usage yet; sequential results must not be counted twice.
 		if (usage != null && previousPageUsage != null) {
@@ -745,7 +745,7 @@ export default function (pi: ExtensionAPI) {
 			Math.max(0, remaining - PAGE_MARGIN_TOKENS) * 4 - imageCount * ESTIMATED_IMAGE_CHARS,
 		);
 		if (chars < MIN_PAGE_CHARS) {
-			const message = `Too little context remains to read a page safely. Call new_context first, then retry ${cursor ? "with the same cursor" : `with offset ${offset}`}.`;
+			const message = `Too little context remains to read a page safely. Call new_context first, then retry ${cursor ? "with the same cursor" : `with offset ${offset}${imageOffset === undefined ? "" : ` and imageOffset ${imageOffset}`}`}.`;
 			// Refusals consume context too. Once even the guidance no longer fits, omit repeated text;
 			// the failed call still carries its original offset and earlier refusals explain the retry.
 			const text = Math.ceil(message.length / 4) <= remaining ? message : "";
@@ -1049,7 +1049,7 @@ export default function (pi: ExtensionAPI) {
 		label: "History",
 		...toolCards("history"),
 		description:
-			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads return stored images and page long text with the next offset.",
+			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads page text and stored images; continue with the returned offset and imageOffset.",
 		promptSnippet: "recover earlier conversation that left the active context window",
 		promptGuidelines: ["Use history search first, then history read with the returned entry id"],
 		parameters: Type.Object({
@@ -1060,6 +1060,7 @@ export default function (pi: ExtensionAPI) {
 			limit: Type.Optional(Type.Integer({ description: "Maximum search results per page (default 10, max 50)", minimum: 1, maximum: 50 })),
 			cursor: Type.Optional(Type.String({ description: "Search continuation returned by the previous page; keep query and all unchanged", maxLength: 512 })),
 			offset: Type.Optional(Type.Integer({ description: "Character offset for read (default 0)", minimum: 0 })),
+			imageOffset: Type.Optional(Type.Integer({ description: "First image to return for read (default 0 on the first text page; otherwise skips images). Use both offsets from the continuation.", minimum: 0 })),
 		}),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const manager = ctx.sessionManager;
@@ -1157,20 +1158,29 @@ export default function (pi: ExtensionAPI) {
 			const id = requireValue(params.id, "id", params.op);
 			const formatEntry = (item: WindowedEntry, source = "") => {
 				const offset = params.offset ?? 0;
-				if (offset >= item.text.length) {
+				const imageOffset = params.imageOffset ?? (offset === 0 ? 0 : item.images.length);
+				if (imageOffset > item.images.length) {
+					throw new Error(`Image offset ${imageOffset} is past the end of history entry "${id}" (${item.images.length} images).`);
+				}
+				if (offset > item.text.length || (offset === item.text.length && imageOffset === item.images.length)) {
 					throw new Error(`Offset ${offset} is past the end of history entry "${id}" (${item.text.length} chars).`);
 				}
+				// Reserve one image first so an image-only continuation either advances or asks for fresh context.
+				const firstImage = imageOffset < item.images.length ? 1 : 0;
+				const chars = pageSize(nativeContext(ctx), offset, firstImage, undefined, item.images.length ? imageOffset : undefined);
+				const imageEnd = Math.min(item.images.length, imageOffset + firstImage + Math.floor((chars - MIN_PAGE_CHARS) / ESTIMATED_IMAGE_CHARS));
+				const images = item.images.slice(imageOffset, imageEnd);
 				const end = Math.min(
 					item.text.length,
-					offset + pageSize(nativeContext(ctx), offset, offset === 0 ? item.images.length : 0),
+					offset + chars - (images.length - firstImage) * ESTIMATED_IMAGE_CHARS,
 				);
-				const more = end < item.text.length ? `\nMore remains; call history read with id "${id}" and offset ${end}.` : "";
+				const more = end < item.text.length || imageEnd < item.images.length
+					? `\nMore remains; call history read with id "${id}" and offset ${end}${item.images.length ? ` and imageOffset ${imageEnd}` : ""}.` : "";
 				const header = `${source ? `${source} ` : ""}${item.entry.timestamp ?? ""} [window ${item.windowId}] [${id}] [chars ${offset}-${end} of ${item.text.length}] `;
-				// Stored images ride along with the first page only.
 				return pageResult(
 					`${header}${item.text.slice(offset, end)}${more}`,
-					offset === 0 ? item.images : [],
-					{ kind: "history-read", headerLength: header.length, offset, end, total: item.text.length },
+					images,
+					{ kind: "history-read", headerLength: header.length, offset, end, total: item.text.length, imageOffset, imageEnd, imageTotal: item.images.length },
 				);
 			};
 

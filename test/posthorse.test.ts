@@ -837,6 +837,41 @@ test("history returns stored images for a requested entry and summarizes them el
 	assert.doesNotMatch(handoff, /UE5HREFUQQ|SlBFR0RBVEE|V0VCUERBVEE/);
 });
 
+test("history image continuations preserve order, text, and retry offsets", async () => {
+	for (const text of ["short", "x".repeat(25_000)]) {
+		const { handlers, tools, context: base } = setup();
+		const images = Array.from({ length: 13 }, (_, index) => ({ type: "image", mimeType: "image/png", data: Buffer.from(`image ${index}`).toString("base64") }));
+		const context = {
+			...usageContext(base, 32_000, 1_000),
+			sessionManager: {
+				getBranch: () => [{ type: "message", id: "images", message: { role: "user", content: [{ type: "text", text }, ...images] } }],
+				getSessionDir: () => join(tmpdir(), "missing"),
+			},
+		};
+		let offset = 0, imageOffset = 0;
+		let recoveredText = "";
+		const recoveredImages = [];
+		for (let page = 0; page < 30; page++) {
+			handlers.get("turn_start")!({}, context);
+			const result = await run(tools, "history", { op: "read", id: "images", offset, imageOffset }, context);
+			const display = result.details;
+			assert.equal(display?.kind, "history-read");
+			if (display?.kind !== "history-read") throw new Error("Missing history metadata");
+			recoveredText += toolText(result).slice(display.headerLength, display.headerLength + display.end - display.offset);
+			recoveredImages.push(...result.content.slice(1));
+			const next = toolText(result).match(/and offset (\d+) and imageOffset (\d+)\./);
+			if (!next) break;
+			offset = Number(next[1]); imageOffset = Number(next[2]);
+			assert.ok(offset > display.offset || imageOffset > (display.imageOffset ?? 0));
+		}
+		assert.equal(recoveredText, `[user] ${text}\n[13 images: image/png]`);
+		assert.deepEqual(recoveredImages, images);
+		await assert.rejects(run(tools, "history", { op: "read", id: "images", imageOffset: 14 }, context), /Image offset 14 is past the end/);
+		const tight = usageContext(context, 32_000, 14_117);
+		await assert.rejects(run(tools, "history", { op: "read", id: "images", offset: 5, imageOffset: 4 }, tight), /retry with offset 5 and imageOffset 4/);
+	}
+});
+
 test("small-context configurations are unsupported; larger ones derive honest budgets", async () => {
 	for (const contextWindow of [4096, 8_192, 16_384]) {
 		const { handlers, tools, messages, context: base } = setup();

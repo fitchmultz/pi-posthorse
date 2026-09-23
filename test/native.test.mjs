@@ -21,7 +21,7 @@ async function fixture(t, options = {}) {
 	t.diagnostic(`fixture: ${temp}`);
 	const cwd = join(temp, "project"), agentDir = join(temp, "agent");
 	mkdirSync(cwd); mkdirSync(agentDir);
-	const faux = fauxProvider({ models: [{ id: "posthorse-regression", contextWindow: 100_000, maxTokens: 1000 }] });
+	const faux = fauxProvider({ models: [{ id: "posthorse-regression", contextWindow: options.contextWindow ?? 100_000, maxTokens: 1000 }] });
 	const setResponses = faux.setResponses;
 	faux.setResponses = (steps) => setResponses(steps.map((step) => (ctx, opts) => {
 		// Avoid faux's synthetic first-prompt input/cache-write double count in capacity checks.
@@ -46,6 +46,40 @@ async function fixture(t, options = {}) {
 	return { cwd, session, faux, sessionManager, settingsManager, resourceLoader };
 }
 
+
+test("history recovers every image across pages and fresh contexts", async (t) => {
+	const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0ioAAAAASUVORK5CYII=" };
+	const images = Array.from({ length: 13 }, () => ({ ...image }));
+	let id;
+	const { session, faux, sessionManager } = await fixture(t, {
+		contextWindow: 32_000,
+		seed(manager) {
+			id = manager.appendMessage({ role: "user", content: [{ type: "text", text: "Screenshots to recover" }, ...images], timestamp: Date.now() });
+			manager.appendContextWindow("Recover the earlier screenshots.", null);
+		},
+	});
+	let offset = 0, imageOffset = 0;
+	const recovered = [];
+	for (let page = 0; page < images.length; page++) {
+		faux.setResponses([
+			fauxAssistantMessage(fauxToolCall("history", { op: "read", id, offset, imageOffset }), { stopReason: "toolUse" }),
+			fauxAssistantMessage(fauxToolCall("new_context", { handoff: "Continue recovering screenshots." }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("Page recovered."),
+		]);
+		await session.prompt("Recover the next page, then start a fresh context.");
+		const result = sessionManager.getBranch().findLast((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "history").message;
+		assert.equal(result.isError, false, textOf(result));
+		const returned = result.content.filter((part) => part.type === "image");
+		assert.ok(returned.length > 0 && returned.length < images.length, "bounded pages must make image progress");
+		recovered.push(...returned);
+		const next = textOf(result).match(/and offset (\d+) and imageOffset (\d+)\./);
+		if (!next) break;
+		offset = Number(next[1]); imageOffset = Number(next[2]);
+		assert.equal(imageOffset, recovered.length);
+		assert.ok(offset > 0, "image-only pages retain the completed text offset");
+	}
+	assert.deepEqual(recovered, images);
+});
 
 test("native fork rollover retains recovery history and survives a checkpoint restore", async (t) => {
 	const evidence = process.env.PI_COMPAT_EVIDENCE_DIR ?? tmpdir();
