@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Preserve completed asynchronous tool results during rollover when the response that started them fails or is interrupted.
 - Keep namespaced `ask_question` results as ordinary tool evidence instead of treating them as owner answers during rollover.
 - Skip missing legacy note targets so broken symlinks do not block shared note reads and writes.
 - Prevent legacy note migration from copying the shared destination back through directory symlinks.

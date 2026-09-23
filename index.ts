@@ -535,11 +535,8 @@ function trailingToolBatch(
 				entry.message?.stopReason === "error" ||
 				entry.message?.stopReason === "aborted" ||
 				entry.message?.stopReason === "length";
-			if (invalid) {
-				if (results.length) return undefined;
-			} else {
-				call = entry;
-			}
+			// A failed response can still own completed native async calls.
+			if (!invalid || results.length) call = entry;
 		}
 	}
 	if (!results.length) return undefined;

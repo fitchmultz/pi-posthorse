@@ -24,7 +24,8 @@ async function fixture(t, options = {}) {
 	t.diagnostic(`fixture: ${temp}`);
 	const cwd = join(temp, "project"), agentDir = join(temp, "agent");
 	mkdirSync(cwd); mkdirSync(agentDir);
-	const faux = fauxProvider({ models: [{ id: "posthorse-regression", contextWindow: options.contextWindow ?? 100_000, maxTokens: 1000 }] });
+	const faux = fauxProvider({ api: options.nativeAsync ? "openai-responses" : undefined, models: [{ id: "posthorse-regression", contextWindow: options.contextWindow ?? 100_000, maxTokens: 1000 }] });
+	if (options.nativeAsync) faux.getModel().compat = { supportsAsyncTools: true };
 	const setResponses = faux.setResponses;
 	faux.setResponses = (steps) => setResponses(steps.map((step) => (ctx, opts) => {
 		// Avoid faux's synthetic first-prompt input/cache-write double count in capacity checks.
@@ -585,6 +586,33 @@ for (const all of [false, true]) test(`native search cursors finish despite appe
 	assert.ok(returned.length > originals.length, "prior and new lookup echoes remain searchable");
 	assert.ok(nativeIds.includes(priorEcho), "the original recovery echo remains retrievable too");
 	t.diagnostic(JSON.stringify({ all, originals: originals.length, returned: returned.length }));
+});
+
+for (const stopReason of ["error", "aborted", "length"]) test(`completed native async results survive ${stopReason} and rollover`, async (t) => {
+	let executions = 0, recovery = "";
+	const h = await fixture(t, { nativeAsync: true, extension(pi) {
+		pi.registerTool({ name: "receipt", async: true, label: "Receipt", description: "Local receipt", parameters: { type: "object", properties: {} }, async execute() {
+			executions++;
+			return { content: [{ type: "text", text: `COMPLETED_ACTION_RECEIPT ${stopReason === "error" ? "" : "r".repeat(600_000)}` }], details: {} };
+		} });
+	} });
+	const call = { ...fauxToolCall("receipt", {}), async: true };
+	call.responsesItem = { type: "function_call", id: "fc_receipt", call_id: call.id, name: call.name, arguments: "{}", async: true, status: "completed" };
+	h.faux.setResponses([
+		fauxAssistantMessage(call, {
+			responseId: "resp_receipt", stopReason,
+			...(stopReason === "error" ? { errorMessage: "context_length_exceeded: Your input exceeds the context window of this model" } : {}),
+		}),
+		(ctx) => { recovery = ctx.messages.map(textOf).join("\n"); return fauxAssistantMessage("Continued"); },
+	]);
+	await h.session.prompt("Perform the local operation exactly once and check its receipt.");
+	if (stopReason === "aborted") await h.session.prompt("Continue without repeating the operation.");
+	const branch = h.sessionManager.getBranch();
+	assert.equal(executions, 1);
+	assert.ok(branch.some((entry) => entry.type === "message" && entry.message.role === "toolResult" && !entry.message.isError && textOf(entry.message).includes("COMPLETED_ACTION_RECEIPT")));
+	assert.equal(branch.filter((entry) => entry.type === "context_window").length, 1);
+	assert.match(recovery, /Trailing tool batch/);
+	assert.match(recovery, /COMPLETED_ACTION_RECEIPT/);
 });
 
 for (const stopReason of ["error", "length", "aborted"]) test(`native delivered tool results remain recoverable after ${stopReason} without an unseen claim`, async (t) => {

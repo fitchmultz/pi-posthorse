@@ -800,7 +800,9 @@ test("automatic handoff carries only the trailing incomplete-response tool batch
 			message: { role: "toolResult", toolCallId: "truncated-call", toolName: "write", isError: true, content: "not executed" },
 		},
 	]);
-	assert.doesNotMatch(truncatedCall, /Trailing tool batch|truncated-result|entry result-3/);
+	assert.match(truncatedCall, /Tool-call entry assistant-length/);
+	assert.match(truncatedCall, /\[error entry truncated-result\]\nnot executed/);
+	assert.doesNotMatch(truncatedCall, /entry result-3/);
 
 	const consumed = automaticHandoff(handlers, context, [
 		...batch,
