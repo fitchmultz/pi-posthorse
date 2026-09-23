@@ -718,7 +718,8 @@ export default function (pi: ExtensionAPI) {
 		const active = new Set(pi.getActiveTools());
 		return pi
 			.getAllTools()
-			.filter((tool) => active.has(tool.name))
+			// Public npm declarations omit the fork's tool IDs.
+			.filter((tool) => active.has((tool as typeof tool & { id: string }).id))
 			.reduce(
 				(total, tool) =>
 					total +

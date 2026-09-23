@@ -210,6 +210,29 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) te
 	}
 });
 
+test("namespaced tools count toward the fresh handoff budget", async (t) => {
+	const h = await fixture(t, { contextWindow: 32_768, extension(pi) {
+		pi.registerTool({
+			name: "catalog", namespace: "example", label: "Catalog", description: "d".repeat(52_000),
+			parameters: { type: "object", properties: {} },
+			async execute() { return { content: [{ type: "text", text: "unused" }], details: undefined }; },
+		});
+	} });
+	const catalog = h.session.getAllTools().find((tool) => tool.name === "catalog");
+	h.session.setActiveToolsByName(["new_context", catalog.id]);
+	const handoff = "h".repeat(20_000);
+	h.faux.setResponses([
+		fauxAssistantMessage(fauxToolCall("new_context", { handoff }), { stopReason: "toolUse" }),
+		fauxAssistantMessage("Done."),
+	]);
+	await h.session.prompt("Save the handoff.");
+	const branch = h.sessionManager.getBranch();
+	const result = branch.findLast((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "new_context").message;
+	assert.equal(result.isError, true, "active namespaced tool declarations must reduce the handoff budget");
+	assert.match(textOf(result), /Handoff is too large for the active model/);
+	assert.ok(!branch.some((entry) => entry.type === "context_window" && entry.handoff === handoff));
+});
+
 for (const enabled of [false, true]) test(`native mixed searches/list/reads stay below configured capacity (compaction=${enabled})`, async (t) => {
 	const h = await fixture(t, { enabled, seed(manager) {
 		for (let index = 0; index < 60; index++) manager.appendMessage({ role: "user", content: `needle ${"h".repeat(500)}`, timestamp: index });

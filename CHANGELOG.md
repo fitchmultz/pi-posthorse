@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Count active namespaced tools when sizing handoffs and recovery pages.
 - Paginate stored images in history reads so large image messages remain recoverable after a context reset. Continuations carry both text and image offsets.
 
 ## 0.5.0
