@@ -418,7 +418,7 @@ async function* scopedSessionFiles(
 		return allowed;
 	};
 	for (const file of files) {
-		if (fileKey && historyFileKey(relative(dir, file)) !== fileKey) continue;
+		if (fileKey !== undefined && historyFileKey(relative(dir, file)) !== fileKey) continue;
 		if (await belongs(file)) yield file;
 	}
 }

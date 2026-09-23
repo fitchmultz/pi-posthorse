@@ -511,6 +511,7 @@ test("history keeps the selected session after a cwd override but excludes forei
 		for (const source of ["foreign", "legacy"]) {
 			await assert.rejects(run(tools, "history", { op: "read", id: archivedId(source, `${source}.jsonl`) }, context), /No history entry/);
 		}
+		await assert.rejects(run(tools, "history", { op: "read", id: "same@" }, context), /No history entry/);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
