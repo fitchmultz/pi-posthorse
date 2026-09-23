@@ -325,10 +325,12 @@ for (const all of [false, true]) test(`native search cursors finish despite appe
 	]);
 	await h.session.prompt("Recover earlier source entries");
 	assert.equal(complete, true);
-	assert.deepEqual(returned.slice(0, originals.length), originals, "original entries keep order and appear exactly once");
+	const nativeIds = returned.map((id) => id.split("@")[0]);
+	assert.deepEqual(nativeIds.slice(0, originals.length), originals, "original entries keep order and appear exactly once");
+	assert.ok(returned.every((id) => id.includes("@") === all), "all-session references identify their source file");
 	assert.equal(new Set(returned).size, returned.length, "lookup echoes cannot repeat previously returned entries");
 	assert.ok(returned.length > originals.length, "prior and new lookup echoes remain searchable");
-	assert.ok(returned.includes(priorEcho), "the original recovery echo remains retrievable too");
+	assert.ok(nativeIds.includes(priorEcho), "the original recovery echo remains retrievable too");
 	t.diagnostic(JSON.stringify({ all, originals: originals.length, returned: returned.length }));
 });
 

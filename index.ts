@@ -270,6 +270,10 @@ function isRecoveryCall(part: unknown): boolean {
 	return block?.type === "toolCall" && isRecoveryTool(block.name);
 }
 
+function historyFileKey(source: string): string {
+	return createHash("sha256").update(source).digest("base64url");
+}
+
 function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit | undefined {
 	const { entry } = item;
 	let text = item.text;
@@ -308,9 +312,10 @@ function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit
 			matchIndex = text.toLowerCase().indexOf(query);
 		}
 	}
-	const header = `${source ? `${source} ` : ""}${entry.timestamp ?? ""} [window ${item.windowId}] [${entry.id}] `;
+	const id = source ? `${entry.id}@${historyFileKey(source)}` : entry.id!;
+	const header = `${source ? `${source} ` : ""}${entry.timestamp ?? ""} [window ${item.windowId}] [${id}] `;
 	return {
-		id: entry.id!,
+		id,
 		priority,
 		text: `${header}${excerptAround(text, matchIndex, 100, 400)}`,
 		headerLength: header.length,
@@ -1050,7 +1055,7 @@ export default function (pi: ExtensionAPI) {
 		label: "History",
 		...toolCards("history"),
 		description:
-			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads page text and stored images; continue with the returned offset and imageOffset.",
+			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file, including fork copies, and returns file-qualified entry ids for unambiguous reads. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads page text and stored images; continue with the returned offset and imageOffset.",
 		promptSnippet: "recover earlier conversation that left the active context window",
 		promptGuidelines: ["Use history search first, then history read with the returned entry id"],
 		parameters: Type.Object({
@@ -1079,12 +1084,9 @@ export default function (pi: ExtensionAPI) {
 					} catch { pageError(nativeContext(ctx), "Invalid history cursor or changed query/scope; restart the search without it.", params.cursor); }
 				}
 				const hits: HistoryHit[][] = [[], []];
-				// Mark skipped ids too: fork copies must not reappear on subsequent pages.
-				const seen = new Set<string>();
 				let found = !cursor;
 				const addHit = (hit: HistoryHit | undefined) => {
-					if (!hit || seen.has(hit.id)) return;
-					seen.add(hit.id);
+					if (!hit) return;
 					if (cursor && hit.priority < cursor[1]) return;
 					if (cursor && hit.priority === cursor[1] && !found) {
 						if (hit.id !== cursor[0]) return;
@@ -1098,14 +1100,11 @@ export default function (pi: ExtensionAPI) {
 				if (params.all) {
 					for (const file of sessionFiles(manager.getSessionDir())) {
 						const recent: HistoryHit[][] = [[], []];
-						const matchedIds = new Set<string>();
 						let anchorHere = false;
 						const source = relative(manager.getSessionDir(), file);
 						for await (const item of sessionWindowEntries(file, signal)) {
-							if (seen.has(item.entry.id!)) continue;
 							const hit = historyHit(item, query, source);
 							if (!hit) continue;
-							matchedIds.add(hit.id);
 							const seeking = cursor && !found && hit.priority === cursor[1];
 							if (seeking && anchorHere) continue;
 							if (seeking && hit.id === cursor?.[0]) anchorHere = true;
@@ -1116,7 +1115,6 @@ export default function (pi: ExtensionAPI) {
 						}
 						if (cursor && !found && !anchorHere) recent[cursor[1]] = [];
 						for (const group of recent) for (const hit of group.reverse()) addHit(hit);
-						for (const id of matchedIds) seen.add(id);
 						if (hits[0].length > limit) break;
 					}
 				} else {
@@ -1157,6 +1155,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const id = requireValue(params.id, "id", params.op);
+			const separator = id.indexOf("@");
+			const entryId = separator < 0 ? id : id.slice(0, separator);
+			const fileKey = separator < 0 ? undefined : id.slice(separator + 1);
 			const formatEntry = (item: WindowedEntry, source = "") => {
 				const offset = params.offset ?? 0;
 				const imageOffset = params.imageOffset ?? (offset === 0 ? 0 : item.images.length);
@@ -1185,12 +1186,16 @@ export default function (pi: ExtensionAPI) {
 				);
 			};
 
-			for (const item of windowEntries(manager.getBranch() as EntryLike[])) {
-				if (item.entry.id === id) return formatEntry(item);
+			if (fileKey === undefined) {
+				for (const item of windowEntries(manager.getBranch() as EntryLike[])) {
+					if (item.entry.id === entryId) return formatEntry(item);
+				}
 			}
 			for (const file of sessionFiles(manager.getSessionDir())) {
+				const fileSource = relative(manager.getSessionDir(), file);
+				if (fileKey !== undefined && historyFileKey(fileSource) !== fileKey) continue;
 				for await (const item of sessionWindowEntries(file, signal)) {
-					if (item.entry.id === id) return formatEntry(item, relative(manager.getSessionDir(), file));
+					if (item.entry.id === entryId) return formatEntry(item, fileSource);
 				}
 			}
 			throw new Error(`No history entry with id "${id}".`);

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Qualify all-session history IDs by source file so search, pagination, and read distinguish entries that reuse a native ID. Fork copies now appear once per file rather than hiding unrelated matches.
 - Count active namespaced tools when sizing handoffs and recovery pages.
 - Paginate stored images in history reads so large image messages remain recoverable after a context reset. Continuations carry both text and image offsets.
 
