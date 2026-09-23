@@ -58,7 +58,7 @@ function setup() {
 			messages.push(message);
 		},
 		getActiveTools: () => [...tools.keys()],
-		getAllTools: () => toolDefinitions,
+		getAllTools: () => toolDefinitions.map((tool) => ({ ...tool, id: tool.name })),
 	} as unknown as ExtensionAPI;
 	posthorse(api);
 	const context: TestContext = {

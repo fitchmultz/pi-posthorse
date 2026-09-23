@@ -41,7 +41,7 @@ const exactFreshBudget = (pi: ExtensionAPI) => {
 		const active = new Set(pi.getActiveTools());
 		const toolTokens = pi
 			.getAllTools()
-			.filter((definition) => active.has(definition.name))
+			.filter((definition) => active.has(definition.id))
 			.reduce(
 				(total, definition) =>
 					total +

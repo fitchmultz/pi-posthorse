@@ -25,7 +25,7 @@ function setup() {
 		registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
 		registerMessageRenderer: (name: string, renderer: MessageRenderer) => messages.set(name, renderer),
 		getActiveTools: () => [...tools.keys()],
-		getAllTools: () => [...tools.values()],
+		getAllTools: () => [...tools.values()].map((tool) => ({ ...tool, id: tool.name })),
 	} as unknown as ExtensionAPI);
 	return { tools, messages };
 }
