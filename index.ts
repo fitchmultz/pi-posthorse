@@ -96,7 +96,7 @@ type EntryLike = {
 };
 
 type WindowedEntry = { entry: EntryLike; windowId: string; text: string; images: ImageLike[] };
-type HistoryHit = { id: string; copyKey: string; text: string; headerLength: number; priority: 0 | 1 };
+type HistoryHit = { id: string; text: string; headerLength: number; priority: 0 | 1 };
 type RecoveryRecord = {
 	id: string;
 	timestamp: string;
@@ -313,17 +313,9 @@ function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit
 		}
 	}
 	const id = source ? `${entry.id}@${historyFileKey(source)}` : entry.id!;
-	const copy = createHash("sha256")
-		.update(entry.id!)
-		.update("\0")
-		.update(entry.timestamp ?? "")
-		.update("\0")
-		.update(item.text);
-	for (const image of item.images) copy.update("\0").update(image.mimeType ?? "").update("\0").update(image.data);
 	const header = `${source ? `${source} ` : ""}${entry.timestamp ?? ""} [window ${item.windowId}] [${id}] `;
 	return {
 		id,
-		copyKey: copy.digest("base64url"),
 		priority,
 		text: `${header}${excerptAround(text, matchIndex, 100, 400)}`,
 		headerLength: header.length,
@@ -373,21 +365,6 @@ async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncG
 		const item = toWindowedEntry(entry, windows);
 		if (item) yield item;
 	}
-}
-
-async function sessionParent(file: string, signal?: AbortSignal): Promise<string | undefined> {
-	for await (const line of jsonlLines(file, signal)) {
-		try {
-			const header = JSON.parse(line) as { type?: string; parentSession?: unknown };
-			if (header.type === "session" && typeof header.parentSession === "string") {
-				return resolve(dirname(file), header.parentSession);
-			}
-		} catch {
-			// A file without a valid Pi header has no known parent session.
-		}
-		break;
-	}
-	return undefined;
 }
 
 function sessionFiles(dir: string): string[] {
@@ -1078,7 +1055,7 @@ export default function (pi: ExtensionAPI) {
 		label: "History",
 		...toolCards("history"),
 		description:
-			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file and returns file-qualified entry ids for unambiguous reads. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads page text and stored images; continue with the returned offset and imageOffset.",
+			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches every project session file, including fork copies, and returns file-qualified entry ids for unambiguous reads. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads page text and stored images; continue with the returned offset and imageOffset.",
 		promptSnippet: "recover earlier conversation that left the active context window",
 		promptGuidelines: ["Use history search first, then history read with the returned entry id"],
 		parameters: Type.Object({
@@ -1107,12 +1084,9 @@ export default function (pi: ExtensionAPI) {
 					} catch { pageError(nativeContext(ctx), "Invalid history cursor or changed query/scope; restart the search without it.", params.cursor); }
 				}
 				const hits: HistoryHit[][] = [[], []];
-				// Mark skipped copies too: fork copies must not reappear on subsequent pages.
-				const seen = new Set<string>();
 				let found = !cursor;
 				const addHit = (hit: HistoryHit | undefined) => {
-					if (!hit || seen.has(hit.copyKey)) return;
-					seen.add(hit.copyKey);
+					if (!hit) return;
 					if (cursor && hit.priority < cursor[1]) return;
 					if (cursor && hit.priority === cursor[1] && !found) {
 						if (hit.id !== cursor[0]) return;
@@ -1124,63 +1098,23 @@ export default function (pi: ExtensionAPI) {
 				};
 
 				if (params.all) {
-					const files = sessionFiles(manager.getSessionDir());
-					const knownFiles = new Set(files);
-					const parents = new Map<string, string | undefined>();
-					const parentOf = async (file: string) => {
-						if (!parents.has(file)) parents.set(file, await sessionParent(file, signal));
-						return parents.get(file);
-					};
-					for (const file of files) {
+					for (const file of sessionFiles(manager.getSessionDir())) {
 						const recent: HistoryHit[][] = [[], []];
-						const matchedCopies = new Set<string>();
 						let anchorHere = false;
 						const source = relative(manager.getSessionDir(), file);
-						const ancestorStreams = new Map<string, AsyncGenerator<WindowedEntry>>();
-						const copiedFrom = async (parent: string, key: string): Promise<boolean> => {
-							let stream = ancestorStreams.get(parent);
-							if (!stream) {
-								stream = sessionWindowEntries(parent, signal);
-								ancestorStreams.set(parent, stream);
-							}
-							for (;;) {
-								const next = await stream.next();
-								if (next.done) return false;
-								if (historyHit(next.value, query)?.copyKey === key) return true;
-							}
-						};
-						const originFor = async (key: string): Promise<string> => {
-							let current = file;
-							const visited = new Set<string>();
-							while (knownFiles.has(current) && !visited.has(current)) {
-								visited.add(current);
-								const parent = await parentOf(current);
-								if (!parent || !knownFiles.has(parent) || !(await copiedFrom(parent, key))) break;
-								current = parent;
-							}
-							return current;
-						};
-						try {
-							for await (const item of sessionWindowEntries(file, signal)) {
-								const hit = historyHit(item, query, source);
-								if (!hit) continue;
-								hit.copyKey = `${historyFileKey(await originFor(hit.copyKey))}:${hit.copyKey}`;
-								if (seen.has(hit.copyKey)) continue;
-								matchedCopies.add(hit.copyKey);
-								const seeking = cursor && !found && hit.priority === cursor[1];
-								if (seeking && anchorHere) continue;
-								if (seeking && hit.id === cursor?.[0]) anchorHere = true;
-								const group = recent[hit.priority];
-								group.push(hit);
-								// Keep one page plus its anchor and lookahead, not every matching excerpt.
-								if (group.length > limit + 2) group.shift();
-							}
-						} finally {
-							for (const stream of ancestorStreams.values()) await stream.return(undefined);
+						for await (const item of sessionWindowEntries(file, signal)) {
+							const hit = historyHit(item, query, source);
+							if (!hit) continue;
+							const seeking = cursor && !found && hit.priority === cursor[1];
+							if (seeking && anchorHere) continue;
+							if (seeking && hit.id === cursor?.[0]) anchorHere = true;
+							const group = recent[hit.priority];
+							group.push(hit);
+							// Keep one page plus its anchor and lookahead, not every matching excerpt.
+							if (group.length > limit + 2) group.shift();
 						}
 						if (cursor && !found && !anchorHere) recent[cursor[1]] = [];
 						for (const group of recent) for (const hit of group.reverse()) addHit(hit);
-						for (const key of matchedCopies) seen.add(key);
 						if (hits[0].length > limit) break;
 					}
 				} else {

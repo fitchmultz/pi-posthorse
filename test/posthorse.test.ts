@@ -632,12 +632,11 @@ test("all-session ranking keeps older originals ahead of newer echoes before app
 		const old = { type: "message", id: "old", message: { role: "user", content: "needle oldest original" } };
 		const newer = { type: "message", id: "newer", message: { role: "toolResult", toolName: "bash", content: "needle newer original" } };
 		const echoes = Array.from({ length: 6 }, (_, index) => ({
-			type: "message", id: `echo-${index}`, timestamp: new Date(1_500).toISOString(), message: { role: "toolResult", toolName: "history", content: `needle echo-only ${index}` },
+			type: "message", id: `echo-${index}`, message: { role: "toolResult", toolName: "history", content: `needle echo-only ${index}` },
 		}));
 		for (const [index, entries] of [[old], [newer, ...echoes], [echoes[5]]].entries()) {
 			const file = join(dir, `${index}.jsonl`);
-			const header = { type: "session", version: 3, id: `session-${index}`, timestamp: new Date(index * 1_000).toISOString(), cwd: dir, ...(index === 2 ? { parentSession: join(dir, "1.jsonl") } : {}) };
-			writeFileSync(file, [header, ...entries].map((entry) => JSON.stringify(entry)).join("\n"));
+			writeFileSync(file, entries.map((entry) => JSON.stringify(entry)).join("\n"));
 			utimesSync(file, new Date((index + 1) * 1000), new Date((index + 1) * 1000));
 		}
 		const { tools, context: base } = setup();
@@ -646,11 +645,11 @@ test("all-session ranking keeps older originals ahead of newer echoes before app
 		const ids = (text: string) => [...text.matchAll(/\[window initial\] \[([^\]]+)\]/g)].map((match) => match[1]);
 		assert.deepEqual(ids(await search("needle", 1)), [archivedId("newer", "1.jsonl")]);
 		assert.deepEqual(ids(await search("needle", 2)), [archivedId("newer", "1.jsonl"), archivedId("old", "0.jsonl")]);
-		assert.deepEqual(ids(await search("needle", 4)), [archivedId("newer", "1.jsonl"), archivedId("old", "0.jsonl"), archivedId("echo-5", "2.jsonl"), archivedId("echo-4", "1.jsonl")]);
+		assert.deepEqual(ids(await search("needle", 4)), [archivedId("newer", "1.jsonl"), archivedId("old", "0.jsonl"), archivedId("echo-5", "2.jsonl"), archivedId("echo-5", "1.jsonl")]);
 		const all = await search("needle", 50);
-		assert.deepEqual(ids(all), [archivedId("newer", "1.jsonl"), archivedId("old", "0.jsonl"), archivedId("echo-5", "2.jsonl"), ...echoes.slice(0, 5).map((entry) => archivedId(entry.id, "1.jsonl")).reverse()]);
-		assert.ok(all.split("\n").some((line) => line.startsWith("2.jsonl ") && line.includes(`[${archivedId("echo-5", "2.jsonl")}]`)), "fork copies use the newest file");
-		assert.deepEqual(ids(await search("echo-only", 2)), [archivedId("echo-5", "2.jsonl"), archivedId("echo-4", "1.jsonl")]);
+		assert.deepEqual(ids(all), [archivedId("newer", "1.jsonl"), archivedId("old", "0.jsonl"), archivedId("echo-5", "2.jsonl"), ...echoes.map((entry) => archivedId(entry.id, "1.jsonl")).reverse()]);
+		assert.ok(all.split("\n").some((line) => line.startsWith("2.jsonl ") && line.includes(`[${archivedId("echo-5", "2.jsonl")}]`)));
+		assert.deepEqual(ids(await search("echo-only", 2)), [archivedId("echo-5", "2.jsonl"), archivedId("echo-5", "1.jsonl")]);
 		const controller = new AbortController();
 		controller.abort();
 		await assert.rejects(tools.get("history")!.execute("id", { op: "search", query: "needle", all: true }, controller.signal, () => {}, context), { name: "AbortError" });
@@ -1155,24 +1154,22 @@ test("history cursors finish partial headers and progress past growing lookup ec
 	}
 });
 
-test("all-session cursors retain ranking and fork deduplication across pages", async () => {
+test("all-session cursors retain ranking and per-file entries across pages", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-cursor-forks-"));
 	try {
 		const { tools, handlers, context: base } = setup();
-		const original = { type: "message", id: "shared", timestamp: new Date(500).toISOString(), message: { role: "user", content: "needle shared ancestor" } };
+		const original = { type: "message", id: "shared", message: { role: "user", content: "needle shared ancestor" } };
 		const older = [original, { type: "message", id: "older", message: { role: "user", content: "needle older source" } }];
 		const current: Record<string, unknown>[] = [original, { type: "message", id: "newer", message: { role: "user", content: "needle newer source" } }, { type: "message", id: "prior-echo", message: { role: "toolResult", toolName: "notes", content: "needle prior echo" } }];
 		const oldFile = join(dir, "old.jsonl"), activeFile = join(dir, "current.jsonl");
-		const header = { type: "session", version: 3, id: "session-old", timestamp: new Date(0).toISOString(), cwd: dir };
-		const forkHeader = { ...header, id: "session-current", timestamp: new Date(1_000).toISOString(), parentSession: oldFile };
-		writeFileSync(oldFile, [header, ...older].map((entry) => JSON.stringify(entry)).join("\n"));
+		writeFileSync(oldFile, older.map((entry) => JSON.stringify(entry)).join("\n"));
 		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
 		let cursor: string | undefined;
 		const ids: string[] = [];
 		for (let page = 0; page < 20; page++) {
 			handlers.get("turn_start")!({}, context);
 			current.push({ type: "message", id: `lookup-${page}`, message: { role: "assistant", content: [{ type: "toolCall", name: "history", arguments: { op: "search", query: "needle", cursor } }] } });
-			writeFileSync(activeFile, [forkHeader, ...current].map((entry) => JSON.stringify(entry)).join("\n"));
+			writeFileSync(activeFile, current.map((entry) => JSON.stringify(entry)).join("\n"));
 			utimesSync(oldFile, new Date(1000), new Date(1000));
 			utimesSync(activeFile, new Date(2000 + page), new Date(2000 + page));
 			const result = await run(tools, "history", { op: "search", query: "needle", limit: 1, all: true, cursor }, context);
@@ -1185,6 +1182,7 @@ test("all-session cursors retain ranking and fork deduplication across pages", a
 		}
 		assert.deepEqual(ids.slice(0, 3), [archivedId("newer", "current.jsonl"), archivedId("shared", "current.jsonl"), archivedId("older", "old.jsonl")]);
 		assert.equal(new Set(ids).size, ids.length);
+		assert.ok(ids.includes(archivedId("shared", "old.jsonl")), "copied entries keep distinct file references");
 		assert.ok(ids.includes(archivedId("prior-echo", "current.jsonl")), "pagination reaches the oldest echo and terminates");
 		assert.ok(ids.length < 20);
 	} finally { rmSync(dir, { recursive: true, force: true }); }
@@ -1347,37 +1345,35 @@ test("history flattens bashExecution entries and honors excludeFromContext", asy
 	assert.doesNotMatch(hidden, /TOPSECRET|cat token/);
 });
 
-test("all-session search reports fork-copied entries once, from the newest-modified session", async () => {
+test("all-session search returns fork copies with their source-qualified references", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-fork-test-"));
 	try {
 		const original = join(dir, "original.jsonl");
 		const fork = join(dir, "fork.jsonl");
 		const grandchild = join(dir, "grandchild.jsonl");
-		const shared = JSON.stringify({ type: "message", id: "shared", parentId: null, timestamp: new Date(500).toISOString(), message: { role: "user", content: "fork needle shared" } });
-		const forkNew = JSON.stringify({ type: "message", id: "fork-new", parentId: "shared", timestamp: new Date(1_500).toISOString(), message: { role: "user", content: "fork needle newer" } });
-		writeFileSync(original, [JSON.stringify({ type: "session", version: 3, id: "session-original", timestamp: new Date(0).toISOString(), cwd: dir }), shared].join("\n"));
-		writeFileSync(fork, [
-			JSON.stringify({ type: "session", version: 3, id: "session-fork", parentSession: original, timestamp: new Date(500).toISOString(), cwd: dir }),
-			shared,
-			forkNew,
-		].join("\n"));
+		const shared = JSON.stringify({ type: "message", id: "shared", parentId: null, message: { role: "user", content: "fork needle shared" } });
+		const forkNew = JSON.stringify({ type: "message", id: "fork-new", parentId: "shared", message: { role: "user", content: "fork needle newer" } });
+		writeFileSync(original, shared);
+		writeFileSync(fork, [shared, forkNew].join("\n"));
 		writeFileSync(grandchild, [
-			JSON.stringify({ type: "session", version: 3, id: "session-grandchild", parentSession: fork, timestamp: new Date(1_500).toISOString(), cwd: dir }),
 			shared,
 			forkNew,
-			JSON.stringify({ type: "message", id: "grand-new", parentId: "fork-new", timestamp: new Date(2_500).toISOString(), message: { role: "user", content: "fork needle latest" } }),
+			JSON.stringify({ type: "message", id: "grand-new", parentId: "fork-new", message: { role: "user", content: "fork needle latest" } }),
 		].join("\n"));
 		utimesSync(original, new Date(1_000), new Date(1_000));
 		utimesSync(fork, new Date(2_000), new Date(2_000));
 		utimesSync(grandchild, new Date(3_000), new Date(3_000));
 		const { tools, context: base } = setup();
 		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
-		const text = toolText(await run(tools, "history", { op: "search", query: "fork needle", all: true, limit: 5 }, context));
+		const text = toolText(await run(tools, "history", { op: "search", query: "fork needle", all: true, limit: 10 }, context));
 		assert.deepEqual(
 			text.split("\n").map((line) => line.match(/\[window initial\] \[([^\]]+)\]/)?.[1]),
-			[archivedId("grand-new", "grandchild.jsonl"), archivedId("fork-new", "grandchild.jsonl"), archivedId("shared", "grandchild.jsonl")],
+			[
+				archivedId("grand-new", "grandchild.jsonl"), archivedId("fork-new", "grandchild.jsonl"), archivedId("shared", "grandchild.jsonl"),
+				archivedId("fork-new", "fork.jsonl"), archivedId("shared", "fork.jsonl"),
+				archivedId("shared", "original.jsonl"),
+			],
 		);
-		assert.equal(text.split(`[${archivedId("shared", "grandchild.jsonl")}]`).length, 2);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -1450,26 +1446,28 @@ test("all-session history keeps new entries in sibling forks separate", async ()
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-sibling-forks-"));
 	try {
 		const root = join(dir, "root.jsonl");
+		const rootHeader = { type: "session", version: 3, id: "session-root", timestamp: new Date(0).toISOString(), cwd: dir };
 		const ancestor = { type: "message", id: "ancestor", parentId: null, timestamp: new Date(500).toISOString(), message: { role: "user", content: "start" } };
-		writeFileSync(root, [
-			{ type: "session", version: 3, id: "session-root", timestamp: new Date(0).toISOString(), cwd: dir },
-			ancestor,
-		].map((entry) => JSON.stringify(entry)).join("\n"));
+		const repeated = { type: "message", id: "deadbeef", parentId: "ancestor", timestamp: new Date(3_000).toISOString(), message: { role: "user", content: "needle same request" } };
+		writeFileSync(root, [rootHeader, ancestor].map((entry) => JSON.stringify(entry)).join("\n"));
 		utimesSync(root, new Date(500), new Date(500));
 		for (const [name, time] of [["first", 1_000], ["second", 2_000]] as const) {
 			const file = join(dir, `${name}.jsonl`);
 			writeFileSync(file, [
 				{ type: "session", version: 3, id: `session-${name}`, parentSession: root, timestamp: new Date(time).toISOString(), cwd: dir },
 				ancestor,
-				{ type: "message", id: "deadbeef", parentId: "ancestor", timestamp: new Date(3_000).toISOString(), message: { role: "user", content: "needle same request" } },
+				repeated,
 			].map((entry) => JSON.stringify(entry)).join("\n"));
 			utimesSync(file, new Date(time), new Date(time));
 		}
+		writeFileSync(root, [rootHeader, ancestor, repeated].map((entry) => JSON.stringify(entry)).join("\n"));
+		utimesSync(root, new Date(4_000), new Date(4_000));
 		const { tools, context: base } = setup();
 		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
 		const hits = toolText(await run(tools, "history", { op: "search", query: "needle", all: true }, context));
 		assert.ok(hits.includes(`[${archivedId("deadbeef", "first.jsonl")}]`));
 		assert.ok(hits.includes(`[${archivedId("deadbeef", "second.jsonl")}]`));
+		assert.ok(hits.includes(`[${archivedId("deadbeef", "root.jsonl")}]`));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
