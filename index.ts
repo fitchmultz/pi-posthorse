@@ -319,7 +319,7 @@ function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit
 		.update(entry.timestamp ?? "")
 		.update("\0")
 		.update(item.text);
-	for (const image of item.images) copy.update("\0").update(image.mimeType).update("\0").update(image.data);
+	for (const image of item.images) copy.update("\0").update(image.mimeType ?? "").update("\0").update(image.data);
 	const header = `${source ? `${source} ` : ""}${entry.timestamp ?? ""} [window ${item.windowId}] [${id}] `;
 	return {
 		id,
