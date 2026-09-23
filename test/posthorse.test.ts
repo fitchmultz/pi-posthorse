@@ -1292,7 +1292,7 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 	}
 });
 
-test("legacy note migration does not copy the shared destination back through a symlink", async () => {
+test("legacy note migration skips broken symlinks and does not copy the shared destination back", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-migration-"));
 	try {
 		const main = join(dir, "main");
@@ -1305,6 +1305,7 @@ test("legacy note migration does not copy the shared destination back through a 
 		writeFileSync(join(worktree, ".git"), `gitdir: ${join(main, ".git", "worktrees", "wt")}\n`);
 		writeFileSync(join(worktree, ".pi", "notes", "local.md"), "local state");
 		symlinkSync(join(main, ".pi"), join(worktree, ".pi", "notes", "projectState"), "dir");
+		symlinkSync(join(dir, "deleted.md"), join(worktree, ".pi", "notes", "old-state.md"));
 		const { tools, context } = setup();
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: worktree });
 
