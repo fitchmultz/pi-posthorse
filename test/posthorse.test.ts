@@ -732,7 +732,7 @@ test("new_context beside a failed sibling tool does not suppress the reminder", 
 	assert.equal(messages.length, 0, "a fully successful batch rolls over; no reminder needed");
 });
 
-test("automatic handoff carries only the trailing incomplete-response tool batch, with entry ids and no base64", () => {
+test("automatic handoff carries trailing synchronous results, with entry ids and no base64", () => {
 	const { handlers, context } = setup();
 	const image = { type: "image", data: "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=", mimeType: "image/png" };
 	const batch: Record<string, unknown>[] = [
@@ -758,7 +758,7 @@ test("automatic handoff carries only the trailing incomplete-response tool batch
 	];
 	const handoff = automaticHandoff(handlers, context, batch);
 	assert.ok(handoff.length <= 20_000);
-	assert.match(handoff, /Trailing tool batch without a later complete assistant response \(failed or interrupted requests may already have received these results\)/);
+	assert.match(handoff, /Tool result evidence \(current projected window; may already have been received or handled; not current progress\)/);
 	assert.match(handoff, /Tool-call entry assistant-1/);
 	assert.match(handoff, /\[result entry result-1\]\n3 tests failed FAILURE DETAIL/);
 	assert.match(handoff, /Call arguments: \{"command":"npm test"\}/);
@@ -767,7 +767,7 @@ test("automatic handoff carries only the trailing incomplete-response tool batch
 	assert.match(handoff, /\[result entry result-3\]\n\[1 image: image\/png\] — recover with history read id result-3/);
 	assert.doesNotMatch(handoff, /ASSISTANT PROSE|QUJDREVG/);
 	assert.ok(handoff.indexOf("entry result-1") < handoff.indexOf("entry result-2"), "results keep their order");
-	assert.ok(handoff.indexOf("entry owner") < handoff.indexOf("Trailing tool batch"));
+	assert.ok(handoff.indexOf("entry owner") < handoff.indexOf("Tool result evidence"));
 	assert.ok(handoff.indexOf("entry result-3") < handoff.indexOf("older checkpoint"));
 	assert.match(handoff, /FIRST read obsolete-checkpoint\.md/);
 
@@ -776,7 +776,7 @@ test("automatic handoff carries only the trailing incomplete-response tool batch
 			...batch,
 			{ type: "message", id: "assistant-interrupted", timestamp: "6", message: { role: "assistant", stopReason, content: "I received these results" } },
 		]);
-		assert.match(interrupted, /Trailing tool batch/);
+		assert.match(interrupted, /Tool result evidence/);
 		assert.match(interrupted, /entry result-3/);
 		assert.doesNotMatch(interrupted, /no model has seen|no model has consumed/);
 	}
@@ -808,7 +808,7 @@ test("automatic handoff carries only the trailing incomplete-response tool batch
 		...batch,
 		{ type: "message", id: "assistant-2", timestamp: "6", message: { role: "assistant", stopReason: "stop", content: "All done." } },
 	]);
-	assert.doesNotMatch(consumed, /Trailing tool batch|FAILURE DETAIL|ENOENT/);
+	assert.doesNotMatch(consumed, /Tool result evidence|FAILURE DETAIL|ENOENT/);
 	assert.match(consumed, /run the checks/);
 
 	const calls = Array.from({ length: 300 }, (_, index) => ({
@@ -833,6 +833,30 @@ test("automatic handoff carries only the trailing incomplete-response tool batch
 	]);
 	assert.ok(stressed.length <= 20_000);
 	for (const id of resultIds) assert.match(stressed, new RegExp(`entry ${id}\\]`));
+});
+
+test("async receipt recovery shares the handoff header budget across earlier batches", () => {
+	const { handlers, context } = setup();
+	const branch: Record<string, unknown>[] = [
+		{ type: "message", id: "owner", message: { role: "user", content: "Check prior receipts before taking action." } },
+	];
+	for (let index = 0; index < 600; index++) {
+		const id = `00000000-0000-7000-8000-${index.toString().padStart(12, "0")}`;
+		branch.push(
+			{ type: "message", id: `call-${index}`, message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id, name: "work", async: true, arguments: { index } }] } },
+			{ type: "message", id, message: { role: "toolResult", toolCallId: id, toolName: "work", content: `Receipt ${index} ${"r".repeat(1000)}` } },
+			{ type: "message", id: `response-${index}`, message: { role: "assistant", stopReason: "stop", content: "Complete" } },
+		);
+	}
+	const handoff = automaticHandoff(handlers, context, branch);
+	assert.ok(handoff.length <= 20_000);
+	const omitted = Number(handoff.match(/Omitted (\d+) earlier tool result\(s\) whose headers could not fit/)?.[1]);
+	assert.ok(omitted > 0 && omitted < 599, "earlier batches remain eligible under the shared header budget");
+	assert.equal((handoff.match(/\[result entry /g) ?? []).length, 600 - omitted);
+	assert.match(handoff, /entry 00000000-0000-7000-8000-000000000599\]/);
+	assert.match(handoff, /history search\/read to recover them/);
+	assert.match(handoff, /owner input.*entry owner/);
+	assert.doesNotMatch(handoff, /no model has seen|no model has consumed/);
 });
 
 test("history returns stored images for a requested entry and summarizes them elsewhere", async () => {
