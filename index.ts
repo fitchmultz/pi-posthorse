@@ -270,6 +270,10 @@ function isRecoveryCall(part: unknown): boolean {
 	return block?.type === "toolCall" && isRecoveryTool(block.name);
 }
 
+function historyFileKey(source: string): string {
+	return createHash("sha256").update(source).digest("base64url");
+}
+
 function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit | undefined {
 	const { entry } = item;
 	let text = item.text;
@@ -308,7 +312,7 @@ function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit
 			matchIndex = text.toLowerCase().indexOf(query);
 		}
 	}
-	const id = source ? `${entry.id}@${encodeURIComponent(source)}` : entry.id!;
+	const id = source ? `${entry.id}@${historyFileKey(source)}` : entry.id!;
 	const copy = createHash("sha256")
 		.update(entry.id!)
 		.update("\0")
@@ -1167,7 +1171,7 @@ export default function (pi: ExtensionAPI) {
 			const id = requireValue(params.id, "id", params.op);
 			const separator = id.indexOf("@");
 			const entryId = separator < 0 ? id : id.slice(0, separator);
-			const source = separator < 0 ? undefined : decodeURIComponent(id.slice(separator + 1));
+			const fileKey = separator < 0 ? undefined : id.slice(separator + 1);
 			const formatEntry = (item: WindowedEntry, source = "") => {
 				const offset = params.offset ?? 0;
 				const imageOffset = params.imageOffset ?? (offset === 0 ? 0 : item.images.length);
@@ -1196,14 +1200,14 @@ export default function (pi: ExtensionAPI) {
 				);
 			};
 
-			if (source === undefined) {
+			if (fileKey === undefined) {
 				for (const item of windowEntries(manager.getBranch() as EntryLike[])) {
 					if (item.entry.id === entryId) return formatEntry(item);
 				}
 			}
 			for (const file of sessionFiles(manager.getSessionDir())) {
 				const fileSource = relative(manager.getSessionDir(), file);
-				if (source !== undefined && fileSource !== source) continue;
+				if (fileKey !== undefined && historyFileKey(fileSource) !== fileKey) continue;
 				for await (const item of sessionWindowEntries(file, signal)) {
 					if (item.entry.id === entryId) return formatEntry(item, fileSource);
 				}
