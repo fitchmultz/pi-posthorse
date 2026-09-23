@@ -8,7 +8,7 @@ export type PosthorseDisplay =
 	| { kind: "note-read"; offset: number; end: number; total: number }
 	| { kind: "note-write" | "note-append" | "new-context" }
 	| { kind: "history-search"; entries: Array<{ headerLength: number; length: number }>; footerLength?: number }
-	| { kind: "history-read"; headerLength: number; offset: number; end: number; total: number };
+	| { kind: "history-read"; headerLength: number; offset: number; end: number; total: number; imageOffset?: number; imageEnd?: number; imageTotal?: number };
 
 type ToolName = "notes" | "history" | "get_context_remaining" | "new_context";
 const titles: Record<ToolName, string> = { notes: "Notes", history: "History", get_context_remaining: "Context budget", new_context: "New context" };
@@ -72,6 +72,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 					const details = [
 						name === "history" && args.op === "search" ? `Scope: ${args.all === true ? "all project sessions" : "current branch"}` : "",
 						args.offset !== undefined ? `Offset: ${typeof args.offset === "number" ? n(args.offset) : "[invalid offset]"}` : "",
+						args.imageOffset !== undefined ? `Image offset: ${typeof args.imageOffset === "number" ? n(args.imageOffset) : "[invalid image offset]"}` : "",
 						args.limit !== undefined ? `Limit: ${typeof args.limit === "number" ? n(args.limit) : "[invalid limit]"}` : "",
 					].filter(Boolean).join(" · ");
 					return [...new Text(heading, 0, 0).render(width), ...textBlock(details, theme, "muted").render(width)];
@@ -103,7 +104,16 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 					case "note-write": summary = args.content === "" ? "Cleared note" : "Saved note"; break;
 					case "note-append": summary = "Appended to note"; break;
 					case "history-search": if (Array.isArray(display.entries) && (!display.entries.length || sections)) summary = `${display.entries.length ? `${n(display.entries.length)} matches` : "No matches"} · ${args.all === true ? "all sessions" : "current branch"}${display.footerLength ? "\nMore results; continue with cursor" : ""}`; break;
-					case "history-read": summary = pageSummary(display); break;
+					case "history-read":
+						summary = pageSummary(display);
+						if (display.imageTotal && display.imageEnd !== undefined) {
+							summary = summary.split("\n")[0];
+							summary += `\nImages ${n(display.imageOffset ?? 0)}–${n(display.imageEnd)} of ${n(display.imageTotal)}`;
+							if (display.end < display.total || display.imageEnd < display.imageTotal) {
+								summary = `Next offset ${n(display.end)}\nimageOffset ${n(display.imageEnd)}\n${summary}`;
+							}
+						}
+						break;
 					case "new-context": summary = "Requested for after the whole tool batch succeeds."; break;
 				}
 			}

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Paginate stored images in history reads so large image messages remain recoverable after a context reset. Continuations carry both text and image offsets.
+
 ## 0.5.0
 
 - Requires a fork build exposing native `publishLocalFile`. Note replacements now preserve the previous content when publication fails; note locations and append behavior are unchanged.
