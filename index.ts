@@ -21,7 +21,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import * as codingAgent from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerPosthorseMessages, toolCards, type PosthorseDisplay } from "./ui.ts";
 
@@ -98,6 +98,7 @@ type EntryLike = {
 };
 
 type WindowedEntry = { entry: EntryLike; windowId: string; text: string; images: ImageLike[] };
+type ProjectedEntry = { sourceEntry: EntryLike; messages: MessageLike[] };
 type HistoryHit = { id: string; text: string; headerLength: number; priority: 0 | 1 };
 type RecoveryRecord = {
 	id: string;
@@ -260,6 +261,10 @@ function flattenEntry(entry: EntryLike): string | undefined {
 	if (entry.type === "context_window") {
 		return `[context_window] ${entry.handoff ? `Handoff: ${entry.handoff}` : "No handoff"}`;
 	}
+	if (entry.type === "context_edit" && entry.replacement) {
+		const content = entry.replacement.content;
+		return `[context_edit] ${[textOf({ content }), imageSummary(imagesOf(content))].filter(Boolean).join("\n")}`;
+	}
 	return undefined;
 }
 
@@ -330,7 +335,7 @@ function toWindowedEntry(entry: EntryLike, windows: Map<string, string>): Window
 	if (entry.id) windows.set(entry.id, windowId);
 	const text = flattenEntry(entry);
 	if (!text || !entry.id) return undefined;
-	const images = imagesOf(entry.type === "message" ? entry.message?.content : entry.content);
+	const images = imagesOf(entry.type === "context_edit" ? entry.replacement?.content : entry.type === "message" ? entry.message?.content : entry.content);
 	return { entry, windowId, text, images };
 }
 
@@ -546,7 +551,7 @@ function trailingToolBatch(
 	return { callId: (call.id ?? "unknown").slice(0, 120), blocks };
 }
 
-function buildAutoHandoff(entries: readonly EntryLike[], maxChars: number): string {
+function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly ProjectedEntry[], maxChars: number): string {
 	let windowStart = 0;
 	let priorWindow: EntryLike | undefined;
 	for (let i = entries.length - 1; i >= 0; i--) {
@@ -558,16 +563,16 @@ function buildAutoHandoff(entries: readonly EntryLike[], maxChars: number): stri
 	}
 
 	const current = entries.slice(windowStart);
-	const edits = new Map<string, EntryLike["replacement"]>();
+	const edits = new Map<string, EntryLike>();
 	for (const entry of current) {
-		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry.replacement);
+		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
 	}
 	const edited = current.flatMap((entry) => {
-		const replacement = entry.id ? edits.get(entry.id) : undefined;
-		if (replacement === null) return [];
-		if (!replacement) return [entry];
-		if (entry.type === "message") return [{ ...entry, message: { ...entry.message, content: replacement.content } }];
-		if (entry.type === "custom_message") return [{ ...entry, content: replacement.content }];
+		const edit = entry.id ? edits.get(entry.id) : undefined;
+		if (edit?.replacement === null) return [];
+		if (!edit?.replacement) return [entry];
+		if (entry.type === "message") return [{ ...entry, id: edit.id, message: { ...entry.message, content: edit.replacement.content } }];
+		if (entry.type === "custom_message") return [{ ...entry, id: edit.id, content: edit.replacement.content }];
 		return [entry];
 	});
 	const records = edited
@@ -586,7 +591,16 @@ function buildAutoHandoff(entries: readonly EntryLike[], maxChars: number): stri
 	const joinedLength = (parts: Array<string | undefined>) =>
 		parts.filter((part): part is string => Boolean(part)).join("\n\n").length;
 
-	const toolBatch = trailingToolBatch(edited);
+	const toolEntries = projected.flatMap(({ sourceEntry, messages }) =>
+		messages
+			.filter((message) => message.role === "assistant" || message.role === "toolResult")
+			.map((message) => ({
+				type: "message",
+				id: edits.get(sourceEntry.id ?? "")?.id ?? sourceEntry.id,
+				message,
+			})),
+	);
+	const toolBatch = trailingToolBatch(toolEntries);
 	const batchHeader = toolBatch
 		? `Trailing tool batch without a later complete assistant response (failed or interrupted requests may already have received these results). Tool-call entry ${toolBatch.callId}:`
 		: undefined;
@@ -937,7 +951,8 @@ export default function (pi: ExtensionAPI) {
 		if (budget && !budget.supported) return undefined;
 		const limit = freshPayloadChars(native, activeToolTokens(), event.pendingMessages);
 		if (limit < MIN_PAGE_CHARS) return undefined;
-		const handoff = buildAutoHandoff(event.branchEntries, limit);
+		const projected = (ctx as ExtensionContext).sessionManager.buildSessionProjection().entries;
+		const handoff = buildAutoHandoff(event.branchEntries, projected, limit);
 		if (handoff.length > limit) return undefined;
 		return { newContext: { handoff } };
 	});
