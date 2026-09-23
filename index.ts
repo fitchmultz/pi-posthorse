@@ -75,6 +75,7 @@ type MessageLike = {
 	errorMessage?: string;
 	content?: unknown;
 	toolName?: string;
+	namespace?: string;
 	toolCallId?: string;
 	isError?: boolean;
 	command?: string;
@@ -191,7 +192,9 @@ function importLegacyNotes(source: string, target: string, sharedRoot?: string):
 	for (const name of readdirSync(source)) {
 		const from = join(source, name);
 		const to = join(target, name);
-		if (statSync(from).isDirectory()) {
+		const info = statSync(from, { throwIfNoEntry: false });
+		if (!info) continue;
+		if (info.isDirectory()) {
 			importLegacyNotes(from, to, sharedRoot);
 		} else {
 			try {
@@ -476,6 +479,7 @@ function recoveryRecord(entry: EntryLike): RecoveryRecord | undefined {
 		entry.type === "message" &&
 		entry.message?.role === "toolResult" &&
 		entry.message.toolName === "ask_question" &&
+		entry.message.namespace === undefined &&
 		entry.message.isError !== true
 	) {
 		kind = "owner";

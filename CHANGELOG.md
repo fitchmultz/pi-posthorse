@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep namespaced `ask_question` results as ordinary tool evidence instead of treating them as owner answers during rollover.
+- Skip missing legacy note targets so broken symlinks do not block shared note reads and writes.
 - Prevent legacy note migration from copying the shared destination back through directory symlinks.
 - Read large history records without repeatedly copying and scanning their unfinished lines.
 - Honor Pi context edits and native projection in automatic recovery handoffs, including assistant checkpoints and omitted asynchronous results. Still-visible results remain in the handoff even when their call was edited out or predates the window, without borrowing another call's identity or arguments. Edited handoff references recover replacement text and images through `history read`.
