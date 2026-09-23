@@ -375,6 +375,24 @@ async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncG
 	}
 }
 
+async function sessionHeader(file: string, signal?: AbortSignal): Promise<{ parent?: string; startedAt: number }> {
+	for await (const line of jsonlLines(file, signal)) {
+		try {
+			const header = JSON.parse(line) as { type?: string; parentSession?: unknown; timestamp?: unknown };
+			if (header.type === "session") {
+				return {
+					parent: typeof header.parentSession === "string" ? resolve(dirname(file), header.parentSession) : undefined,
+					startedAt: typeof header.timestamp === "string" ? Date.parse(header.timestamp) : NaN,
+				};
+			}
+		} catch {
+			// A file without a valid Pi header has no known parent session.
+		}
+		break;
+	}
+	return { startedAt: NaN };
+}
+
 function sessionFiles(dir: string): string[] {
 	if (!existsSync(dir)) return [];
 	const files = readdirSync(dir, { recursive: true, withFileTypes: true })
@@ -1109,13 +1127,36 @@ export default function (pi: ExtensionAPI) {
 				};
 
 				if (params.all) {
-					for (const file of sessionFiles(manager.getSessionDir())) {
+					const files = sessionFiles(manager.getSessionDir());
+					const knownFiles = new Set(files);
+					const headers = new Map<string, { parent?: string; startedAt: number }>();
+					// ponytail: Pi timestamps copied entries before a fork's header. Clock rollback can blur
+					// this boundary; native per-entry origin metadata would make it exact.
+					const originFor = async (file: string, timestamp?: string): Promise<string> => {
+						const time = timestamp ? Date.parse(timestamp) : NaN;
+						if (!Number.isFinite(time)) return file;
+						const visited = new Set<string>();
+						let source = file;
+						while (knownFiles.has(source) && !visited.has(source)) {
+							visited.add(source);
+							let header = headers.get(source);
+							if (!header) {
+								header = await sessionHeader(source, signal);
+								headers.set(source, header);
+							}
+							if (!header.parent || !(time < header.startedAt)) return source;
+							source = header.parent;
+						}
+						return source;
+					};
+					for (const file of files) {
 						const recent: HistoryHit[][] = [[], []];
 						const matchedCopies = new Set<string>();
 						let anchorHere = false;
 						const source = relative(manager.getSessionDir(), file);
 						for await (const item of sessionWindowEntries(file, signal)) {
 							const hit = historyHit(item, query, source);
+							if (hit) hit.copyKey = `${historyFileKey(await originFor(file, item.entry.timestamp))}:${hit.copyKey}`;
 							if (!hit || seen.has(hit.copyKey)) continue;
 							matchedCopies.add(hit.copyKey);
 							const seeking = cursor && !found && hit.priority === cursor[1];
