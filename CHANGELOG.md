@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Skip circular directory links during note migration, listing, and search while preserving ordinary linked notes.
 - Preserve completed asynchronous tool results during rollover when the response that started them fails or is interrupted.
 - Keep namespaced `ask_question` results as ordinary tool evidence instead of treating them as owner answers during rollover.
 - Skip missing legacy note targets so broken symlinks do not block shared note reads and writes.
