@@ -460,13 +460,13 @@ test("all-session history recurses and returns newest matching entries first", a
 			context,
 		);
 		const text = toolText(search);
-		assert.match(text, /^subagents\/new\.jsonl .+\[nested-new\].+nested newest/s);
+		assert.match(text, /^subagents\/new\.jsonl .+\[nested-new@subagents%2Fnew\.jsonl\].+nested newest/s);
 		assert.ok(text.indexOf("nested-new") < text.indexOf("nested-old"));
-		assert.doesNotMatch(text, /\[old\]/);
+		assert.doesNotMatch(text, /\[old@old\.jsonl\]/);
 		mayReadCurrentBranch = true;
 		const read = await tools.get("history")!.execute(
 			"id",
-			{ op: "read", id: "nested-new" },
+			{ op: "read", id: "nested-new@subagents%2Fnew.jsonl" },
 			new AbortController().signal,
 			() => {},
 			context,
@@ -590,8 +590,8 @@ test("archived history preserves Unicode separators across chunks and an untermi
 		writeFileSync(join(dir, "session.jsonl"), entries.map((entry) => JSON.stringify(entry)).join("\r\n"));
 		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
 		const hits = toolText(await run(tools, "history", { op: "search", query: "needle", all: true }, context));
-		assert.match(hits, /\[window unicode-window\] \[unicode\]/);
-		assert.match(hits, /\[window unicode-window\] \[last\]/);
+		assert.match(hits, /\[window unicode-window\] \[unicode@session\.jsonl\]/);
+		assert.match(hits, /\[window unicode-window\] \[last@session\.jsonl\]/);
 		const read = toolText(await run(tools, "history", { op: "read", id: "unicode", offset: 66_000 }, context));
 		assert.ok(read.endsWith(body.slice(66_000 - "[user] ".length)));
 		assert.ok(toolText(await run(tools, "history", { op: "read", id: "last" }, context)).endsWith("[user] final needle\u2029tail"));
@@ -637,13 +637,13 @@ test("all-session ranking keeps older originals ahead of newer echoes before app
 		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
 		const search = async (query: string, limit: number) => toolText(await run(tools, "history", { op: "search", query, all: true, limit }, context));
 		const ids = (text: string) => [...text.matchAll(/\[window initial\] \[([^\]]+)\]/g)].map((match) => match[1]);
-		assert.deepEqual(ids(await search("needle", 1)), ["newer"]);
-		assert.deepEqual(ids(await search("needle", 2)), ["newer", "old"]);
-		assert.deepEqual(ids(await search("needle", 4)), ["newer", "old", "echo-5", "echo-4"]);
+		assert.deepEqual(ids(await search("needle", 1)), ["newer@1.jsonl"]);
+		assert.deepEqual(ids(await search("needle", 2)), ["newer@1.jsonl", "old@0.jsonl"]);
+		assert.deepEqual(ids(await search("needle", 4)), ["newer@1.jsonl", "old@0.jsonl", "echo-5@2.jsonl", "echo-4@1.jsonl"]);
 		const all = await search("needle", 50);
-		assert.deepEqual(ids(all), ["newer", "old", ...echoes.map((entry) => entry.id).reverse()]);
-		assert.match(all, /2\.jsonl[^\n]+\[echo-5\]/, "fork copies use the newest file");
-		assert.deepEqual(ids(await search("echo-only", 2)), ["echo-5", "echo-4"]);
+		assert.deepEqual(ids(all), ["newer@1.jsonl", "old@0.jsonl", "echo-5@2.jsonl", ...echoes.slice(0, 5).map((entry) => `${entry.id}@1.jsonl`).reverse()]);
+		assert.match(all, /2\.jsonl[^\n]+\[echo-5@2\.jsonl\]/, "fork copies use the newest file");
+		assert.deepEqual(ids(await search("echo-only", 2)), ["echo-5@2.jsonl", "echo-4@1.jsonl"]);
 		const controller = new AbortController();
 		controller.abort();
 		await assert.rejects(tools.get("history")!.execute("id", { op: "search", query: "needle", all: true }, controller.signal, () => {}, context), { name: "AbortError" });
@@ -1174,9 +1174,9 @@ test("all-session cursors retain ranking and fork deduplication across pages", a
 			if (!next) break;
 			cursor = next;
 		}
-		assert.deepEqual(ids.slice(0, 3), ["newer", "shared", "older"]);
+		assert.deepEqual(ids.slice(0, 3), ["newer@current.jsonl", "shared@current.jsonl", "older@old.jsonl"]);
 		assert.equal(new Set(ids).size, ids.length);
-		assert.ok(ids.includes("prior-echo"), "pagination reaches the oldest echo and terminates");
+		assert.ok(ids.includes("prior-echo@current.jsonl"), "pagination reaches the oldest echo and terminates");
 		assert.ok(ids.length < 20);
 	} finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -1352,10 +1352,52 @@ test("all-session search reports a fork-copied entry once, from the newest-modif
 		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
 		const text = toolText(await run(tools, "history", { op: "search", query: "fork needle", all: true, limit: 5 }, context));
 		assert.deepEqual(
-			text.split("\n").map((line) => line.split(" ").slice(0, 1)[0] + line.match(/\[[a-z-]+\] \[/)?.[0]),
-			["fork.jsonl[fork-new] [", "fork.jsonl[shared] ["],
+			text.split("\n").map((line) => line.match(/\[window initial\] \[([^\]]+)\]/)?.[1]),
+			["fork-new@fork.jsonl", "shared@fork.jsonl"],
 		);
-		assert.equal(text.match(/\[shared\]/g)?.length, 1);
+		assert.equal(text.match(/\[shared@fork\.jsonl\]/g)?.length, 1);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("all-session history reads the searched entry when independent sessions reuse an entry id", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-id-collision-"));
+	try {
+		for (const [name, content, time] of [
+			["older", "needle approved requirement", 1_000],
+			["newer", "needle unrelated request", 2_000],
+		] as const) {
+			const file = join(dir, `${name}.jsonl`);
+			writeFileSync(file, [
+				{ type: "session", version: 3, id: `session-${name}`, timestamp: new Date(time).toISOString(), cwd: dir },
+				{ type: "message", id: "deadbeef", parentId: null, timestamp: new Date(time).toISOString(), message: { role: "user", content } },
+				{ type: "message", id: "feedface", parentId: "deadbeef", timestamp: new Date(3_000).toISOString(), message: { role: "user", content: [{ type: "image", mimeType: "image/png", data: Buffer.from(name).toString("base64") }] } },
+			].map((entry) => JSON.stringify(entry)).join("\n"));
+			utimesSync(file, new Date(time), new Date(time));
+		}
+		const { tools, context: base } = setup();
+		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const search = (query: string, cursor?: string) => run(tools, "history", { op: "search", query, all: true, limit: 1, cursor }, context);
+		const older = toolText(await search("approved"));
+		const id = older.match(/\[window initial\] \[([^\]]+)\]/)?.[1];
+		assert.ok(id);
+		const read = toolText(await run(tools, "history", { op: "read", id }, context));
+		assert.match(read, /^older\.jsonl .+\[user\] needle approved requirement$/);
+
+		const first = toolText(await search("needle"));
+		assert.match(first, /^newer\.jsonl .+\[user\] needle unrelated request/);
+		const cursor = first.match(/\[More results; continue with cursor "([^"]+)"/)?.[1];
+		assert.ok(cursor, "the older session must not be hidden by a colliding id");
+		const second = toolText(await search("needle", cursor));
+		assert.match(second, /^older\.jsonl .+\[user\] needle approved requirement/);
+		assert.ok(second.includes(`[${id}]`), "the paged hit must use the same read reference");
+
+		const images = toolText(await run(tools, "history", { op: "search", query: "image/png", all: true }, context));
+		assert.match(images, /\[feedface@newer\.jsonl\]/);
+		assert.match(images, /\[feedface@older\.jsonl\]/);
+		const olderImage = await run(tools, "history", { op: "read", id: "feedface@older.jsonl" }, context);
+		assert.deepEqual(olderImage.content.slice(1), [{ type: "image", mimeType: "image/png", data: Buffer.from("older").toString("base64") }]);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
