@@ -217,6 +217,34 @@ test("a projected orphan result is not attributed to an older assistant", async 
 	assert.doesNotMatch(handoff, new RegExp(`Tool-call entry ${olderId}`));
 });
 
+test("mixed projected results retain their own call provenance", async (t) => {
+	let otherCallEntry;
+	const h = await fixture(t, { seed(manager) {
+		const omittedCall = { ...fauxToolCall("work", { token: "PRIVATE_MIXED_ARGUMENT" }), async: true };
+		const omittedEntry = manager.appendMessage(fauxAssistantMessage(omittedCall, { stopReason: "toolUse" }));
+		const otherCall = fauxToolCall("read", { path: "safe.txt" });
+		otherCallEntry = manager.appendMessage(fauxAssistantMessage(otherCall, { stopReason: "toolUse" }));
+		for (const [call, text] of [[omittedCall, "RESULT_A"], [otherCall, "RESULT_B"]]) {
+			manager.appendMessage({
+				role: "toolResult", toolName: call.name, toolCallId: call.id,
+				content: [{ type: "text", text }], isError: false, timestamp: Date.now(),
+			});
+		}
+		manager.appendContextEdit(omittedEntry, null);
+	} });
+	const projected = JSON.stringify(h.sessionManager.buildSessionProjection().messages);
+	assert.match(projected, /RESULT_A/);
+	assert.match(projected, /RESULT_B/);
+	assert.doesNotMatch(projected, /PRIVATE_MIXED_ARGUMENT/);
+	const handoff = automaticRecovery(h);
+	assert.match(handoff, /RESULT_A/);
+	assert.match(handoff, /RESULT_B/);
+	assert.doesNotMatch(handoff, /PRIVATE_MIXED_ARGUMENT/);
+	assert.doesNotMatch(handoff, new RegExp(`Tool-call entry ${otherCallEntry}:`));
+	assert.match(handoff, new RegExp(`Call entry: ${otherCallEntry}`));
+	assert.match(handoff, /RESULT_A[\s\S]*No matching trailing call/);
+});
+
 test("recovery excludes results dependent on an omitted async call", async (t) => {
 	const h = await fixture(t, { seed(manager) {
 		const call = { ...fauxToolCall("work", {}), async: true, executionStarted: true };

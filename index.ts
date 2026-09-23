@@ -537,6 +537,7 @@ function trailingToolBatch(
 	const linked = results.some((result) => calls.some((block) => block.id === result.message?.toolCallId));
 	const batchResults = linked ? results : results.filter((result) => !!result.message?.toolCallId && rawCallIds.has(result.message.toolCallId));
 	if (!batchResults.length) return undefined;
+	const allLinked = !!call && batchResults.every((result) => calls.some((block) => block.id === result.message?.toolCallId));
 	if (!linked) call = undefined;
 	const blocks = batchResults.map((result) => {
 		const message = result.message ?? {};
@@ -548,12 +549,15 @@ function trailingToolBatch(
 			[textOf(message).trim(), images && `${images} — recover with history read id ${resultId}`]
 				.filter(Boolean)
 				.join("\n") || "(empty result)";
+		const callDetail = matching
+			? `${allLinked ? "" : `\nCall entry: ${(call?.id ?? "unknown").slice(0, 120)}`}\nCall arguments: ${safeJsonStringify(matching.arguments ?? {})}`
+			: linked ? "\nNo matching trailing call" : "";
 		return {
 			header: `[${message.isError ? "error" : "result"} entry ${resultId}]`,
-			text: `${output}\n\nTool: ${name}${matching ? `\nCall arguments: ${safeJsonStringify(matching.arguments ?? {})}` : ""}`,
+			text: `${output}\n\nTool: ${name}${callDetail}`,
 		};
 	});
-	return { callId: call ? (call.id ?? "unknown").slice(0, 120) : undefined, blocks };
+	return { callId: allLinked ? (call?.id ?? "unknown").slice(0, 120) : undefined, blocks };
 }
 
 function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly ProjectedEntry[], maxChars: number): string {
