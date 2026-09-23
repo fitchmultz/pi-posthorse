@@ -17,7 +17,9 @@ const textOf = (message) => typeof message?.content === "string" ? message.conte
 const nextCursor = (text) => text.match(/\[More results; continue with cursor "([^"]+)" and the same query\/scope\.\]$/)?.[1];
 
 async function fixture(t, options = {}) {
-	const temp = mkdtempSync(join(process.env.PI_COMPAT_EVIDENCE_DIR ?? tmpdir(), "posthorse-regression-"));
+	const evidence = process.env.PI_COMPAT_EVIDENCE_DIR ?? tmpdir();
+	mkdirSync(evidence, { recursive: true });
+	const temp = mkdtempSync(join(evidence, "posthorse-regression-"));
 	t.diagnostic(`fixture: ${temp}`);
 	const cwd = join(temp, "project"), agentDir = join(temp, "agent");
 	mkdirSync(cwd); mkdirSync(agentDir);

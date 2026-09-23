@@ -107,8 +107,11 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 					case "history-read":
 						summary = pageSummary(display);
 						if (display.imageTotal && display.imageEnd !== undefined) {
+							summary = summary.split("\n")[0];
 							summary += `\nImages ${n(display.imageOffset ?? 0)}–${n(display.imageEnd)} of ${n(display.imageTotal)}`;
-							if (display.imageEnd < display.imageTotal) summary += `\nNext offset ${n(display.end)} · imageOffset ${n(display.imageEnd)}`;
+							if (display.end < display.total || display.imageEnd < display.imageTotal) {
+								summary = `Next offset ${n(display.end)}\nimageOffset ${n(display.imageEnd)}\n${summary}`;
+							}
 						}
 						break;
 					case "new-context": summary = "Requested for after the whole tool batch succeeds."; break;
