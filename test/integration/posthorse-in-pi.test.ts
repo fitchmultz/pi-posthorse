@@ -104,10 +104,10 @@ describe("Posthorse inside the Pi fork", () => {
 		const handoff = freshTexts[0];
 		expect(handoff).toContain("Automatic context rollover recovery record.");
 		expect(handoff).toContain("dump everything");
-		expect(handoff).toContain("Trailing tool batch");
+		expect(handoff).toContain("Tool result evidence");
 		expect(handoff).toMatch(/\[result entry [^\]]+\]\nDUMP HEAD r+\n… middle omitted …\nr+ DUMP TAIL/);
 		expect(handoff).not.toContain("OLD ASSISTANT PROSE");
-		expect(handoff.indexOf("dump everything")).toBeLessThan(handoff.indexOf("Trailing tool batch"));
+		expect(handoff.indexOf("dump everything")).toBeLessThan(handoff.indexOf("Tool result evidence"));
 		expect(handoff.indexOf("DUMP TAIL")).toBeLessThan(handoff.indexOf("older checkpoint"));
 		expect(handoff).toContain("FIRST read obsolete-checkpoint.md");
 		expect(handoff.length).toBeLessThanOrEqual(20_000);
@@ -161,7 +161,7 @@ describe("Posthorse inside the Pi fork", () => {
 
 		expect(contextWindows(harness)).toBe(1);
 		expect(freshTexts).toHaveLength(1);
-		expect(freshTexts[0]).toContain("Trailing tool batch");
+		expect(freshTexts[0]).toContain("Tool result evidence");
 		expect(freshTexts[0]).toMatch(/MEDIUM HEAD m+[\s\S]*MEDIUM TAIL/);
 		expect(freshTexts[0]).toContain(`entry ${lastToolResultId(harness)}`);
 	});

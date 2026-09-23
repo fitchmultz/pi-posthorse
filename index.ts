@@ -523,40 +523,50 @@ function formatPriorCheckpoint(entry: EntryLike | undefined, limit: number): str
 	return boundedBlock(header, handoff, limit);
 }
 
-/** Trailing results without a later complete assistant response; interrupted requests may have received them. */
-function trailingToolBatch(
+/** Async receipts can arrive during a later response, so its completion cannot establish receipt delivery. */
+function recoverableToolResults(
 	entries: readonly EntryLike[],
 ): { callId?: string; blocks: Array<{ header: string; text: string }> } | undefined {
-	const results: EntryLike[] = [];
-	let call: EntryLike | undefined;
-	for (let i = entries.length - 1; i >= 0 && !call; i--) {
+	type Call = { type?: string; id?: string; name?: string; arguments?: unknown; async?: boolean };
+	const calls = new Map<string, { entry: EntryLike; block: Call }>();
+	for (const entry of entries) {
+		if (entry.message?.role !== "assistant" || !Array.isArray(entry.message.content)) continue;
+		for (const block of entry.message.content as Call[]) {
+			if (block?.type === "toolCall" && typeof block.id === "string") calls.set(block.id, { entry, block });
+		}
+	}
+	let trailingStart = -1;
+	let hasTrailingResult = false;
+	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
-		const role = entry.type === "message" ? entry.message?.role : undefined;
+		const role = entry.message?.role;
 		if (role === "toolResult") {
-			results.unshift(entry);
+			hasTrailingResult = true;
 		} else if (role === "assistant") {
 			const invalid =
 				entry.message?.stopReason === "error" ||
 				entry.message?.stopReason === "aborted" ||
 				entry.message?.stopReason === "length";
-			// A failed response can still own completed native async calls.
-			if (!invalid || results.length) call = entry;
+			if (!invalid || hasTrailingResult) {
+				trailingStart = i;
+				break;
+			}
 		}
 	}
+	const results = entries.filter((entry, index) => {
+		const message = entry.message;
+		if (message?.role !== "toolResult" || typeof message.toolCallId !== "string") return false;
+		const call = calls.get(message.toolCallId);
+		// Use only projected provenance. An orphan may be async; never resurrect its raw call.
+		return index > trailingStart || !call || call.block.async === true;
+	});
 	if (!results.length) return undefined;
-	const calls = Array.isArray(call?.message?.content)
-		? (call.message.content as Array<{ type?: string; id?: string; name?: string; arguments?: unknown }>).filter(
-				(block) => block?.type === "toolCall",
-			)
-		: [];
-	const linked = results.some((result) => calls.some((block) => block.id === result.message?.toolCallId));
-	const batchResults = linked ? results : results.filter((result) => typeof result.message?.toolCallId === "string");
-	if (!batchResults.length) return undefined;
-	const allLinked = !!call && batchResults.every((result) => calls.some((block) => block.id === result.message?.toolCallId));
-	const blocks = batchResults.map((result) => {
+	const call = calls.get(results[0].message!.toolCallId!)?.entry;
+	const allLinked = !!call && results.every((result) => calls.get(result.message!.toolCallId!)?.entry === call);
+	const blocks = results.map((result) => {
 		const message = result.message ?? {};
-		const matching = call && calls.find((block) => block.id === message.toolCallId);
-		const name = (message.toolName ?? matching?.name ?? "tool").slice(0, 80);
+		const matching = calls.get(message.toolCallId!);
+		const name = (message.toolName ?? matching?.block.name ?? "tool").slice(0, 80);
 		const resultId = (result.id ?? "unknown").slice(0, 120);
 		const images = imageSummary(imagesOf(message.content));
 		const output =
@@ -564,8 +574,8 @@ function trailingToolBatch(
 				.filter(Boolean)
 				.join("\n") || "(empty result)";
 		const callDetail = matching
-			? `${allLinked ? "" : `\nCall entry: ${(call?.id ?? "unknown").slice(0, 120)}`}\nCall arguments: ${safeJsonStringify(matching.arguments ?? {})}`
-			: linked ? "\nNo matching trailing call" : "";
+			? `${allLinked ? "" : `\nCall entry: ${(matching.entry.id ?? "unknown").slice(0, 120)}`}\nCall arguments: ${safeJsonStringify(matching.block.arguments ?? {})}`
+			: "\nNo matching projected call";
 		return {
 			header: `[${message.isError ? "error" : "result"} entry ${resultId}]`,
 			text: `${output}\n\nTool: ${name}${callDetail}`,
@@ -623,9 +633,9 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 				message,
 			})),
 	);
-	const toolBatch = trailingToolBatch(toolEntries);
+	const toolBatch = recoverableToolResults(toolEntries);
 	const batchHeader = toolBatch
-		? `Trailing tool batch without a later complete assistant response (failed or interrupted requests may already have received these results). ${toolBatch.callId ? `Tool-call entry ${toolBatch.callId}` : "No matching trailing tool call"}:`
+		? `Tool result evidence (current projected window; may already have been received or handled; not current progress).${toolBatch.callId ? ` Tool-call entry ${toolBatch.callId}:` : ""}`
 		: undefined;
 	const minimumParts = [
 		preamble,

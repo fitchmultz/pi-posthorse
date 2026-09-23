@@ -169,7 +169,7 @@ test("automatic rollover keeps namespaced ask_question output as tool evidence, 
 	for (const text of [windows[0].handoff, nextRequest]) {
 		assert.match(text, /Do not deploy/);
 		assert.match(text, /SURVEY_OUTPUT: deployment approved/);
-		assert.match(text, /Trailing tool batch/);
+		assert.match(text, /Tool result evidence/);
 		assert.doesNotMatch(text, /owner answer via ask_question/);
 	}
 });
@@ -245,6 +245,7 @@ test("a projected orphan result is not attributed to an older assistant", async 
 			content: [{ type: "text", text: "safe orphan result" }], isError: false, timestamp: Date.now(),
 		});
 		manager.appendContextEdit(final, null);
+		manager.appendMessage(fauxAssistantMessage("Later complete response"));
 	} });
 	assert.match(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /safe orphan result/);
 	const handoff = automaticRecovery(h);
@@ -266,7 +267,7 @@ test("recovery keeps a projected result whose call predates the window", async (
 	assert.match(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /CROSS_WINDOW_RESULT/);
 	const handoff = automaticRecovery(h);
 	assert.match(handoff, /CROSS_WINDOW_RESULT/);
-	assert.match(handoff, /No matching trailing tool call/);
+	assert.match(handoff, /No matching projected call/);
 });
 
 test("mixed projected results retain their own call provenance", async (t) => {
@@ -294,7 +295,45 @@ test("mixed projected results retain their own call provenance", async (t) => {
 	assert.doesNotMatch(handoff, /PRIVATE_MIXED_ARGUMENT/);
 	assert.doesNotMatch(handoff, new RegExp(`Tool-call entry ${otherCallEntry}:`));
 	assert.match(handoff, new RegExp(`Call entry: ${otherCallEntry}`));
-	assert.match(handoff, /RESULT_A[\s\S]*No matching trailing call/);
+	assert.match(handoff, /RESULT_A[\s\S]*No matching projected call/);
+});
+
+test("interleaved async receipts retain projected provenance across complete responses", async (t) => {
+	const image = { type: "image", mimeType: "image/png", data: "PRIVATE_IMAGE_BYTES" };
+	let firstEntry, secondEntry, editId;
+	const h = await fixture(t, { seed(manager) {
+		const first = { ...fauxToolCall("work", { task: "first" }), async: true };
+		const second = { ...fauxToolCall("work", { task: "second" }), async: true };
+		const sync = fauxToolCall("read", { path: "already-read.txt" });
+		firstEntry = manager.appendMessage(fauxAssistantMessage(first, { stopReason: "toolUse" }));
+		manager.appendMessage(fauxAssistantMessage(sync, { stopReason: "toolUse" }));
+		manager.appendMessage({
+			role: "toolResult", toolName: sync.name, toolCallId: sync.id,
+			content: [{ type: "text", text: "HANDLED_SYNC_RESULT" }], isError: false, timestamp: Date.now(),
+		});
+		manager.appendMessage(fauxAssistantMessage("Finished synchronous work"));
+		secondEntry = manager.appendMessage(fauxAssistantMessage(second, { stopReason: "toolUse" }));
+		const firstResult = manager.appendMessage({
+			role: "toolResult", toolName: first.name, toolCallId: first.id,
+			content: [{ type: "text", text: "PRIVATE_FIRST_RESULT" }], isError: false, timestamp: Date.now(),
+		});
+		manager.appendMessage(fauxAssistantMessage("Another complete response"));
+		manager.appendMessage({
+			role: "toolResult", toolName: second.name, toolCallId: second.id,
+			content: [{ type: "text", text: "SECOND_ASYNC_RECEIPT" }], isError: false, timestamp: Date.now(),
+		});
+		manager.appendMessage(fauxAssistantMessage("Both results handled"));
+		editId = manager.appendContextEdit(firstResult, { content: [{ type: "text", text: "EDITED_FIRST_RECEIPT" }, image] });
+	} });
+	const handoff = automaticRecovery(h);
+	assert.match(handoff, /EDITED_FIRST_RECEIPT/);
+	assert.match(handoff, /SECOND_ASYNC_RECEIPT/);
+	assert.match(handoff, new RegExp(`Call entry: ${firstEntry}\\nCall arguments: \\{"task":"first"\\}`));
+	assert.match(handoff, new RegExp(`Call entry: ${secondEntry}\\nCall arguments: \\{"task":"second"\\}`));
+	assert.match(handoff, new RegExp(`recover with history read id ${editId}`));
+	assert.doesNotMatch(handoff, /PRIVATE_FIRST_RESULT|PRIVATE_IMAGE_BYTES|HANDLED_SYNC_RESULT|Both results handled/);
+	assert.match(handoff, /may already have been received or handled; not current progress/);
+	assert.ok(handoff.indexOf("EDITED_FIRST_RECEIPT") < handoff.indexOf("SECOND_ASYNC_RECEIPT"));
 });
 
 test("recovery excludes results dependent on an omitted async call", async (t) => {
@@ -391,7 +430,7 @@ test("native fork rollover retains recovery history and survives a checkpoint re
 	assert.equal(sessionManager.getBranch().filter((entry) => entry.type === "compaction").length, 0);
 	assert.equal(recovery.length, 1);
 	assert.match(JSON.stringify(recovery), /Automatic context rollover recovery record/);
-	assert.match(JSON.stringify(recovery), /Trailing tool batch/);
+	assert.match(JSON.stringify(recovery), /Tool result evidence/);
 	assert.match(JSON.stringify(recovery), /DUMP HEAD/);
 	assert.match(JSON.stringify(recovery), /DUMP TAIL/);
 	const history = session.messages.find((message) => message.role === "toolResult" && message.toolName === "history");
@@ -588,6 +627,31 @@ for (const all of [false, true]) test(`native search cursors finish despite appe
 	t.diagnostic(JSON.stringify({ all, originals: originals.length, returned: returned.length }));
 });
 
+test("recovery retains the owner correction and a receipt journaled during a completed response", async (t) => {
+	const h = await fixture(t, { seed(manager) {
+		const slow = { ...fauxToolCall("slow", {}), async: true };
+		const dump = fauxToolCall("dump", {});
+		manager.appendMessage(fauxAssistantMessage([slow, dump], { stopReason: "toolUse" }));
+		manager.appendMessage({
+			role: "toolResult", toolName: dump.name, toolCallId: dump.id,
+			content: [{ type: "text", text: "HANDLED_DUMP" }], isError: false, timestamp: Date.now(),
+		});
+		manager.appendMessage({ role: "user", content: "NEW_OWNER_DECISION: Work only on the revised request.", timestamp: Date.now() });
+		// Native journal order when slow finishes during a request that did not receive its result.
+		manager.appendMessage({
+			role: "toolResult", toolName: slow.name, toolCallId: slow.id,
+			content: [{ type: "text", text: "LATE_RECEIPT" }], isError: false, timestamp: Date.now(),
+		});
+		manager.appendMessage(fauxAssistantMessage("Waiting for receipt"));
+	} });
+	assert.match(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /LATE_RECEIPT/);
+	const handoff = automaticRecovery(h);
+	assert.match(handoff, /NEW_OWNER_DECISION/);
+	assert.match(handoff, /LATE_RECEIPT/);
+	assert.match(handoff, /may already have been received or handled; not current progress/);
+	assert.doesNotMatch(handoff, /HANDLED_DUMP|Waiting for receipt/);
+});
+
 for (const stopReason of ["error", "aborted", "length"]) test(`completed native async results survive ${stopReason} and rollover`, async (t) => {
 	let executions = 0, recovery = "";
 	const h = await fixture(t, { nativeAsync: true, extension(pi) {
@@ -611,7 +675,7 @@ for (const stopReason of ["error", "aborted", "length"]) test(`completed native 
 	assert.equal(executions, 1);
 	assert.ok(branch.some((entry) => entry.type === "message" && entry.message.role === "toolResult" && !entry.message.isError && textOf(entry.message).includes("COMPLETED_ACTION_RECEIPT")));
 	assert.equal(branch.filter((entry) => entry.type === "context_window").length, 1);
-	assert.match(recovery, /Trailing tool batch/);
+	assert.match(recovery, /Tool result evidence/);
 	assert.match(recovery, /COMPLETED_ACTION_RECEIPT/);
 });
 
@@ -637,7 +701,7 @@ for (const stopReason of ["error", "length", "aborted"]) test(`native delivered 
 	}
 	assert.equal(delivered, true);
 	assert.ok(h.sessionManager.getBranch().some((entry) => entry.type === "message" && entry.message.role === "assistant" && entry.message.stopReason === stopReason && textOf(entry.message).includes("I received ACTION-RECEIPT")));
-	assert.match(recovery, /Trailing tool batch without a later complete assistant response/);
+	assert.match(recovery, /Tool result evidence \(current projected window; may already have been received or handled; not current progress\)/);
 	assert.match(recovery, /ACTION-RECEIPT/);
 	assert.doesNotMatch(recovery, /no model has seen|no model has consumed/);
 });

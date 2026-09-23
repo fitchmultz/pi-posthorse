@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Retain native async receipts across later complete responses during rollover, labeled as evidence that may already have been received or handled.
 - Skip circular directory links during note migration, listing, and search while preserving ordinary linked notes.
 - Preserve completed asynchronous tool results during rollover when the response that started them fails or is interrupted.
 - Keep namespaced `ask_question` results as ordinary tool evidence instead of treating them as owner answers during rollover.
