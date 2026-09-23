@@ -1294,7 +1294,7 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 	}
 });
 
-test("legacy note migration skips broken symlinks and does not copy the shared destination back", async () => {
+test("legacy note migration skips symlink cycles and missing targets", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-migration-"));
 	try {
 		const main = join(dir, "main");
@@ -1306,6 +1306,7 @@ test("legacy note migration skips broken symlinks and does not copy the shared d
 		mkdirSync(join(worktree, ".pi", "notes"), { recursive: true });
 		writeFileSync(join(worktree, ".git"), `gitdir: ${join(main, ".git", "worktrees", "wt")}\n`);
 		writeFileSync(join(worktree, ".pi", "notes", "local.md"), "local state");
+		symlinkSync(".", join(worktree, ".pi", "notes", "loop"), "dir");
 		symlinkSync(join(main, ".pi"), join(worktree, ".pi", "notes", "projectState"), "dir");
 		symlinkSync(join(dir, "deleted.md"), join(worktree, ".pi", "notes", "old-state.md"));
 		const { tools, context } = setup();
@@ -1315,7 +1316,27 @@ test("legacy note migration skips broken symlinks and does not copy the shared d
 		assert.equal(toolText(await notes({ op: "read", path: "projectState/context.md" })), "linked state");
 		await notes({ op: "write", path: "checkpoint.md", content: "current checkpoint" });
 		assert.equal(toolText(await notes({ op: "read", path: "checkpoint.md" })), "current checkpoint");
+		await notes({ op: "append", path: "checkpoint.md", content: "next step" });
+		assert.match(toolText(await notes({ op: "search", query: "next step" })), /checkpoint\.md:2: next step/);
 		assert.equal(toolText(await notes({ op: "list" })), "checkpoint.md\nlocal.md\nprojectState/context.md");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("notes list and search follow directory aliases without following cycles", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-cycles-"));
+	try {
+		const notesDir = join(dir, ".pi", "notes");
+		mkdirSync(join(notesDir, "nested"), { recursive: true });
+		writeFileSync(join(notesDir, "nested", "state.md"), "checkpoint");
+		symlinkSync("nested", join(notesDir, "alias"), "dir");
+		symlinkSync("..", join(notesDir, "nested", "back"), "dir");
+		const { tools, context } = setup();
+		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: dir });
+
+		assert.equal(toolText(await notes({ op: "list" })), "alias/state.md\nnested/state.md");
+		assert.equal(toolText(await notes({ op: "search", query: "checkpoint" })), "alias/state.md:1: checkpoint\nnested/state.md:1: checkpoint");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

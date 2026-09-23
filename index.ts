@@ -179,23 +179,26 @@ function textResult(text: string, images: ImageLike[] = [], display?: PosthorseD
 }
 
 /** Import old checkout-local notes without overwriting shared notes, including concurrent writes. */
-function importLegacyNotes(source: string, target: string, sharedRoot?: string): void {
+function importLegacyNotes(source: string, target: string, sharedRoot?: string, ancestors = new Set<string>()): void {
 	if (!existsSync(source)) return;
+	const sourceRoot = realpathSync(source);
+	if (ancestors.has(sourceRoot)) return;
 	if (sharedRoot) {
 		// A directory symlink can lead back into the destination being populated.
-		const path = relative(sharedRoot, realpathSync(source));
+		const path = relative(sharedRoot, sourceRoot);
 		if (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`)) return;
 	}
-	if (existsSync(target) && (!statSync(target).isDirectory() || realpathSync(source) === realpathSync(target))) return;
+	if (existsSync(target) && (!statSync(target).isDirectory() || sourceRoot === realpathSync(target))) return;
 	mkdirSync(target, { recursive: true });
 	sharedRoot ??= realpathSync(target);
+	ancestors.add(sourceRoot);
 	for (const name of readdirSync(source)) {
 		const from = join(source, name);
 		const to = join(target, name);
 		const info = statSync(from, { throwIfNoEntry: false });
 		if (!info) continue;
 		if (info.isDirectory()) {
-			importLegacyNotes(from, to, sharedRoot);
+			importLegacyNotes(from, to, sharedRoot, ancestors);
 		} else {
 			try {
 				copyFileSync(from, to, constants.COPYFILE_EXCL);
@@ -204,6 +207,7 @@ function importLegacyNotes(source: string, target: string, sharedRoot?: string):
 			}
 		}
 	}
+	ancestors.delete(sourceRoot);
 }
 
 /** Conventional repos use the main checkout; separate Git directories are their own shared root. */
@@ -1073,12 +1077,16 @@ export default function (pi: ExtensionAPI) {
 				}
 				return join(dir, relative);
 			};
-			const walk = (directory: string, output: string[]) => {
+			const walk = (directory: string, output: string[], ancestors = new Set<string>()) => {
+				const root = realpathSync(directory);
+				if (ancestors.has(root)) return;
+				ancestors.add(root);
 				for (const file of readdirSync(directory)) {
 					const path = join(directory, file);
-					if (statSync(path).isDirectory()) walk(path, output);
+					if (statSync(path).isDirectory()) walk(path, output, ancestors);
 					else output.push(path);
 				}
+				ancestors.delete(root);
 			};
 
 			switch (params.op) {
