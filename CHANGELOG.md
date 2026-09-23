@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Honor Pi context edits and native projection in automatic recovery handoffs, including assistant checkpoints and omitted asynchronous results. Edited handoff references now recover replacement text and images through `history read`.
+- Honor Pi context edits and native projection in automatic recovery handoffs, including assistant checkpoints and omitted asynchronous results. Still-visible results whose calls were edited out remain in the handoff without borrowed call arguments. Edited handoff references recover replacement text and images through `history read`.
 - Keep `history` searches and reads within the current project's session files and their nested subagents, even when distinct projects share a session directory.
 - Qualify all-session history IDs by source file so search, pagination, and read distinguish entries that reuse a native ID. Fork copies now appear once per file rather than hiding unrelated matches.
 - Count active namespaced tools when sizing handoffs and recovery pages.

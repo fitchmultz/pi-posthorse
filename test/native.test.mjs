@@ -194,7 +194,27 @@ test("recovery does not use an edited assistant's unedited checkpoint", async (t
 		manager.appendContextEdit(final, null);
 	} });
 	assert.doesNotMatch(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /PRIVATE_CHECKPOINT_ARGUMENT/);
-	assert.doesNotMatch(automaticRecovery(h), /PRIVATE_CHECKPOINT_ARGUMENT/);
+	const handoff = automaticRecovery(h);
+	assert.doesNotMatch(handoff, /PRIVATE_CHECKPOINT_ARGUMENT/);
+	assert.match(handoff, /safe result/);
+});
+
+test("a projected orphan result is not attributed to an older assistant", async (t) => {
+	let olderId;
+	const h = await fixture(t, { seed(manager) {
+		olderId = manager.appendMessage(fauxAssistantMessage("Earlier unrelated response"));
+		const call = { ...fauxToolCall("work", {}), async: true };
+		const final = manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+		manager.appendMessage({
+			role: "toolResult", toolName: "work", toolCallId: call.id,
+			content: [{ type: "text", text: "safe orphan result" }], isError: false, timestamp: Date.now(),
+		});
+		manager.appendContextEdit(final, null);
+	} });
+	assert.match(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /safe orphan result/);
+	const handoff = automaticRecovery(h);
+	assert.match(handoff, /safe orphan result/);
+	assert.doesNotMatch(handoff, new RegExp(`Tool-call entry ${olderId}`));
 });
 
 test("recovery excludes results dependent on an omitted async call", async (t) => {

@@ -504,10 +504,15 @@ function formatPriorCheckpoint(entry: EntryLike | undefined, limit: number): str
 	return boundedBlock(header, handoff, limit);
 }
 
+function toolCallsOf(content: unknown): Array<{ id?: string; name?: string; arguments?: unknown }> {
+	return Array.isArray(content) ? content.filter((block) => block?.type === "toolCall") : [];
+}
+
 /** Trailing results without a later complete assistant response; interrupted requests may have received them. */
 function trailingToolBatch(
 	entries: readonly EntryLike[],
-): { callId: string; blocks: Array<{ header: string; text: string }> } | undefined {
+	rawCallIds: Set<string>,
+): { callId?: string; blocks: Array<{ header: string; text: string }> } | undefined {
 	const results: EntryLike[] = [];
 	let call: EntryLike | undefined;
 	for (let i = entries.length - 1; i >= 0 && !call; i--) {
@@ -527,15 +532,15 @@ function trailingToolBatch(
 			}
 		}
 	}
-	if (!call || !results.length) return undefined;
-	const calls = Array.isArray(call.message?.content)
-		? (call.message.content as Array<{ type?: string; id?: string; name?: string; arguments?: unknown }>).filter(
-				(block) => block?.type === "toolCall",
-			)
-		: [];
-	const blocks = results.map((result) => {
+	if (!results.length) return undefined;
+	const calls = toolCallsOf(call?.message?.content);
+	const linked = results.some((result) => calls.some((block) => block.id === result.message?.toolCallId));
+	const batchResults = linked ? results : results.filter((result) => !!result.message?.toolCallId && rawCallIds.has(result.message.toolCallId));
+	if (!batchResults.length) return undefined;
+	if (!linked) call = undefined;
+	const blocks = batchResults.map((result) => {
 		const message = result.message ?? {};
-		const matching = calls.find((block) => block.id === message.toolCallId);
+		const matching = call && calls.find((block) => block.id === message.toolCallId);
 		const name = (message.toolName ?? matching?.name ?? "tool").slice(0, 80);
 		const resultId = (result.id ?? "unknown").slice(0, 120);
 		const images = imageSummary(imagesOf(message.content));
@@ -545,10 +550,10 @@ function trailingToolBatch(
 				.join("\n") || "(empty result)";
 		return {
 			header: `[${message.isError ? "error" : "result"} entry ${resultId}]`,
-			text: `${output}\n\nTool: ${name}\nCall arguments: ${safeJsonStringify(matching?.arguments ?? {})}`,
+			text: `${output}\n\nTool: ${name}${matching ? `\nCall arguments: ${safeJsonStringify(matching.arguments ?? {})}` : ""}`,
 		};
 	});
-	return { callId: (call.id ?? "unknown").slice(0, 120), blocks };
+	return { callId: call ? (call.id ?? "unknown").slice(0, 120) : undefined, blocks };
 }
 
 function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly ProjectedEntry[], maxChars: number): string {
@@ -591,6 +596,13 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 	const joinedLength = (parts: Array<string | undefined>) =>
 		parts.filter((part): part is string => Boolean(part)).join("\n\n").length;
 
+	const rawCallIds = new Set(
+		current.flatMap((entry) =>
+			entry.type === "message" && entry.message?.role === "assistant"
+				? toolCallsOf(entry.message.content).flatMap((block) => typeof block.id === "string" ? [block.id] : [])
+				: [],
+		),
+	);
 	const toolEntries = projected.flatMap(({ sourceEntry, messages }) =>
 		messages
 			.filter((message) => message.role === "assistant" || message.role === "toolResult")
@@ -600,9 +612,9 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 				message,
 			})),
 	);
-	const toolBatch = trailingToolBatch(toolEntries);
+	const toolBatch = trailingToolBatch(toolEntries, rawCallIds);
 	const batchHeader = toolBatch
-		? `Trailing tool batch without a later complete assistant response (failed or interrupted requests may already have received these results). Tool-call entry ${toolBatch.callId}:`
+		? `Trailing tool batch without a later complete assistant response (failed or interrupted requests may already have received these results). ${toolBatch.callId ? `Tool-call entry ${toolBatch.callId}` : "No matching trailing tool call"}:`
 		: undefined;
 	const minimumParts = [
 		preamble,
@@ -621,7 +633,7 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 	}
 	const batchBlocks = toolBatch?.blocks.slice(firstBatchBlock) ?? [];
 	const batchOmission = firstBatchBlock
-		? `Omitted ${firstBatchBlock} earlier tool result(s) whose headers could not fit. Use history read with tool-call entry ${toolBatch!.callId}, then history search/read to recover them.`
+		? `Omitted ${firstBatchBlock} earlier tool result(s) whose headers could not fit. ${toolBatch!.callId ? `Use history read with tool-call entry ${toolBatch!.callId}, then ` : "Use "}history search/read to recover them.`
 		: undefined;
 	const bareBatch = batchHeader
 		? [batchHeader, batchOmission, ...batchBlocks.map((block) => block.header)]
