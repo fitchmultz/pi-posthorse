@@ -29,6 +29,7 @@ type TestContext = {
 	sessionManager: {
 		getBranch(): Record<string, unknown>[];
 		getSessionDir(): string;
+		buildSessionProjection?(): { entries: Array<{ sourceEntry: Record<string, unknown>; messages: unknown[] }> };
 	};
 	getContextUsage(): { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
 	getCompactionSettings(): { enabled: boolean; reserveTokens: number };
@@ -65,7 +66,7 @@ function setup() {
 	const context: TestContext = {
 		cwd: process.cwd(),
 		model: { contextWindow: 100_000 },
-		sessionManager: { getBranch: () => [], getSessionDir: () => tmpdir() },
+		sessionManager: { getBranch: () => [], getSessionDir: () => tmpdir(), buildSessionProjection: () => ({ entries: [] }) },
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
 		getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }),
 		getSystemPrompt: () => "You are a test assistant.",
@@ -105,10 +106,13 @@ function usageContext(base: TestContext, contextWindow: number, tokens: number, 
 }
 
 function automaticHandoff(handlers: Map<string, Handler>, context: TestContext, branchEntries: Record<string, unknown>[]) {
+	const entries = branchEntries
+		.filter((entry) => entry.type === "message")
+		.map((entry) => ({ sourceEntry: entry, messages: [entry.message] }));
 	return (
 		handlers.get("session_before_auto_compact")!(
 			{ reason: "threshold", branchEntries },
-			context,
+			{ ...context, sessionManager: { ...context.sessionManager, buildSessionProjection: () => ({ entries }) } },
 		) as { newContext: { handoff: string } }
 	).newContext.handoff;
 }

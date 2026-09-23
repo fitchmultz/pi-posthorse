@@ -49,6 +49,17 @@ async function fixture(t, options = {}) {
 	return { cwd, session, faux, sessionManager, settingsManager, resourceLoader };
 }
 
+function automaticRecovery({ session, sessionManager, resourceLoader }) {
+	const extension = resourceLoader.getExtensions().extensions.find((item) => item.path === join(root, "index.ts"));
+	const handler = extension.handlers.get("session_before_auto_compact")[0];
+	const result = handler({
+		type: "session_before_auto_compact", reason: "threshold",
+		branchEntries: sessionManager.getBranch(), pendingMessages: [], signal: new AbortController().signal,
+	}, session.extensionRunner.createContext());
+	assert.ok(result?.newContext?.handoff);
+	return result.newContext.handoff;
+}
+
 
 test("all-session history scopes project sessions and their nested subagents", async (t) => {
 	let foreignId, ownId, foreignChildId, ownChildId;
@@ -126,6 +137,169 @@ test("history recovers every image across pages and fresh contexts", async (t) =
 		assert.ok(offset > 0, "image-only pages retain the completed text offset");
 	}
 	assert.deepEqual(recovered, images);
+});
+
+test("automatic rollover respects context edits in its recovery handoff", async (t) => {
+	const { session, faux, sessionManager } = await fixture(t, {
+		contextWindow: 128_000,
+		seed(manager) {
+			const omitted = manager.appendMessage({ role: "user", content: "PRIVATE_EDIT_MARKER", timestamp: Date.now() });
+			manager.appendContextEdit(omitted, null);
+			const revised = manager.appendMessage({ role: "user", content: "OBSOLETE_EDIT_MARKER", timestamp: Date.now() });
+			manager.appendContextEdit(revised, { content: "APPROVED_EDIT_MARKER" });
+		},
+		extension(pi) {
+			pi.registerTool({
+				name: "dump", label: "dump", description: "Large local result",
+				parameters: { type: "object", properties: {} },
+				async execute() { return { content: [{ type: "text", text: `PRIVATE_TOOL_MARKER ${"x".repeat(600_000)}` }], details: {} }; },
+			});
+			pi.on("turn_end", (event, ctx) => {
+				if (!event.toolResults.some((result) => result.toolName === "dump")) return;
+				const result = ctx.sessionManager.getBranch().findLast((entry) =>
+					entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "dump");
+				ctx.sessionManager.appendContextEdit(result.id, { content: [{ type: "text", text: `APPROVED_TOOL_MARKER ${"x".repeat(600_000)}` }] });
+			});
+		},
+	});
+	const requests = [];
+	faux.setResponses([
+		(ctx) => { requests.push(JSON.stringify(ctx.messages)); return fauxAssistantMessage(fauxToolCall("dump", {}), { stopReason: "toolUse" }); },
+		(ctx) => { requests.push(JSON.stringify(ctx.messages)); return fauxAssistantMessage("done"); },
+	]);
+	await session.prompt("Run the local dump tool.");
+	const windows = sessionManager.getBranch().filter((entry) => entry.type === "context_window");
+	assert.equal(windows.length, 1);
+	assert.equal(requests.length, 2);
+	for (const text of [...requests, windows[0].handoff]) {
+		assert.equal(/PRIVATE_EDIT_MARKER|OBSOLETE_EDIT_MARKER/.test(text), false);
+		assert.equal(text.includes("APPROVED_EDIT_MARKER"), true);
+	}
+	for (const text of [requests[1], windows[0].handoff]) {
+		assert.equal(text.includes("PRIVATE_TOOL_MARKER"), false);
+		assert.equal(text.includes("APPROVED_TOOL_MARKER"), true);
+	}
+});
+
+test("recovery does not use an edited assistant's unedited checkpoint", async (t) => {
+	const h = await fixture(t, { seed(manager) {
+		const call = { ...fauxToolCall("work", { token: "PRIVATE_CHECKPOINT_ARGUMENT" }), async: true };
+		manager.appendMessage(fauxAssistantMessage(call, { responseId: "checkpoint-response", stopReason: "pending" }), true);
+		const final = manager.appendMessage(fauxAssistantMessage(call, { responseId: "checkpoint-response", stopReason: "toolUse" }));
+		manager.appendMessage(fauxAssistantMessage({ ...call, executionStarted: true }, { responseId: "checkpoint-response", stopReason: "pending" }), true);
+		manager.appendMessage({
+			role: "toolResult", toolName: "work", toolCallId: call.id,
+			content: [{ type: "text", text: "safe result" }], isError: false, timestamp: Date.now(),
+		});
+		manager.appendContextEdit(final, null);
+	} });
+	assert.doesNotMatch(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /PRIVATE_CHECKPOINT_ARGUMENT/);
+	const handoff = automaticRecovery(h);
+	assert.doesNotMatch(handoff, /PRIVATE_CHECKPOINT_ARGUMENT/);
+	assert.match(handoff, /safe result/);
+});
+
+test("a projected orphan result is not attributed to an older assistant", async (t) => {
+	let olderId;
+	const h = await fixture(t, { seed(manager) {
+		olderId = manager.appendMessage(fauxAssistantMessage("Earlier unrelated response"));
+		const call = { ...fauxToolCall("work", {}), async: true };
+		const final = manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+		manager.appendMessage({
+			role: "toolResult", toolName: "work", toolCallId: call.id,
+			content: [{ type: "text", text: "safe orphan result" }], isError: false, timestamp: Date.now(),
+		});
+		manager.appendContextEdit(final, null);
+	} });
+	assert.match(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /safe orphan result/);
+	const handoff = automaticRecovery(h);
+	assert.match(handoff, /safe orphan result/);
+	assert.doesNotMatch(handoff, new RegExp(`Tool-call entry ${olderId}`));
+});
+
+test("recovery keeps a projected result whose call predates the window", async (t) => {
+	const h = await fixture(t, { seed(manager) {
+		const call = { ...fauxToolCall("work", {}), async: true };
+		manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+		manager.appendContextWindow("Fresh window", null);
+		manager.appendMessage(fauxAssistantMessage("Unrelated response"));
+		manager.appendMessage({
+			role: "toolResult", toolName: "work", toolCallId: call.id,
+			content: [{ type: "text", text: "CROSS_WINDOW_RESULT" }], isError: false, timestamp: Date.now(),
+		});
+	} });
+	assert.match(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /CROSS_WINDOW_RESULT/);
+	const handoff = automaticRecovery(h);
+	assert.match(handoff, /CROSS_WINDOW_RESULT/);
+	assert.match(handoff, /No matching trailing tool call/);
+});
+
+test("mixed projected results retain their own call provenance", async (t) => {
+	let otherCallEntry;
+	const h = await fixture(t, { seed(manager) {
+		const omittedCall = { ...fauxToolCall("work", { token: "PRIVATE_MIXED_ARGUMENT" }), async: true };
+		const omittedEntry = manager.appendMessage(fauxAssistantMessage(omittedCall, { stopReason: "toolUse" }));
+		const otherCall = fauxToolCall("read", { path: "safe.txt" });
+		otherCallEntry = manager.appendMessage(fauxAssistantMessage(otherCall, { stopReason: "toolUse" }));
+		for (const [call, text] of [[omittedCall, "RESULT_A"], [otherCall, "RESULT_B"]]) {
+			manager.appendMessage({
+				role: "toolResult", toolName: call.name, toolCallId: call.id,
+				content: [{ type: "text", text }], isError: false, timestamp: Date.now(),
+			});
+		}
+		manager.appendContextEdit(omittedEntry, null);
+	} });
+	const projected = JSON.stringify(h.sessionManager.buildSessionProjection().messages);
+	assert.match(projected, /RESULT_A/);
+	assert.match(projected, /RESULT_B/);
+	assert.doesNotMatch(projected, /PRIVATE_MIXED_ARGUMENT/);
+	const handoff = automaticRecovery(h);
+	assert.match(handoff, /RESULT_A/);
+	assert.match(handoff, /RESULT_B/);
+	assert.doesNotMatch(handoff, /PRIVATE_MIXED_ARGUMENT/);
+	assert.doesNotMatch(handoff, new RegExp(`Tool-call entry ${otherCallEntry}:`));
+	assert.match(handoff, new RegExp(`Call entry: ${otherCallEntry}`));
+	assert.match(handoff, /RESULT_A[\s\S]*No matching trailing call/);
+});
+
+test("recovery excludes results dependent on an omitted async call", async (t) => {
+	const h = await fixture(t, { seed(manager) {
+		const call = { ...fauxToolCall("work", {}), async: true, executionStarted: true };
+		const callId = manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+		const laterId = manager.appendMessage(fauxAssistantMessage("Unrelated complete response"));
+		manager.appendMessage({
+			role: "toolResult", toolName: "work", toolCallId: call.id,
+			content: [{ type: "text", text: "PRIVATE_ASYNC_RESULT" }], isError: false, timestamp: Date.now(),
+		});
+		manager.appendCompaction("Previous context", laterId, 100);
+		manager.appendContextEdit(callId, null);
+	} });
+	assert.doesNotMatch(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /PRIVATE_ASYNC_RESULT/);
+	assert.doesNotMatch(automaticRecovery(h), /PRIVATE_ASYNC_RESULT/);
+});
+
+test("edited image recovery points to the replacement rather than the raw original", async (t) => {
+	const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0ioAAAAASUVORK5CYII=" };
+	let editId;
+	const h = await fixture(t, { seed(manager) {
+		const original = manager.appendMessage({ role: "user", content: "PRIVATE_IMAGE_ORIGINAL", timestamp: Date.now() });
+		editId = manager.appendContextEdit(original, { content: [image] });
+	} });
+	assert.doesNotMatch(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /PRIVATE_IMAGE_ORIGINAL/);
+	const handoff = automaticRecovery(h);
+	const pointer = handoff.match(/recover with history read id ([^\s]+)/)?.[1];
+	assert.ok(pointer, handoff);
+	h.faux.setResponses([
+		fauxAssistantMessage(fauxToolCall("history", { op: "read", id: pointer }), { stopReason: "toolUse" }),
+		fauxAssistantMessage("done"),
+	]);
+	await h.session.prompt("Recover the edited image.");
+	const result = h.sessionManager.getBranch().findLast((entry) =>
+		entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "history").message;
+	assert.equal(result.isError, false);
+	assert.equal(result.content.filter((part) => part.type === "image").length, 1);
+	assert.doesNotMatch(textOf(result), /PRIVATE_IMAGE_ORIGINAL/);
+	assert.equal(pointer, editId);
 });
 
 test("native fork rollover retains recovery history and survives a checkpoint restore", async (t) => {
