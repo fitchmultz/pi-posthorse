@@ -174,6 +174,73 @@ test("automatic rollover keeps namespaced ask_question output as tool evidence, 
 	}
 });
 
+test("recovery and history retain native tool identity and admitted arguments after rollover", async (t) => {
+	const executed = [];
+	const h = await fixture(t, {
+		nativeAsync: true,
+		extension(pi) {
+			for (const namespace of ["ENVIRONMENT_A", "ENVIRONMENT_B"]) pi.registerTool({
+				namespace, name: "record", async: true, label: "Record", description: "In-memory fixture operation",
+				parameters: { type: "object", properties: { target: { type: "string" } }, required: ["target"] },
+				prepareArguments(args) { return { ...args, target: `${namespace}_ACTUAL_RESOURCE` }; },
+				async execute(id, args) {
+					executed.push({ namespace, id, args });
+					return { content: [{ type: "text", text: "Fixture operation complete" }], details: {} };
+				},
+			});
+		},
+	});
+	const calls = ["ENVIRONMENT_A", "ENVIRONMENT_B"].map((namespace, i) => {
+		const call = { ...fauxToolCall("record", { target: "REQUESTED_ALIAS" }), namespace, async: true };
+		call.responsesItem = { type: "function_call", id: `fc_identity_${i}`, call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments), async: true, status: "completed" };
+		return call;
+	});
+	h.faux.setResponses([
+		fauxAssistantMessage(calls, { responseId: "resp_identity", stopReason: "toolUse" }),
+		fauxAssistantMessage("Done"),
+	]);
+	await h.session.prompt("Run both in-memory fixture operations exactly once.");
+	assert.deepEqual(executed, calls.map((call) => ({
+		namespace: call.namespace, id: call.id, args: { target: `${call.namespace}_ACTUAL_RESOURCE` },
+	})));
+	// History reads raw journal entries; each call's execution checkpoint holds its admitted input.
+	const callEntries = calls.map((call) => h.sessionManager.getBranch().findLast((entry) =>
+		entry.type === "message" && entry.message.role === "assistant" &&
+		entry.message.content.some((part) => part.id === call.id && part.executionArguments)));
+	const resultEntries = h.sessionManager.getBranch().filter((entry) =>
+		entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "record");
+	const handoff = automaticRecovery(h);
+	h.session.newContext({ handoff });
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+	assert.ok(!h.sessionManager.buildSessionProjection().messages.some((message) =>
+		message.role === "assistant" && message.content.some((part) => part.id === calls[0].id)));
+
+	const lookups = [
+		...callEntries.map((entry) => fauxToolCall("history", { op: "read", id: entry.id })),
+		...resultEntries.map((entry) => fauxToolCall("history", { op: "read", id: entry.id })),
+		fauxToolCall("history", { op: "search", query: "ENVIRONMENT_A" }),
+		fauxToolCall("history", { op: "search", query: "ACTUAL_RESOURCE" }),
+	];
+	h.faux.setResponses([fauxAssistantMessage(lookups, { stopReason: "toolUse" }), fauxAssistantMessage("History recovered")]);
+	await h.session.prompt("Recover the earlier operations from history.");
+	const reads = lookups.map((lookup) => textOf(h.sessionManager.getBranch().find((entry) =>
+		entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === lookup.id)?.message));
+	for (const [i, call] of calls.entries()) {
+		for (const text of [handoff, reads[i]]) {
+			assert.ok(text.includes(`record (namespace: "${call.namespace}")`), text);
+			assert.ok(text.includes(`Call ID: ${call.id}`), text);
+			assert.ok(text.includes('{"target":"REQUESTED_ALIAS"}'), text);
+			assert.ok(text.includes(`Execution arguments: {"target":"${call.namespace}_ACTUAL_RESOURCE"}`), text);
+		}
+		const resultText = reads[calls.length + resultEntries.findIndex((entry) => entry.message.toolCallId === call.id)];
+		assert.ok(resultText.includes(`record (namespace: "${call.namespace}")`), resultText);
+		assert.ok(resultText.includes(`Call ID: ${call.id}`), resultText);
+	}
+	assert.ok(reads.at(-2).includes(`[${callEntries[0].id}]`), reads.at(-2));
+	assert.ok(reads.at(-1).includes(`[${callEntries[1].id}]`), reads.at(-1));
+	assert.equal(executed.length, 2, "recovery does not execute the operations again");
+});
+
 test("automatic rollover respects context edits in its recovery handoff", async (t) => {
 	const { session, faux, sessionManager } = await fixture(t, {
 		contextWindow: 128_000,
