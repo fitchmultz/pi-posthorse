@@ -69,6 +69,15 @@ type NativeExtensionAPI = {
 };
 
 type ImageLike = { type: "image"; data: string; mimeType: string };
+type ToolCallLike = {
+	type?: string;
+	id?: string;
+	name?: string;
+	namespace?: string;
+	arguments?: unknown;
+	executionArguments?: unknown;
+	async?: boolean;
+};
 type MessageLike = {
 	role?: string;
 	stopReason?: string;
@@ -158,16 +167,26 @@ function safeJsonStringify(value: unknown): string {
 	}
 }
 
+function toolIdentity(name?: string, namespace?: string): string {
+	return `${name ?? "tool"}${namespace === undefined ? "" : ` (namespace: ${safeJsonStringify(namespace)})`}`;
+}
+
+function executionArgumentsText(call: ToolCallLike): string {
+	return call.executionArguments === undefined ? "" : `\nExecution arguments: ${safeJsonStringify(call.executionArguments)}`;
+}
+
 function textOf(message: MessageLike): string {
 	if (typeof message.content === "string") return message.content;
 	if (!Array.isArray(message.content)) return "";
 	return message.content
 		.map((part) => {
 			if (!part || typeof part !== "object") return "";
-			const block = part as { type?: string; text?: string; thinking?: string; name?: string; arguments?: unknown };
+			const block = part as ToolCallLike & { text?: string; thinking?: string };
 			if (block.type === "text") return block.text ?? "";
 			if (block.type === "thinking") return block.thinking ?? "";
-			if (block.type === "toolCall") return `${block.name ?? "tool"} ${safeJsonStringify(block.arguments ?? {})}`;
+			if (block.type === "toolCall") {
+				return `${toolIdentity(block.name, block.namespace)} ${safeJsonStringify(block.arguments ?? {})}${block.id === undefined ? "" : `\nCall ID: ${block.id}`}${executionArgumentsText(block)}`;
+			}
 			return "";
 		})
 		.filter(Boolean)
@@ -263,7 +282,10 @@ function flattenEntry(entry: EntryLike): string | undefined {
 			if (message.excludeFromContext === true) return "[bashExecution] (excluded from model context by Pi)";
 			return `[bashExecution] $ ${message.command ?? ""}\n${message.output ?? ""}`;
 		}
-		return `[${message.role ?? "message"}] ${[textOf(message), assistantFailure(message), imageSummary(imagesOf(message.content))].filter(Boolean).join("\n")}`;
+		const resultIdentity = message.role === "toolResult"
+			? `Tool: ${toolIdentity(message.toolName, message.namespace)}${message.toolCallId === undefined ? "" : `\nCall ID: ${message.toolCallId}`}`
+			: "";
+		return `[${message.role ?? "message"}] ${[textOf(message), assistantFailure(message), imageSummary(imagesOf(message.content)), resultIdentity].filter(Boolean).join("\n")}`;
 	}
 	if (entry.type === "compaction" || entry.type === "branch_summary") {
 		return `[${entry.type}] ${entry.summary ?? ""}`;
@@ -527,11 +549,10 @@ function formatPriorCheckpoint(entry: EntryLike | undefined, limit: number): str
 function recoverableToolResults(
 	entries: readonly EntryLike[],
 ): { callId?: string; blocks: Array<{ header: string; text: string }> } | undefined {
-	type Call = { type?: string; id?: string; name?: string; arguments?: unknown; async?: boolean };
-	const calls = new Map<string, { entry: EntryLike; block: Call }>();
+	const calls = new Map<string, { entry: EntryLike; block: ToolCallLike }>();
 	for (const entry of entries) {
 		if (entry.message?.role !== "assistant" || !Array.isArray(entry.message.content)) continue;
-		for (const block of entry.message.content as Call[]) {
+		for (const block of entry.message.content as ToolCallLike[]) {
 			if (block?.type === "toolCall" && typeof block.id === "string") calls.set(block.id, { entry, block });
 		}
 	}
@@ -566,7 +587,7 @@ function recoverableToolResults(
 	const blocks = results.map((result) => {
 		const message = result.message ?? {};
 		const matching = calls.get(message.toolCallId!);
-		const name = (message.toolName ?? matching?.block.name ?? "tool").slice(0, 80);
+		const name = toolIdentity(message.toolName ?? matching?.block.name, message.namespace ?? matching?.block.namespace);
 		const resultId = (result.id ?? "unknown").slice(0, 120);
 		const images = imageSummary(imagesOf(message.content));
 		const output =
@@ -574,11 +595,11 @@ function recoverableToolResults(
 				.filter(Boolean)
 				.join("\n") || "(empty result)";
 		const callDetail = matching
-			? `${allLinked ? "" : `\nCall entry: ${(matching.entry.id ?? "unknown").slice(0, 120)}`}\nCall arguments: ${safeJsonStringify(matching.block.arguments ?? {})}`
+			? `${allLinked ? "" : `\nCall entry: ${(matching.entry.id ?? "unknown").slice(0, 120)}`}\nCall arguments: ${safeJsonStringify(matching.block.arguments ?? {})}${executionArgumentsText(matching.block)}`
 			: "\nNo matching projected call";
 		return {
 			header: `[${message.isError ? "error" : "result"} entry ${resultId}]`,
-			text: `${output}\n\nTool: ${name}${callDetail}`,
+			text: `${output}\n\nTool: ${name}\nCall ID: ${message.toolCallId}${callDetail}`,
 		};
 	});
 	return { callId: allLinked ? (call?.id ?? "unknown").slice(0, 120) : undefined, blocks };
