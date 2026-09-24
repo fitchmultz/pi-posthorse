@@ -1095,7 +1095,9 @@ export default function (pi: ExtensionAPI) {
 				ancestors.add(root);
 				for (const file of readdirSync(directory)) {
 					const path = join(directory, file);
-					if (statSync(path).isDirectory()) walk(path, output, ancestors);
+					const info = statSync(path, { throwIfNoEntry: false });
+					if (!info) continue;
+					if (info.isDirectory()) walk(path, output, ancestors);
 					else output.push(path);
 				}
 				ancestors.delete(root);
