@@ -1348,7 +1348,7 @@ test("legacy note migration skips symlink cycles and missing targets", async () 
 	}
 });
 
-test("notes list and search follow directory aliases without following cycles", async () => {
+test("notes list and search follow aliases while skipping cycles and missing targets", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-cycles-"));
 	try {
 		const notesDir = join(dir, ".pi", "notes");
@@ -1356,6 +1356,8 @@ test("notes list and search follow directory aliases without following cycles", 
 		writeFileSync(join(notesDir, "nested", "state.md"), "checkpoint");
 		symlinkSync("nested", join(notesDir, "alias"), "dir");
 		symlinkSync("..", join(notesDir, "nested", "back"), "dir");
+		symlinkSync("deleted.md", join(notesDir, "missing.md"));
+		symlinkSync("deleted-directory", join(notesDir, "missing-directory"), "dir");
 		const { tools, context } = setup();
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: dir });
 
