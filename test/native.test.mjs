@@ -336,13 +336,13 @@ test("interleaved async receipts retain projected provenance across complete res
 	assert.ok(handoff.indexOf("EDITED_FIRST_RECEIPT") < handoff.indexOf("SECOND_ASYNC_RECEIPT"));
 });
 
-test("recovery excludes results dependent on an omitted async call", async (t) => {
+for (const toolName of ["work", "ask_question"]) test(`recovery excludes ${toolName} results dependent on an omitted async call`, async (t) => {
 	const h = await fixture(t, { seed(manager) {
-		const call = { ...fauxToolCall("work", {}), async: true, executionStarted: true };
+		const call = { ...fauxToolCall(toolName, {}), async: true, executionStarted: true };
 		const callId = manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
 		const laterId = manager.appendMessage(fauxAssistantMessage("Unrelated complete response"));
 		manager.appendMessage({
-			role: "toolResult", toolName: "work", toolCallId: call.id,
+			role: "toolResult", toolName, toolCallId: call.id,
 			content: [{ type: "text", text: "PRIVATE_ASYNC_RESULT" }], isError: false, timestamp: Date.now(),
 		});
 		manager.appendCompaction("Previous context", laterId, 100);
