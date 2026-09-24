@@ -114,7 +114,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 							}
 						}
 						break;
-					case "new-context": summary = "Requested for after the whole tool batch succeeds."; break;
+					case "new-context": summary = "Requested after foreground tools succeed.\nBackground work continues."; break;
 				}
 			}
 			if (!context.isError && !isPartial && (display?.kind === "notes-list" || display?.kind === "notes-search") && display.page && (display.page.offset || display.page.end < display.page.total)) summary += `\n${pageSummary(display.page)}`;

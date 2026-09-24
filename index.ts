@@ -59,6 +59,12 @@ type NativeContext = {
 };
 
 type NativeExtensionAPI = {
+	registerContextWindowHook(
+		handler: (
+			event: { contextEntries: ProjectedEntry[]; pendingMessages: MessageLike[] },
+			ctx: ExtensionContext,
+		) => ReceiptEdit[] | undefined,
+	): void;
 	on(
 		event: "session_before_auto_compact",
 		handler: (
@@ -109,6 +115,7 @@ type EntryLike = {
 
 type WindowedEntry = { entry: EntryLike; windowId: string; text: string; images: ImageLike[] };
 type ProjectedEntry = { sourceEntry: EntryLike; messages: MessageLike[] };
+type ReceiptEdit = { type: "context_edit"; targetId: string; replacement: { content: string } };
 type HistoryHit = { id: string; text: string; headerLength: number; priority: 0 | 1 };
 type RecoveryRecord = {
 	id: string;
@@ -618,7 +625,7 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 
 	const current = entries.slice(windowStart);
 	const edits = new Map<string, EntryLike>();
-	for (const entry of current) {
+	for (const entry of entries) {
 		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
 	}
 	const omittedProjectedIds = new Set(projected.filter(({ messages }) => !messages.length).map(({ sourceEntry }) => sourceEntry.id));
@@ -809,6 +816,74 @@ function freshPayloadChars(ctx: NativeContext, toolTokens: number, pendingMessag
 	);
 }
 
+/** Bound only the carried receipts; edits preserve the journal and native call/result identity. */
+function boundWindowReceipts(
+	ctx: ExtensionContext & NativeContext,
+	projected: readonly ProjectedEntry[],
+	pending: readonly MessageLike[],
+	toolTokens: number,
+): ReceiptEdit[] | undefined {
+	if (!ctx.model) return undefined;
+	const estimate = codingAgent.estimateTokens as (message: MessageLike) => number;
+	const messages = projected.flatMap((entry) => entry.messages);
+	const budget = budgetFor(ctx);
+	const reserve = budget?.enabled && budget.supported ? budget.reserveTokens : 0;
+	const overhead =
+		reserve +
+		PAGE_MARGIN_TOKENS +
+		Math.max(
+			Math.ceil(ctx.getSystemPrompt().length / 4) + toolTokens,
+			messages.filter((message) => message.role === "system").reduce((sum, message) => sum + estimate(message), 0),
+		) +
+		pending.reduce((sum, message) => sum + estimate(message), 0);
+	const fixed = messages.filter((message) => message.role !== "system" && message.role !== "toolResult");
+	const available = ctx.model.contextWindow - overhead - fixed.reduce((sum, message) => sum + estimate(message), 0);
+	const edits = new Map<string, EntryLike>();
+	for (const entry of ctx.sessionManager.getBranch() as EntryLike[]) {
+		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
+	}
+	const receipts = projected.flatMap(({ sourceEntry, messages }) =>
+		messages.filter((message) => message.role === "toolResult").map((message) => {
+			if (!sourceEntry.id) throw new Error("Posthorse: retained receipt has no history entry");
+			const recoveryId = edits.get(sourceEntry.id)?.id ?? sourceEntry.id;
+			const images = imageSummary(imagesOf(message.content));
+			const header = `Retained ${message.isError ? "error" : "result"} excerpt. Full content: history read id ${recoveryId}.${images ? `\n${images}` : ""}\n`;
+			const cost = estimate(message);
+			const minimum = Math.min(cost, Math.ceil(header.length / 4));
+			return { id: sourceEntry.id, message, header, cost, minimum };
+		}),
+	);
+	if (receipts.reduce((sum, receipt) => sum + receipt.cost, 0) <= available) return undefined;
+	let extra = available - receipts.reduce((sum, receipt) => sum + receipt.minimum, 0);
+	if (extra < 0) throw new Error("Posthorse: fresh context cannot fit fixed input and receipt recovery references");
+	// Like handoffs, oversized receipt excerpts leave half the remaining capacity for continued work.
+	extra = Math.floor(extra / 2);
+	const drafts: ReceiptEdit[] = [];
+	receipts.sort((a, b) => a.cost - a.minimum - (b.cost - b.minimum));
+	for (const [index, receipt] of receipts.entries()) {
+		const allowance = receipt.minimum + Math.min(receipt.cost - receipt.minimum, Math.floor(extra / (receipts.length - index)));
+		extra -= allowance - receipt.minimum;
+		if (receipt.cost <= allowance) continue;
+		const content = receipt.header + excerpt(textOf(receipt.message), allowance * 4 - receipt.header.length);
+		drafts.push({ type: "context_edit", targetId: receipt.id, replacement: { content } });
+	}
+	const replacements = new Map(drafts.map((draft) => [draft.targetId, draft.replacement.content]));
+	const total = projected.reduce(
+		(sum, entry) =>
+			sum + entry.messages.reduce(
+				(tokens, message) => tokens + (message.role === "system" ? 0 : estimate(
+					replacements.has(entry.sourceEntry.id ?? "")
+						? { ...message, content: replacements.get(entry.sourceEntry.id!) }
+						: message,
+				)),
+				0,
+			),
+		overhead,
+	);
+	if (total > ctx.model.contextWindow) throw new Error("Posthorse: retained receipts exceed fresh context capacity");
+	return drafts;
+}
+
 function unsupportedMessage(budget: Budget): string {
 	const n = (value: number) => value.toLocaleString("en-US");
 	return `Posthorse: unsupported configuration. The model's context window (${n(budget.contextWindow)} tokens) minus Pi's compaction.reserveTokens (${n(budget.reserveTokens)}) leaves ${n(budget.usable)} usable tokens; Posthorse needs at least ${n(MIN_USABLE_TOKENS)}. Automatic rollover and checkpoint reminders are off for this model. Lower compaction.reserveTokens in Pi settings or use a larger-context model. new_context remains available with a model-aware handoff limit.`;
@@ -841,11 +916,15 @@ function buildGuidance(ctx: NativeContext): string {
 	return `## Context self-management (Posthorse)
 Context windows are finite. Use get_context_remaining for the best available native estimate when it matters; routine turns do not include a changing meter.
 ${automatic}
-new_context starts a genuinely fresh Pi context after the complete tool batch. Earlier conversation remains in the session transcript and is recoverable with notes and history.
+new_context requests a fresh Pi context after the current foreground tools succeed. Background work continues across the reset. Earlier conversation remains in the session transcript and is recoverable with notes and history.
 Automatic handoffs are emergency recovery records, not proof of current state. Restore notes/todos/history and verify live state before continuing stateful or external work.`;
 }
 
 export default function (pi: ExtensionAPI) {
+	const nativePi = pi as unknown as NativeExtensionAPI;
+	if (typeof nativePi.registerContextWindowHook !== "function") {
+		throw new Error("Posthorse requires the fitchmultz/pi fork with registerContextWindowHook (see README).");
+	}
 	registerPosthorseMessages(pi);
 	const activeToolTokens = () => {
 		const active = new Set(pi.getActiveTools());
@@ -863,6 +942,10 @@ export default function (pi: ExtensionAPI) {
 				0,
 			);
 	};
+
+	nativePi.registerContextWindowHook((event, ctx) =>
+		boundWindowReceipts(nativeContext(ctx), event.contextEntries, event.pendingMessages, activeToolTokens()),
+	);
 
 	let pendingPageTokens = 0;
 	let previousPageUsage: number | null | undefined;
@@ -943,7 +1026,8 @@ export default function (pi: ExtensionAPI) {
 			(event.message.stopReason === "error" || event.message.stopReason === "aborted")
 		)
 			return;
-		// Pi commits a new_context request only when every tool in the batch succeeded.
+		// Suppress clear successes; turn_end can also include unrelated background errors.
+		// If Pi still rolls over, context filtering below removes any stale reminder.
 		if (
 			event.toolResults.some((result) => result.toolName === "new_context") &&
 			!event.toolResults.some((result) => result.isError)
@@ -1018,8 +1102,8 @@ export default function (pi: ExtensionAPI) {
 		label: "New Context",
 		...toolCards("new_context"),
 		description:
-			"Start a genuinely fresh context window after this tool batch. Earlier conversation leaves active context without a generated summary but remains recoverable through history. Pass concise continuation state in handoff, or save richer state with notes first.",
-		promptSnippet: "start a fresh context window with an optional atomic handoff",
+			"Request a fresh context window after the current foreground tools succeed. Background work continues across the reset. Earlier conversation leaves active context without a generated summary but remains recoverable through history. Pass concise continuation state in handoff, or save richer state with notes first.",
+		promptSnippet: "request a fresh context window with an optional atomic handoff",
 		promptGuidelines: [
 			"Before calling new_context, pass concise continuation state in handoff or save durable goal/progress/decisions/next-steps with notes",
 		],
@@ -1042,7 +1126,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			return {
 				...textResult(
-					"Requested a fresh Pi context after this complete tool batch succeeds. Earlier conversation stays in session history.",
+					"Requested a fresh Pi context after the current foreground tools succeed. Background work continues across the reset. Earlier conversation stays in session history.",
 					[],
 					{ kind: "new-context" },
 				),

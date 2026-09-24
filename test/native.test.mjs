@@ -7,7 +7,7 @@ import { basename, dirname, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const hostIndex = process.env.PI_HOST_INDEX ? pathToFileURL(process.env.PI_HOST_INDEX).href : import.meta.resolve("@earendil-works/pi-coding-agent");
-const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(hostIndex);
+const { createAgentSession, DefaultResourceLoader, estimateTokens, ModelRuntime, SessionManager, SettingsManager } = await import(hostIndex);
 
 // Resolve the faux provider from the selected host's graph as well.
 const aiManifest = pathToFileURL(findPackageJSON("@earendil-works/pi-ai", hostIndex));
@@ -24,7 +24,7 @@ async function fixture(t, options = {}) {
 	t.diagnostic(`fixture: ${temp}`);
 	const cwd = join(temp, "project"), agentDir = join(temp, "agent");
 	mkdirSync(cwd); mkdirSync(agentDir);
-	const faux = fauxProvider({ api: options.nativeAsync ? "openai-responses" : undefined, models: [{ id: "posthorse-regression", contextWindow: options.contextWindow ?? 100_000, maxTokens: 1000 }] });
+	const faux = fauxProvider({ api: options.nativeAsync ? "openai-responses" : undefined, models: [{ id: "posthorse-regression", contextWindow: options.contextWindow ?? 100_000, maxTokens: options.maxTokens ?? 1000 }] });
 	if (options.nativeAsync) faux.getModel().compat = { supportsAsyncTools: true };
 	const setResponses = faux.setResponses;
 	faux.setResponses = (steps) => setResponses(steps.map((step) => (ctx, opts) => {
@@ -321,9 +321,10 @@ test("a projected orphan result is not attributed to an older assistant", async 
 });
 
 test("recovery keeps a projected result whose call predates the window", async (t) => {
+	let callEntry;
 	const h = await fixture(t, { seed(manager) {
 		const call = { ...fauxToolCall("work", {}), async: true };
-		manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+		callEntry = manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
 		manager.appendContextWindow("Fresh window", null);
 		manager.appendMessage(fauxAssistantMessage("Unrelated response"));
 		manager.appendMessage({
@@ -334,7 +335,10 @@ test("recovery keeps a projected result whose call predates the window", async (
 	assert.match(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /CROSS_WINDOW_RESULT/);
 	const handoff = automaticRecovery(h);
 	assert.match(handoff, /CROSS_WINDOW_RESULT/);
-	assert.match(handoff, /No matching projected call/);
+	assert.ok(h.sessionManager.buildSessionProjection().entries.some((entry) =>
+		entry.sourceEntry.id === callEntry && entry.messages.some((message) => message.role === "assistant")));
+	assert.match(handoff, new RegExp(`Tool-call entry ${callEntry}:`));
+	assert.match(handoff, /Call arguments: \{\}/);
 });
 
 test("mixed projected results retain their own call provenance", async (t) => {
@@ -719,9 +723,11 @@ test("recovery retains the owner correction and a receipt journaled during a com
 	assert.doesNotMatch(handoff, /HANDLED_DUMP|Waiting for receipt/);
 });
 
-for (const stopReason of ["error", "aborted", "length"]) test(`completed native async results survive ${stopReason} and rollover`, async (t) => {
+for (const [stopReason, pendingChars] of [["error", 0], ["aborted", 0], ["length", 0], ["aborted", 240_000]]) test(`completed native async results survive ${stopReason} and rollover (new input=${pendingChars})`, async (t) => {
 	let executions = 0, recovery = "";
-	const h = await fixture(t, { nativeAsync: true, extension(pi) {
+	let recoveredMessages;
+	const reserve = 16_384;
+	const h = await fixture(t, { nativeAsync: true, maxTokens: stopReason === "length" ? 24_000 : 1000, extension(pi) {
 		pi.registerTool({ name: "receipt", async: true, label: "Receipt", description: "Local receipt", parameters: { type: "object", properties: {} }, async execute() {
 			executions++;
 			return { content: [{ type: "text", text: `COMPLETED_ACTION_RECEIPT ${stopReason === "error" ? "" : "r".repeat(600_000)}` }], details: {} };
@@ -734,16 +740,251 @@ for (const stopReason of ["error", "aborted", "length"]) test(`completed native 
 			responseId: "resp_receipt", stopReason,
 			...(stopReason === "error" ? { errorMessage: "context_length_exceeded: Your input exceeds the context window of this model" } : {}),
 		}),
-		(ctx) => { recovery = ctx.messages.map(textOf).join("\n"); return fauxAssistantMessage("Continued"); },
+		(ctx) => {
+			recoveredMessages = structuredClone(ctx.messages);
+			recovery = ctx.messages.map(textOf).join("\n");
+			return fauxAssistantMessage("Continued");
+		},
 	]);
 	await h.session.prompt("Perform the local operation exactly once and check its receipt.");
-	if (stopReason === "aborted") await h.session.prompt("Continue without repeating the operation.");
+	if (stopReason === "aborted") await h.session.prompt(`Continue without repeating the operation. ${"p".repeat(pendingChars)}`);
 	const branch = h.sessionManager.getBranch();
+	const inputTokens = recoveredMessages.reduce((sum, message) => sum + estimateTokens(message), 0);
+	assert.ok(inputTokens + reserve <= 100_000, `fresh provider input ${inputTokens} plus reserve exceeds capacity`);
+	assert.equal(h.faux.state.callCount, 2, "rollover must not add a provider request");
 	assert.equal(executions, 1);
 	assert.ok(branch.some((entry) => entry.type === "message" && entry.message.role === "toolResult" && !entry.message.isError && textOf(entry.message).includes("COMPLETED_ACTION_RECEIPT")));
-	assert.equal(branch.filter((entry) => entry.type === "context_window").length, 1);
+	// The large new prompt needs another window after the first rollover retained its receipt.
+	assert.equal(branch.filter((entry) => entry.type === "context_window").length, pendingChars ? 2 : 1);
 	assert.match(recovery, /Tool result evidence/);
 	assert.match(recovery, /COMPLETED_ACTION_RECEIPT/);
+	const receipt = recoveredMessages.find((message) => message.role === "toolResult" && message.toolCallId === call.id);
+	assert.equal(receipt?.isError, false);
+	assert.equal(receipt?.toolName, "receipt");
+	if (stopReason !== "error") {
+		const sourceId = textOf(receipt).match(/history read id ([a-f0-9]+)\./)?.[1];
+		assert.ok(sourceId, "bounded receipt must expose its full-history reference");
+		let source = h.sessionManager.getEntry(sourceId);
+		if (pendingChars) {
+			assert.equal(source.type, "context_edit", "the second window must preserve the prior replacement as its recovery source");
+			source = h.sessionManager.getEntry(textOf(source.replacement).match(/history read id ([a-f0-9]+)\./)?.[1]);
+		}
+		assert.equal(textOf(source.message), `COMPLETED_ACTION_RECEIPT ${"r".repeat(600_000)}`);
+		if (stopReason === "length") {
+			let offset = 0, recovered = "";
+			for (;;) {
+				h.session.newContext({ handoff: "Recover the original receipt without repeating the operation." });
+				h.faux.setResponses([
+					fauxAssistantMessage(fauxToolCall("history", { op: "read", id: sourceId, offset }), { stopReason: "toolUse" }),
+					fauxAssistantMessage("Page received"),
+				]);
+				await h.session.prompt("Read the next receipt page.");
+				const page = h.sessionManager.getBranch().findLast((entry) =>
+					entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "history").message;
+				assert.equal(page.isError, false);
+				const { headerLength, end, total } = page.details;
+				recovered += textOf(page).slice(headerLength, headerLength + end - offset);
+				assert.ok(end > offset, "history paging must progress");
+				offset = end;
+				if (end === total) break;
+			}
+			assert.equal(recovered, `[toolResult] COMPLETED_ACTION_RECEIPT ${"r".repeat(600_000)}\nTool: receipt\nCall ID: ${call.id}`);
+			assert.equal(executions, 1, "history recovery cannot repeat the operation");
+		}
+	}
+	t.diagnostic(JSON.stringify({ stopReason, pendingChars, inputTokens, reserve }));
+});
+
+for (const mode of ["explicit", "automatic"]) test(`large model output ceilings allow ${mode} rollover`, async (t) => {
+	const h = await fixture(t, {
+		maxTokens: mode === "explicit" ? 100_000 : 150_000,
+		extension(pi) {
+			pi.registerTool({
+				name: "dump", label: "Dump", description: "Trigger automatic rollover",
+				parameters: { type: "object", properties: {} },
+				async execute() { return { content: [{ type: "text", text: "d".repeat(600_000) }], details: {} }; },
+			});
+		},
+	});
+	if (mode === "explicit") h.session.newContext({ handoff: "Continue in a fresh window" });
+	let observed = false;
+	h.faux.setResponses([
+		...(mode === "automatic" ? [fauxAssistantMessage(fauxToolCall("dump", {}), { stopReason: "toolUse" })] : []),
+		(ctx) => {
+			observed = true;
+			assert.equal(ctx.messages.filter((message) => message.role === "toolResult").length, 0);
+			const tokens = ctx.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+			assert.ok(tokens + 16_384 <= 100_000, "fresh input fits Pi's configured reserve");
+			return fauxAssistantMessage("Fresh window received");
+		},
+	]);
+	await h.session.prompt("Continue the local work.");
+	assert.equal(observed, true);
+	assert.equal(h.faux.state.callCount, mode === "explicit" ? 1 : 2);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_edit").length, 0);
+});
+
+test("a receipt fitting Pi's reserve stays unchanged despite a large model output ceiling", async (t) => {
+	const content = [{ type: "text", text: `FITTING_RECEIPT ${"r".repeat(200_000)}` }];
+	const call = { ...fauxToolCall("receipt", {}), async: true };
+	call.responsesItem = { type: "function_call", id: "fc_fitting", call_id: call.id, name: call.name, arguments: "{}", async: true, status: "completed" };
+	const h = await fixture(t, {
+		maxTokens: 60_000, nativeAsync: true,
+		seed(manager) {
+			manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+			manager.appendMessage({
+				role: "toolResult", toolName: call.name, toolCallId: call.id,
+				content, isError: false, timestamp: Date.now(),
+			});
+		},
+	});
+	h.session.newContext({ handoff: "Inspect the retained receipt." });
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_edit").length, 0);
+	let observed = false;
+	h.faux.setResponses([(ctx) => {
+		observed = true;
+		const receipt = ctx.messages.find((message) => message.role === "toolResult" && message.toolCallId === call.id);
+		assert.deepEqual(receipt?.content, content);
+		const tokens = ctx.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+		assert.ok(tokens + 16_384 <= 100_000);
+		return fauxAssistantMessage("Receipt received");
+	}]);
+	await h.session.prompt("Check the receipt without repeating the action.");
+	assert.equal(observed, true);
+	assert.equal(h.faux.state.callCount, 1);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+});
+
+test("fixed input that cannot fit stops an explicit rollover before provider dispatch", async (t) => {
+	const h = await fixture(t, { contextWindow: 40_000, customPrompt: "s".repeat(100_000) });
+	assert.throws(() => h.session.newContext(), /fresh context cannot fit fixed input/);
+	assert.equal(h.faux.state.callCount, 0);
+});
+
+test("a 600k native receipt completed during the awaited rollover hook is bounded before dispatch", async (t) => {
+	const gate = Promise.withResolvers(), written = Promise.withResolvers();
+	let executions = 0, requests = 0;
+	const content = `DURING_HOOK_HEAD ${"r".repeat(600_000)} DURING_HOOK_TAIL`;
+	const h = await fixture(t, { nativeAsync: true, extension(pi) {
+		pi.registerTool({
+			name: "late", async: true, label: "Late", description: "Receipt arriving during rollover",
+			parameters: { type: "object", properties: {} },
+			async execute() {
+				executions++;
+				await gate.promise;
+				return { content: [{ type: "text", text: content }], details: {} };
+			},
+		});
+		pi.registerTool({
+			name: "dump", label: "Dump", description: "Trigger automatic rollover",
+			parameters: { type: "object", properties: {} },
+			async execute() { return { content: [{ type: "text", text: "d".repeat(340_000) }], details: {} }; },
+		});
+		pi.on("session_before_auto_compact", async () => {
+			gate.resolve();
+			await written.promise;
+		});
+	} });
+	const call = { ...fauxToolCall("late", {}), async: true };
+	call.responsesItem = { type: "function_call", id: "fc_late", call_id: call.id, name: call.name, arguments: "{}", async: true, status: "completed" };
+	h.session.subscribe((event) => {
+		if (event.type === "message_end" && event.message.role === "toolResult" && event.message.toolCallId === call.id) written.resolve();
+	});
+	h.faux.setResponses([
+		() => { requests++; return fauxAssistantMessage([call, fauxToolCall("dump", {})], { stopReason: "toolUse" }); },
+		(ctx) => {
+			requests++;
+			const tokens = ctx.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+			assert.ok(tokens + 16_384 <= 100_000, `late receipt input ${tokens} plus reserve exceeds capacity`);
+			const receipt = ctx.messages.find((message) => message.role === "toolResult" && message.toolCallId === call.id);
+			assert.equal(receipt?.isError, false);
+			assert.match(textOf(receipt), /DURING_HOOK_HEAD/);
+			assert.match(textOf(receipt), /DURING_HOOK_TAIL/);
+			const sourceId = textOf(receipt).match(/history read id ([a-f0-9]+)\./)?.[1];
+			assert.equal(textOf(h.sessionManager.getEntry(sourceId).message), content);
+			return fauxAssistantMessage("Receipt checked");
+		},
+	]);
+	await h.session.prompt("Execute both local operations once.");
+	assert.equal(executions, 1);
+	assert.equal(requests, 2);
+	assert.equal(h.faux.state.callCount, 2);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+});
+
+test("explicit windows share receipt capacity, preserve edited provenance, and reopen without growth", async (t) => {
+	const ids = [], calls = [];
+	let approvedId;
+	const h = await fixture(t, {
+		contextWindow: 100_000,
+		nativeAsync: true,
+		extension(pi) {
+			pi.registerTool({
+				name: "catalog", namespace: "large", label: "Catalog", description: "d".repeat(20_000),
+				parameters: { type: "object", properties: {} },
+				async execute() { throw new Error("Receipt recovery must not execute a tool"); },
+			});
+		},
+		seed(manager) {
+			for (const [index, content] of [
+				[{ type: "text", text: "PRIVATE_ORIGINAL" }],
+				Array.from({ length: 120 }, () => ({ type: "image", mimeType: "image/png", data: "PRIVATE_IMAGE" })),
+				[{ type: "text", text: "small receipt" }],
+			].entries()) {
+				const call = { ...fauxToolCall("catalog", { index }), namespace: "large", async: true, executionStarted: true };
+				call.responsesItem = { type: "function_call", id: `fc_multi_${index}`, call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments), async: true, status: "completed" };
+				calls.push(call);
+				manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+				ids.push(manager.appendMessage({
+					role: "toolResult", toolName: "catalog", namespace: "large", toolCallId: call.id,
+					content, isError: index === 0, timestamp: Date.now(),
+				}));
+			}
+			approvedId = manager.appendContextEdit(ids[0], { content: `APPROVED_HEAD ${"a".repeat(600_000)} APPROVED_TAIL` });
+			manager.appendContextWindow("Prior retained window", null, ids);
+		},
+	});
+	const handoff = automaticRecovery(h);
+	assert.ok(handoff.includes(`entry ${approvedId}`), "handoffs must use edits from before the prior window");
+	h.session.newContext({ handoff });
+	const projection = h.sessionManager.buildSessionProjection();
+	const results = projection.messages.filter((message) => message.role === "toolResult");
+	assert.deepEqual(results.map((message) => message.toolCallId), calls.map((call) => call.id));
+	assert.deepEqual(results.map((message) => message.isError), [true, false, false]);
+	assert.ok(results.every((message) => message.namespace === "large"));
+	assert.match(textOf(results[0]), new RegExp(`history read id ${approvedId}\\.`));
+	assert.match(textOf(results[0]), /APPROVED_HEAD/);
+	assert.match(textOf(results[0]), /APPROVED_TAIL/);
+	assert.doesNotMatch(JSON.stringify(results), /PRIVATE_ORIGINAL|PRIVATE_IMAGE/);
+	assert.match(textOf(results[1]), new RegExp(`history read id ${ids[1]}\\.`));
+	assert.match(textOf(results[1]), /120 images/);
+	assert.equal(textOf(results[2]), "small receipt");
+	assert.deepEqual(
+		SessionManager.open(h.sessionManager.getSessionFile()).buildSessionProjection().messages.filter((message) => message.role === "toolResult"),
+		results,
+	);
+	const edits = h.sessionManager.getBranch().filter((entry) => entry.type === "context_edit");
+	h.session.newContext({ handoff: "Same capacity" });
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_edit").length, edits.length);
+	h.session.agent.state.model = { ...h.session.model, contextWindow: 40_000 };
+	h.session.newContext({ handoff: "Smaller model" });
+	const smaller = h.sessionManager.buildSessionProjection().messages.filter((message) => message.role === "toolResult");
+	const priorExcerpt = edits.findLast((entry) => entry.targetId === ids[0]);
+	assert.match(textOf(smaller[0]), new RegExp(`history read id ${priorExcerpt.id}\\.`));
+	assert.doesNotMatch(JSON.stringify(smaller), /PRIVATE_ORIGINAL|PRIVATE_IMAGE/);
+	assert.deepEqual(
+		SessionManager.open(h.sessionManager.getSessionFile()).buildSessionProjection().messages.filter((message) => message.role === "toolResult"),
+		smaller,
+	);
+	h.faux.setResponses([(ctx) => {
+		const tokens = ctx.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+		assert.ok(tokens + 16_384 <= 40_000, `complete multi-receipt input ${tokens} plus reserve exceeds capacity`);
+		assert.equal(ctx.messages.filter((message) => message.role === "toolResult").length, 3);
+		return fauxAssistantMessage("Checked the retained receipts");
+	}]);
+	await h.session.prompt("Check the retained receipts.");
+	assert.equal(h.faux.state.callCount, 1);
 });
 
 for (const stopReason of ["error", "length", "aborted"]) test(`native delivered tool results remain recoverable after ${stopReason} without an unseen claim`, async (t) => {

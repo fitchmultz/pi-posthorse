@@ -22,6 +22,7 @@ function setup() {
 	const messages = new Map<string, MessageRenderer>();
 	posthorse({
 		on() {},
+		registerContextWindowHook() {},
 		registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
 		registerMessageRenderer: (name: string, renderer: MessageRenderer) => messages.set(name, renderer),
 		getActiveTools: () => [...tools.keys()],
@@ -252,10 +253,11 @@ test("new_context remains a conditional request and only its committed message s
 	const handoff = Array.from({ length: 60 }, (_, i) => `Handoff line ${i + 1}`).join("\n");
 	const args = { handoff };
 	const output = await execute("new_context", args, context(tmpdir()));
-	assert.deepEqual(output.content, [{ type: "text", text: "Requested a fresh Pi context after this complete tool batch succeeds. Earlier conversation stays in session history." }]);
+	assert.match(output.content.map((part) => part.type === "text" ? part.text : "").join("\n"), /Requested.*foreground tools succeed.*Background work continues/s);
 	const component = card("new_context", args);
 	component.updateResult({ ...output, isError: false });
-	assert.match(text(component), /Requested.*batch succeeds/s);
+	assert.match(text(component), /Requested.*foreground tools succeed/s);
+	assert.match(text(component), /Background work continues/);
 	assert.doesNotMatch(text(component), /committed|window started/i);
 	component.setExpanded(true);
 	assert.match(text(component), /Handoff line 60/);
