@@ -1,8 +1,8 @@
 {
 	"name": "pi-posthorse",
-	"version": "0.5.0",
+	"version": "0.5.0-official.1",
 	"type": "module",
-	"description": "Experimental Posthorse for official Pi 0.87.1: no-summary context resets, handoffs, notes, and history.",
+	"description": "Posthorse beta for official Pi 0.87.1: no-summary context resets, handoffs, notes, and history.",
 	"keywords": ["pi-package", "pi-extension", "context", "posthorse", "rollover"],
 	"repository": {
 		"type": "git",
@@ -15,7 +15,7 @@
 	},
 	"pi": {
 		"extensions": ["./index.ts"],
-		"image": "https://raw.githubusercontent.com/fitchmultz/pi-posthorse/main/diagram.png"
+		"image": "https://raw.githubusercontent.com/fitchmultz/pi-posthorse/upstream/diagram.png"
 	},
 	"scripts": {
 		"check": "tsc --noEmit",

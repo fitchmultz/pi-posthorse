@@ -7,8 +7,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { access, lstat, open, readlink, realpath, rename, unlink } from "node:fs/promises";
-import { isContextOverflow } from "@earendil-works/pi-ai/compat";
+import { access, lstat, open, readlink, realpath, rename, stat, unlink } from "node:fs/promises";
 import {
 	appendFileSync,
 	constants,
@@ -47,25 +46,60 @@ const LEGACY_AUTO_HANDOFF_PREFIX =
 type CompactionPolicy = { enabled: boolean; reserveTokens: number };
 type PolicyContext = Pick<ExtensionContext, "model" | "getContextUsage" | "getSystemPrompt"> & { policy: CompactionPolicy };
 
-/** Same-directory rename publishes a complete note or leaves the original untouched. */
-async function publishLocalFile(path: string, content: string, signal?: AbortSignal): Promise<void> {
-	signal?.throwIfAborted();
-	if (path.endsWith(sep)) statSync(path);
-	// Follow final symlinks, including dangling links, without replacing the link itself.
+/** Matches the fork's local publisher: resolve each link without normalizing away path constraints. */
+async function resolveLocalFileTarget(absolutePath: string): Promise<string> {
+	if (!isAbsolute(absolutePath)) throw new Error("Expected an absolute file path");
+	let target = absolutePath;
 	const links = new Set<string>();
-	let previous;
 	for (;;) {
-		path = join(await realpath(dirname(path)), basename(path));
-		previous = await lstat(path).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
-		if (!previous?.isSymbolicLink()) break;
-		if (links.has(path)) throw new Error(`Symlink cycle: ${path}`);
-		links.add(path);
-		const link = await readlink(path);
-		path = isAbsolute(link) ? link : `${dirname(path)}${sep}${link}`;
+		// A trailing separator requires an existing directory, never a new regular file.
+		if (target.endsWith(sep) || target.endsWith("/")) {
+			await stat(target);
+			return realpath(target);
+		}
+		const parentInput = dirname(target);
+		// realpath alone can accept regular-file/.. on macOS; stat checks traversal.
+		const parentInfo = await stat(parentInput);
+		if (!parentInfo.isDirectory()) {
+			throw Object.assign(new Error(`Not a directory: ${parentInput}`), { code: "ENOTDIR" });
+		}
+		const parent = await realpath(parentInput);
+		target = join(parent, basename(target));
+		const info = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+			if (error.code !== "ENOENT") throw error;
+			return undefined;
+		});
+		if (!info) return target;
+		if (!info.isSymbolicLink()) return realpath(target);
+		if (links.has(target)) {
+			throw Object.assign(new Error(`Symlink cycle: ${absolutePath}`), { code: "ELOOP" });
+		}
+		links.add(target);
+		const link = await readlink(target);
+		// Preserve ".." until realpath has followed any preceding directory symlinks.
+		target = isAbsolute(link) ? link : `${parent}${sep}${link}`;
 	}
-	if (previous && !previous.isFile()) throw new Error(`Cannot publish to a non-regular file: ${path}`);
-	if (previous) await access(path, constants.W_OK);
-	const temporary = join(dirname(path), `.posthorse-${randomUUID()}.tmp`);
+}
+
+/** Same-directory publication preserves ordinary mode/uid/gid; hardlinks retain the old inode. */
+async function publishLocalFile(path: string, content: string, signal?: AbortSignal): Promise<void> {
+	const throwIfAborted = () => {
+		if (signal?.aborted) throw Object.assign(new Error("Operation aborted", { cause: signal.reason }), { code: "ABORT_ERR" });
+	};
+	throwIfAborted();
+	const target = await resolveLocalFileTarget(path);
+	const previous = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+		if (error.code !== "ENOENT") throw error;
+		return undefined;
+	});
+	if (previous && !previous.isFile()) {
+		throw Object.assign(new Error(`Cannot publish to a non-regular file: ${target}`), {
+			code: previous.isDirectory() ? "EISDIR" : "EINVAL", path: target,
+		});
+	}
+	if (previous) await access(target, constants.W_OK);
+	throwIfAborted();
+	const temporary = join(dirname(target), `.posthorse-${randomUUID()}.tmp`);
 	const file = await open(temporary, "wx", previous ? 0o600 : 0o666);
 	try {
 		await file.writeFile(content, { signal });
@@ -75,8 +109,8 @@ async function publishLocalFile(path: string, content: string, signal?: AbortSig
 			await file.chmod(previous.mode & 0o777);
 		}
 		await file.close();
-		signal?.throwIfAborted();
-		await rename(temporary, path);
+		throwIfAborted();
+		await rename(temporary, target);
 	} catch (error) {
 		await file.close().catch(() => {});
 		await unlink(temporary).catch(() => {});
@@ -112,8 +146,6 @@ type EntryLike = {
 	handoff?: string;
 	targetId?: string;
 	replacement?: { content: unknown } | null;
-	/** Search locator for a boundary draft whose persisted ID does not exist yet. */
-	recoveryQuery?: string;
 };
 
 type WindowedEntry = { entry: EntryLike; windowId: string; text: string; images: ImageLike[] };
@@ -277,8 +309,7 @@ function customHistoryQuery(entry: EntryLike): string {
 }
 
 function historyReference(entry: EntryLike): string {
-	const query = entry.recoveryQuery ?? (!entry.id ? customHistoryQuery(entry) : undefined);
-	return query ? `history search query ${JSON.stringify(query)}` : `history read id ${entry.id!.slice(0, 120)}`;
+	return `history read id ${entry.id?.slice(0, 120) ?? "unknown"}`;
 }
 
 function flattenEntry(entry: EntryLike): string | undefined {
@@ -630,7 +661,7 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 		const edit = entry.id ? edits.get(entry.id) : undefined;
 		if (edit?.replacement === null) return [];
 		if (!edit?.replacement) return [entry];
-		const reference = { id: edit.id, recoveryQuery: edit.id ? undefined : editHistoryQuery(edit) };
+		const reference = { id: edit.id };
 		if (entry.type === "message") return [{ ...entry, ...reference, message: { ...entry.message, content: edit.replacement.content } }];
 		if (entry.type === "custom_message") return [{ ...entry, ...reference, content: edit.replacement.content }];
 		return [entry];
@@ -658,7 +689,6 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 			.map((message) => ({
 				type: "message",
 				id: edit ? edit.id : sourceEntry.id,
-				recoveryQuery: edit && !edit.id ? editHistoryQuery(edit) : undefined,
 				message,
 			}));
 	});
@@ -817,7 +847,7 @@ function freshPayloadChars(ctx: PolicyContext, toolTokens: number, pendingMessag
 
 function unsupportedMessage(budget: Budget): string {
 	const n = (value: number) => value.toLocaleString("en-US");
-	return `Posthorse: unsupported configuration. The model's context window (${n(budget.contextWindow)} tokens) minus Pi's compaction.reserveTokens (${n(budget.reserveTokens)}) leaves ${n(budget.usable)} usable tokens; Posthorse needs at least ${n(MIN_USABLE_TOKENS)}. Automatic rollover and checkpoint reminders are off for this model. Lower compaction.reserveTokens in Pi settings or use a larger-context model. new_context remains available with a model-aware handoff limit.`;
+	return `Posthorse: unsupported configuration. The model's context window (${n(budget.contextWindow)} tokens) minus the available compaction.reserveTokens (${n(budget.reserveTokens)}) leaves ${n(budget.usable)} usable tokens; Posthorse needs at least ${n(MIN_USABLE_TOKENS)}. Checkpoint reminders are off under these settings. If Pi's live policy matches, automatic compaction remains native and may generate a summary. Lower compaction.reserveTokens in Pi settings or use a larger-context model. new_context remains available with a model-aware handoff limit.`;
 }
 
 /** Capacity before Pi's automatic line (or configured context limit), including page metadata and refusals. */
@@ -835,18 +865,19 @@ function buildGuidance(ctx: PolicyContext): string {
 	let automatic: string;
 	if (!enabled) {
 		automatic =
-			"Pi compaction is disabled, so Posthorse sends no checkpoint reminder and performs no automatic rollover. new_context remains available.";
+			"Pi compaction is disabled in the available settings, so Posthorse sends no checkpoint reminder. new_context remains available.";
 	} else if (budget && !budget.supported) {
 		automatic = unsupportedMessage(budget);
 	} else {
 		const deadline = budget
 			? `${Math.max(1, Math.round((budget.rolloverAt / budget.contextWindow) * 100))}% used`
 			: "the configured Pi context limit";
-		automatic = `Automatic Posthorse rollover follows Pi's enabled compaction setting. At most one best-effort checkpoint reminder may appear before the rollover line (${deadline}); a large turn, overflow, restart, or smaller model can skip it.\nWhen reminded, stop normal work, save goal/progress/decisions/next steps, then call new_context now.`;
+		automatic = `Automatic Posthorse rollover follows Pi's live compaction policy. At most one best-effort checkpoint reminder may appear before the estimated configured rollover line (${deadline}); a large turn, overflow, restart, or smaller model can skip it.\nWhen reminded, stop normal work, save goal/progress/decisions/next steps, then call new_context now.`;
 	}
 	return `## Context self-management (Posthorse)
 Experimental official Pi mode: resets use native compaction entries without a generated summary.
 Context windows are finite. Use get_context_remaining for the best available native estimate when it matters; routine turns do not include a changing meter.
+Reminder and budget policy uses available settings (a persisted CLI snapshot by default); Pi's live settings control automatic compaction.
 ${automatic}
 new_context starts a genuinely fresh Pi context after the complete tool batch. Earlier conversation remains in the session transcript and is recoverable with notes and history.
 Automatic handoffs are emergency recovery records, not proof of current state. Restore notes/todos/history and verify live state before continuing stateful or external work.`;
@@ -958,14 +989,13 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 		const native = policyContext(ctx);
 		if (event.outcome === "aborted" || ctx.signal?.aborted || event.message.role !== "assistant") return;
 		const branch = ctx.sessionManager.getBranch() as EntryLike[];
-		const overflow = event.message.stopReason === "error" && isContextOverflow(event.message);
-		if (event.message.stopReason === "error" && !overflow) return;
+		if (event.message.stopReason === "error" || event.message.stopReason === "aborted") return;
 		const usage = native.getContextUsage();
 		const budget = budgetFor(native);
 		const requested = event.toolResults.filter((result) => result.toolName === "new_context");
 		if (requested.length && event.toolResults.some((result) => result.isError)) return;
 		const limit = freshPayloadChars(native, activeToolTokens(), event.context.pendingMessages);
-		const explicit = requested.at(-1)?.details as { posthorseHandoff?: string } | undefined;
+		const explicit = requested[0]?.details as { posthorseHandoff?: string } | undefined;
 		if (typeof explicit?.posthorseHandoff === "string") {
 			const handoff = explicit.posthorseHandoff || "Fresh context. Restore relevant notes and history before continuing.";
 			// Pending steering may arrive after execute() checks capacity.
@@ -974,21 +1004,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 			return { entries: [...event.entries, { type: "compaction" as const, summary: handoff, firstKeptEntryId: null, details: { posthorse: 1, reason: "explicit" } }], continue: true };
 		}
 		if (!budget?.enabled || !budget.supported) return;
-		if (overflow || (usage?.tokens != null && usage.tokens >= budget.rolloverAt)) {
-			const lastOverflow = branch.map((entry) => isWindow(entry) && (entry.details as { reason?: string })?.reason === "overflow").lastIndexOf(true);
-			const madeProgress = branch.slice(lastOverflow + 1).some((entry) => entry.message?.role === "user" ||
-				(entry.message?.role === "assistant" && !["error", "aborted"].includes(entry.message.stopReason ?? "")));
-			if (overflow && lastOverflow >= 0 && !madeProgress) {
-				// Preserve raw history, but suppress Pi's independent summarizer retry.
-				return { entries: [...event.entries, { type: "context_edit" as const, targetId: event.messageEntryId, replacement: null }] };
-			}
-			if (limit < MIN_PAGE_CHARS) return;
-			const handoff = buildAutoHandoff([...branch, ...event.entries], event.context.contextEntries, limit);
-			if (handoff.length > limit) return;
-			return { entries: [...event.entries, { type: "compaction" as const, summary: handoff, firstKeptEntryId: null,
-				details: { posthorse: 1, reason: overflow ? "overflow" : "threshold" } }], continue: event.continue };
-		}
-		if (!usage || usage.tokens == null) return;
+		if (!usage || usage.tokens == null || usage.tokens >= budget.rolloverAt) return;
 		const reminderBuffer = Math.min(REMINDER_BUFFER_TOKENS, Math.floor(budget.usable * 0.1));
 		const remindAt = budget.rolloverAt - reminderBuffer;
 		if (usage.tokens < remindAt) return;
@@ -1002,7 +1018,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 		pi.sendMessage(
 			{
 				customType: REMINDER_TYPE,
-				content: `[posthorse] Checkpoint now: ${(budget.rolloverAt - usage.tokens).toLocaleString("en-US")} tokens remain before Pi's automatic rollover line. Stop normal work, save goal/progress/decisions/next steps, then call new_context now. This reminder is best-effort; a large turn, overflow, restart, or smaller model can reach rollover without one.`,
+				content: `[posthorse] Checkpoint now: approximately ${(budget.rolloverAt - usage.tokens).toLocaleString("en-US")} tokens remain before the configured automatic rollover line. Stop normal work, save goal/progress/decisions/next steps, then call new_context now. This reminder uses available settings and is best-effort; a large turn, overflow, restart, or smaller model can reach rollover without one.`,
 				display: true,
 				details: fingerprint,
 			},
@@ -1028,19 +1044,45 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 		if (event.messages.some(stale)) return { messages: event.messages.filter((message) => !stale(message)) };
 	});
 
-	// Official core ignores finishTurn continuation for errors. Consume the retry
-	// durably at settlement before requesting the single fresh provider attempt.
-	pi.on("agent_before_settle", (event, ctx) => {
-		if (event.outcome === "aborted" || ctx.signal?.aborted) return;
-		const branch = ctx.sessionManager.getBranch();
-		const boundary = [...branch].reverse().find((entry) => entry.type === "compaction");
-		if (boundary?.type !== "compaction" || (boundary.details as { posthorse?: number; reason?: string })?.posthorse !== 1 ||
-			(boundary.details as { reason?: string }).reason !== "overflow") return;
-		const later = [...branch.slice(branch.indexOf(boundary) + 1), ...event.entries];
-		if (later.some((entry) => entry.type === "compaction" ||
-			(entry.type === "message" && entry.message.role === "assistant") ||
-			(entry.type === "custom" && entry.customType === "posthorse-overflow-retry"))) return;
-		return { entries: [...event.entries, { type: "custom" as const, customType: "posthorse-overflow-retry", data: { boundaryId: boundary.id } }], continue: true };
+	// Pi owns automatic thresholds, recovery retries, and when another request is needed.
+	pi.on("session_before_compact", (event, ctx) => {
+		if (event.reason === "manual") return;
+		const cancelled = () => event.signal.aborted || ctx.signal?.aborted;
+		if (cancelled()) return { cancel: true };
+		try {
+			const native: PolicyContext = {
+				model: ctx.model, policy: event.preparation.settings,
+				getContextUsage: () => ctx.getContextUsage(), getSystemPrompt: () => ctx.getSystemPrompt(),
+			};
+			// Small/unknown context windows deliberately retain native compaction.
+			if (!budgetFor(native)?.supported) return;
+			const limit = freshPayloadChars(native, activeToolTokens());
+			const handoff = buildAutoHandoff(
+				ctx.sessionManager.getBranch(),
+				ctx.sessionManager.buildSessionProjection().entries,
+				limit,
+			);
+			if (limit < MIN_PAGE_CHARS || handoff.length > limit) {
+				throw new Error("Too little fresh context capacity for an automatic recovery record.");
+			}
+			if (cancelled()) return { cancel: true };
+			// The first kept entry is invisible metadata: retain no prior conversation.
+			pi.appendEntry("posthorse-boundary", {});
+			const firstKeptEntryId = ctx.sessionManager.getLeafId();
+			if (!firstKeptEntryId) throw new Error("Pi did not persist the context boundary.");
+			return { compaction: {
+				summary: handoff, firstKeptEntryId, tokensBefore: event.preparation.tokensBefore,
+				details: { posthorse: 1, reason: event.reason },
+			} };
+		} catch (error) {
+			// Throwing here is swallowed by Pi's event runner and would invoke its summarizer.
+			if (!cancelled()) {
+				const message = `Posthorse automatic rollover cancelled: ${error instanceof Error ? error.message : String(error)}`;
+				if (ctx.hasUI) ctx.ui.notify(message, "error");
+				else console.error(message);
+			}
+			return { cancel: true };
+		}
 	});
 
 	pi.registerTool({
@@ -1086,7 +1128,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 		label: "Context Remaining",
 		...toolCards("get_context_remaining"),
 		description:
-			"Best available native estimate of the context budget: tokens until Pi's automatic rollover line and until the configured context limit.",
+			"Best available native context estimate, with rollover budget based on available settings (a persisted CLI snapshot by default).",
 		promptSnippet: "check the remaining context budget only when needed",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
@@ -1100,11 +1142,11 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 				rollover: !budget?.enabled ? "disabled" : budget.supported ? "enabled" : "unsupported",
 				rolloverAt: budget?.rolloverAt,
 			};
-			const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate.`;
-			if (!budget?.enabled) return textResult(`Automatic rollover is disabled (Pi compaction.enabled=false). ${configured}`, [], display);
+			const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%).\nBest available native estimate. Rollover policy uses available settings (a persisted CLI snapshot by default).`;
+			if (!budget?.enabled) return textResult(`Automatic rollover is disabled in the available settings (Pi compaction.enabled=false). ${configured}`, [], display);
 			if (!budget.supported) return textResult(`${unsupportedMessage(budget)} ${configured}`, [], display);
 			return textResult(
-				`≈${n(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until automatic rollover (line at ${n(budget.rolloverAt)}); ${configured}`,
+				`≈${n(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until the configured automatic rollover line (${n(budget.rolloverAt)}); ${configured}`,
 				[], display,
 			);
 		},

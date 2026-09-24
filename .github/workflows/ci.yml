@@ -1,6 +1,8 @@
-name: Official Pi prototype
+name: Official Pi beta
 
 on:
+  push:
+    branches: [upstream]
   pull_request:
     branches: [main]
     paths:

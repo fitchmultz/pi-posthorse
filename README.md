@@ -1,41 +1,88 @@
-# Posthorse — official Pi experiment
-
-This branch is an isolated prototype for **official Pi 0.87.1**. It does not replace, install over, or qualify the installed `fitchmultz/pi` version. Do not publish this branch as a production Posthorse release.
+# Posthorse — official Pi beta
 
 Posthorse starts a fresh model context while keeping the complete session transcript available through `history`. It also provides durable `notes`, a context-budget tool, and sparse checkpoint reminders.
 
-## How this prototype resets context
+The **`upstream` branch targets official Pi 0.87.1**. It is a public testing beta, not a production release or full replacement for the fork-specific Posthorse on `main`. Use fresh official Pi sessions; fork transcript migration is not supported.
 
-Official Pi's actionable `turn_end` boundary can append a native compaction entry with `firstKeptEntryId: null`. Pi persists the current system prompt and tool declarations, retains no preceding conversation in model input, and leaves the original transcript intact. Posthorse supplies a handoff directly; it does **not** ask a model to summarize anything.
+**Automatic recovery still depends on Pi preparing a compaction operation.** Small overflow/truncated responses and consecutive assistant/tool-only spans after a reset can miss that boundary. Oversized input or tool output can therefore still reach the provider. Explicit `new_context` remains available; see [Beta limits](#beta-limits) before testing long tool runs.
 
-The provider still sees Pi's standard “compacted … summary” wrapper around that handoff. The UI and session format call the boundary a compaction. These are official compaction entries marked with `details.posthorse: 1`, rather than the fork's `context_window` entries.
+## Install and try it
 
-- **Explicit reset:** `new_context` records the requested handoff in its tool-result details. At `turn_end`, Posthorse commits it only if every result in that batch succeeded. A failed sibling cancels the request. A late queued message can defer a handoff that no longer fits; the transcript explains the deferral.
-- **Automatic reset:** successful turns crossing `contextWindow - reserveTokens` receive a bounded recovery record at `turn_end`. Oversized tool output can therefore leave active context before the next provider request. The record preserves selected owner inputs, visible coordination, tool evidence, and references to older checkpoints; it is not a progress summary.
-- **Overflow retry:** a recognized provider context-overflow error gets one fresh-context retry. Official Pi ignores a `turn_end` continuation on an error, so Posthorse consumes a persisted retry marker at `agent_before_settle`. If that retry overflows again without new owner input or a successful response, Posthorse omits the second failure from future model input and stops retrying. Both failures remain in raw history.
-- **Other errors and cancellation:** ordinary API errors and aborted turns do not trigger a Posthorse reset.
+With official Pi 0.87.1 and Node 22.19 or newer:
+
+```sh
+pi --version
+pi install git:github.com/fitchmultz/pi-posthorse@upstream
+```
+
+Restart Pi after installing, then start a **new session**. For the first trial, disable other extensions that manage compaction or context resets. Ask the agent to write a short note, call `new_context` with a handoff, then recover the note and an earlier instruction through `notes` and `history`.
+
+Always include `@upstream`. The npm package and default Git branch are for the fork-specific version, not this official-Pi beta.
+
+To update this beta:
+
+```sh
+pi update git:github.com/fitchmultz/pi-posthorse@upstream
+```
+
+Restart Pi after updating. To remove it:
+
+```sh
+pi remove git:github.com/fitchmultz/pi-posthorse@upstream
+```
+
+Restart Pi after removal as well. Use the same agent directory for installation, updates, removal, and running Pi.
+
+### Existing fork users: isolate the trial
+
+Pi identifies Git packages by repository URL **without the ref**. Installing `@upstream` in a profile that already uses this repository can replace the installed fork variant. Use a separate agent directory, session directory, and scratch project. Do not reuse or copy fork transcripts into official Pi.
+
+The following commands assume `pi` already resolves to **official Pi 0.87.1**, not a fork launcher:
+
+```sh
+trial="$(mktemp -d)"
+mkdir -p "$trial/project" "$trial/agent" "$trial/sessions"
+export PI_CODING_AGENT_DIR="$trial/agent"
+cd "$trial/project"
+pi --version
+pi install git:github.com/fitchmultz/pi-posthorse@upstream
+pi --session-dir "$trial/sessions"
+```
+
+Keep the value of `trial` to return to this profile. Configure normal provider authentication there for real model use. The local test suite below does not require model credentials. The environment override applies to this shell; leave it or unset `PI_CODING_AGENT_DIR` before returning to your usual profile.
+
+Notes are project-scoped: Git worktrees share their repository's notes. A separate scratch project prevents a trial from modifying your existing `.pi/notes`.
+
+## How context resets work
+
+Posthorse supplies a handoff directly; supported automatic resets and explicit `new_context` resets do **not** ask a model to summarize the conversation. Pi persists a native compaction boundary, retains the current system prompt and tool declarations, and excludes preceding conversation from the next model context. The original transcript remains available through `history`.
+
+- **Automatic reset:** Posthorse intercepts Pi's native `session_before_compact` event for automatic operations. Pi owns threshold checks, pre-prompt compaction, context-overflow and truncated-response recovery, retry limits, and continuation timing. Posthorse uses the event's effective model-specific settings and the latest projected session content to build a bounded recovery record. It preserves selected owner inputs, visible coordination, tool evidence, and references to older checkpoints; it is not a progress summary. Cancellation is checked before creating the reset boundary.
+- **Explicit reset:** `new_context` requests a reset after the complete tool batch succeeds. A failed sibling cancels the request; multiple successful requests use the first handoff. A late queued message can defer a handoff that no longer fits. Completed sibling file writes or external effects are not rolled back if another tool fails.
 - **Manual `/compact`:** remains Pi's native model-generated compaction, with its normal provider and authentication requirements.
 
-Boundary drafts preserve entries and continuation requested by preceding extension handlers. Later handlers must likewise preserve the drafts they receive; official Pi allows extensions to replace them.
+The standard UI calls these boundaries compactions, and provider messages use Pi's standard “compacted … summary” wrapper around the supplied handoff. This wording does not mean a summarizer was called. Automatic resets use the normal compaction lifecycle; explicit boundary drafts emit `entry_appended` rather than the normal compaction lifecycle events. Clients watching only compaction events should account for that difference.
+
+Normal official SDK/CLI construction allows the automatic hook to run without valid summarization credentials. Pi still attempts and awaits authentication lookup; a custom SDK stream implementation can have different requirements. Ordinary model responses still need their usual authentication.
 
 ## Tools and recovery
 
 | Tool | Purpose |
 | --- | --- |
 | `new_context({ handoff? })` | Request a fresh context after the complete successful tool batch. |
-| `get_context_remaining()` | Return the native context estimate and the configured rollover line. |
+| `get_context_remaining()` | Return the native context estimate and estimated rollover budget. |
 | `notes({ op, ... })` | Write, append, read, list, or search persistent notes. |
 | `history({ op, ... })` | Search or read original session entries, including previous windows. |
 
-Handoffs are limited to 20,000 characters and shrink for smaller models, system/tool overhead, and queued messages. Recovery pages share a turn budget so parallel reads do not each spend the whole remaining context. At most one checkpoint reminder is issued for a window/model/budget combination. Disabled compaction disables automatic resets and reminders; explicit resets remain available.
+Handoffs are limited to 20,000 characters and shrink for smaller models, system/tool overhead, and visible pending messages. Recovery pages share a turn budget so parallel reads do not each spend the whole remaining context. At most one checkpoint reminder is issued for a window/model/budget combination. Disabling Pi's live compaction setting disables automatic resets. Reminders follow the available policy snapshot, which is persisted CLI settings by default and can lag the host; explicit resets remain available.
 
-Notes live in `.pi/notes`. In a Git worktree they share the main checkout's notes (or the common Git directory for separate Git-directory layouts). This is intentional existing behavior: **use a separate scratch working directory for isolated trials**, not the installed extension checkout. Writes publish through a same-directory temporary file and rename, preserving existing file permissions and symlinks. Writes and appends use Pi's per-file mutation queue; publication failures remain failed tool results.
+Notes live in `.pi/notes`. In a Git worktree they share the main checkout's notes, or the common Git directory for separate Git-directory layouts. Writes publish through a same-directory temporary file and rename, preserving existing file permissions and symlinks. Writes and appends use Pi's per-file mutation queue; publication failures remain failed tool results.
 
-History prioritizes original entries ahead of recovery echoes, includes stored images, and supports bounded pagination. Recovery records for same-boundary edits and visible custom messages use searchable target/content keys until Pi assigns their persisted IDs; search then returns the real IDs for reading full text and images. `all: true` searches sessions from the same working directory and their nested subagents, using file-qualified entry IDs. Earlier raw entries are not deleted by a reset. After a reset, restore notes and inspect history before repeating any stateful or external action.
+History prioritizes original entries ahead of recovery echoes, includes stored images, and supports bounded pagination. `all: true` searches sessions from the same working directory and their nested subagents, using file-qualified entry IDs. Earlier raw entries are not deleted by a reset. After a reset, restore notes and inspect history before repeating any stateful or external action.
 
-## Settings contract
+## Settings and context estimates
 
-Official `ExtensionContext` has no live compaction-settings accessor. The default file extension reads **persisted** global and trusted project settings through:
+Automatic resets use the **live effective settings supplied by Pi's compaction event**. Proactive reminders, `get_context_remaining`, explicit handoff limits, and recovery paging cannot access that event outside compaction. Official `ExtensionContext` has no general live compaction-settings accessor, so the default extension reads persisted global and trusted project settings through:
 
 ```ts
 SettingsManager.create(ctx.cwd, getAgentDir(), {
@@ -43,9 +90,9 @@ SettingsManager.create(ctx.cwd, getAgentDir(), {
 }).getCompactionSettings(ctx.model)
 ```
 
-This uses native defaults, model overrides, merging, validation, and project trust. It cannot observe an SDK host's in-memory overrides or a CLI change that has not reached disk. A file change can also be visible to this reader before the running host reloads it. Keep persisted settings and the host's effective settings aligned during CLI experiments. Malformed settings are reported rather than silently treated as defaults by Posthorse.
+This uses native defaults, model overrides, merging, validation, and project trust. It is an approximation of the running host's policy: it cannot observe SDK in-memory overrides or CLI writes that have not reached disk, and it can see external file edits before the host reloads them. Keep persisted settings and the running host aligned when testing proactive behavior. Malformed settings are reported rather than silently treated as defaults.
 
-SDK hosts should supply the actual settings accessor:
+SDK hosts can supply their actual settings accessor:
 
 ```ts
 import { createPosthorse } from "./index.ts";
@@ -57,48 +104,27 @@ const posthorse = createPosthorse((ctx) =>
 // Pass that same settingsManager to createAgentSession.
 ```
 
-No fork methods are fabricated or patched into official Pi.
+No fork methods are fabricated or patched into official Pi. Context estimates are not provider tokenizers or guaranteed rejection boundaries. Native usage is unknown immediately after compaction until valid post-compaction usage arrives.
 
-## Known limits
+## Beta limits
 
-This is not full fork parity:
-
-1. **Before the first boundary:** a huge new prompt can reach the provider before Posthorse has a `turn_end` to act on. A provider overflow response can then be recovered, but the initial oversized request is unavoidable here. Resumed or externally enlarged context can also enter Pi's pre-prompt compaction before Posthorse's turn hook; that path may invoke native summarization and require its normal credentials.
-2. **No room for recovery:** if the prompt, tools, or pending messages leave too little room for a useful handoff, automatic Posthorse rollover does not take over. Native Pi compaction may run. Models with less than 10,000 usable tokens below the automatic line are unsupported for automatic rollover.
-3. **Native behavior remains:** native truncated-response recovery, manual compaction, pre-prompt checks, and other extensions can still compact. This prototype does not replace those core paths. Settings discrepancies can cause their thresholds to differ from Posthorse's.
-4. **Fresh official sessions required:** do not open fork transcripts containing `context_window` entries with official Pi. Official Pi does not implement their context semantics; earlier excluded conversation could reappear. There is no transcript migration or hard startup rejection in this experiment. Use separate agent and session directories.
-5. **Recovery is bounded:** automatic records can omit or truncate older evidence. They carry history references instead of recursively nesting prior recovery records. Read the original transcript when exact instructions or receipts matter.
-6. **Validation scope:** tests use the real 0.87.1 SDK and its local faux provider, not a live remote model. Existing tool-card rendering checks run against official Pi; no interactive terminal dogfood or complete fork compatibility claim is made. Fork checkpoint/restart APIs are not recreated.
+- **First and late queued input:** a huge initial prompt or late queued input can still reach the provider. The automatic hook cannot see the full pending request, so a handoff that fits its visible budget may still leave the eventual request oversized. This beta does not transform or archive incoming prompts to bound them before dispatch. These are limits of this integration, not a claim that official Pi has no input hooks.
+- **Native recovery eligibility:** Pi must prepare an eligible compaction span before the automatic hook runs. A very small overflow or truncated response can end without a reset, particularly with the default `compaction.keepRecentTokens` of 20,000. Even with a smaller setting, a second large tool result after a reset can reach the provider when no new user span is available to compact. A terminating tool batch does not force another request or reset; Pi's pre-prompt check can miss its oversized output until a later response. Posthorse does not guarantee every oversized request will be intercepted. For deliberate small-span recovery tests, set `compaction.keepRecentTokens` to `1` in the isolated profile; the extension does not change this setting.
+- **Unsupported automatic budgets:** models with an unknown context window or fewer than 10,000 usable tokens below the automatic rollover line are left to native compaction, which may generate a summary with its normal authentication requirements. For supported models, failure to build a fitting recovery record cancels compaction and reports the error rather than silently invoking a summarizer.
+- **Late explicit cancellation:** aborting while sibling tools are running prevents an explicit reset. A later `turn_end` handler can abort after Posthorse returns its reset draft, and official Pi may still commit that draft. The public API does not provide the fork's final precommit abort guarantee for explicit resets. Native automatic compaction has its own later cancellation check.
+- **Fresh official sessions:** fork transcripts can silently reactivate excluded context or duplicate messages in official Pi. There is no migration or hard startup rejection. Separate directories do not prevent a user or extension from explicitly opening an incompatible transcript. Fork execution-state, detached-task, and checkpoint restoration are not recreated.
+- **Bounded recovery and extension composition:** recovery records can omit or truncate evidence and refer back to history instead of nesting older records. Read original entries when exact instructions or receipts matter. Other extensions can replace context or boundary drafts; cooperating handlers must preserve the drafts they receive.
+- **Validation scope:** automated checks use the real 0.87.1 SDK and local faux providers. They do not establish live remote-model behavior, interactive-terminal usability, production readiness, or full fork parity.
 
 ## Verify locally
 
-From this worktree, using Node 22.19 or newer:
+From a checkout of this branch, using Node 22.19 or newer:
 
 ```sh
 npm ci --ignore-scripts --no-audit --registry=https://registry.npmjs.org
 PI_OFFLINE=1 PI_TELEMETRY=0 npm run check:compat
 ```
 
-`check:compat` runs the TypeScript check, `test/official.test.mjs`, and `test/renderers.test.ts`. `npm run test:native` runs only the official real-SDK suite. Every SDK fixture uses a new temporary working directory, agent directory, empty credential store, and session directory; its path is printed for inspection. No model credentials or network calls are needed.
+`check:compat` runs the TypeScript check, `test/official.test.mjs`, and `test/renderers.test.ts`. `npm run test:native` runs only the official real-SDK suite. SDK fixtures use fresh temporary working, agent, and session directories with empty credential stores. No remote model service is required.
 
-The native tests cover fresh provider input, retained system/tools/transcript, notes/history after reset, disk reload, sibling failure cancellation, automatic oversized output, repeated rollover, bounded overflow retry, settings disable, reminder deduplication, pending messages, cooperating extensions, atomic note publication, incoming-prompt limitations, and native manual compaction.
-
-The old `test/native.test.mjs`, `test/posthorse.test.ts`, and `scripts/integration.sh` remain fork-specific reference tests. They are **not** run or claimed to pass for this prototype. This branch's CI validates official 0.87.1 rather than the production branch's fork-plus-official-refusal matrix.
-
-## Isolated CLI trial
-
-These commands invoke the worktree's official SDK directly and use a fresh scratch project. They do not run `pi install`, modify your launcher, or reuse installed Pi settings or sessions:
-
-```sh
-prototype="$PWD"
-trial="$(mktemp -d)"
-mkdir -p "$trial/project" "$trial/agent" "$trial/sessions"
-cd "$trial/project"
-PI_CODING_AGENT_DIR="$trial/agent" PI_OFFLINE=1 PI_TELEMETRY=0 \
-  node "$prototype/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
-  --session-dir "$trial/sessions" --no-approve \
-  --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files \
-  --extension "$prototype/index.ts"
-```
-
-A real provider still needs ordinary model authentication in the isolated profile. The automated faux-provider tests above are the credential-free trial. Do not copy or resume installed-fork sessions into this profile.
+The old `test/native.test.mjs`, `test/posthorse.test.ts`, and `scripts/integration.sh` remain fork-specific reference tests. They are not run or claimed to pass on this branch. CI validates official 0.87.1 on pull requests and pushes to `upstream`.
