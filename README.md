@@ -14,7 +14,7 @@ An isolated [Codex prototype](adapters/codex-posthorse/README.md) tests local no
 
 - Node `>=22.19.0`.
 - The `fitchmultz/pi` fork with native `context_window` entries, `session_before_auto_compact`, `registerContextWindowHook`, `ctx.getCompactionSettings()`, and the coding-agent SDK's `publishLocalFile` export.
-- Official, unpatched Pi is unsupported. Posthorse reports a clear extension loading error and cannot operate; Pi itself keeps running.
+- Official, unpatched Pi is unsupported. Posthorse reports a clear error at session start and cannot operate; Pi itself keeps running.
 
 Qualified against fork commit [`a2f4fc8cdf820f74554cfed7fde7a51c04549a67`](https://github.com/fitchmultz/pi/commit/a2f4fc8cdf820f74554cfed7fde7a51c04549a67). CI uses this exact revision.
 

@@ -349,6 +349,21 @@ test("disabling compaction filters persisted reminders without changing history 
 	}
 });
 
+test("hosts without the context-window hook refuse at session start without registering capabilities", () => {
+	const handlers: Array<{ event: string; handler: () => void }> = [];
+	const api = {
+		on(event: string, handler: () => void) { handlers.push({ event, handler }); },
+		registerTool() { assert.fail("unsupported hosts must not expose Posthorse tools"); },
+		registerMessageRenderer() { assert.fail("unsupported hosts must not register Posthorse renderers"); },
+	} as unknown as ExtensionAPI;
+	assert.doesNotThrow(() => posthorse(api), "loading Posthorse must not terminate Pi");
+	assert.deepEqual(handlers.map(({ event }) => event), ["session_start"], "only one refusal handler is registered");
+	assert.throws(
+		() => handlers[0].handler(),
+		/^Error: Posthorse requires the fitchmultz\/pi fork with native context windows.*registerContextWindowHook/,
+	);
+});
+
 test("reminder-free context skips history without hiding native compatibility errors", () => {
 	const { handlers, context } = setup();
 	const marker = { role: "custom", customType: "context-window", content: "new", details: { windowId: "new" } };

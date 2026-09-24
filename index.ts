@@ -923,7 +923,10 @@ Automatic handoffs are emergency recovery records, not proof of current state. R
 export default function (pi: ExtensionAPI) {
 	const nativePi = pi as unknown as NativeExtensionAPI;
 	if (typeof nativePi.registerContextWindowHook !== "function") {
-		throw new Error("Posthorse requires the fitchmultz/pi fork with registerContextWindowHook (see README).");
+		pi.on("session_start", () => {
+			throw new Error("Posthorse requires the fitchmultz/pi fork with native context windows and registerContextWindowHook (see README).");
+		});
+		return;
 	}
 	registerPosthorseMessages(pi);
 	const activeToolTokens = () => {
