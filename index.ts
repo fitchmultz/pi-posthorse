@@ -600,7 +600,9 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 	for (const entry of current) {
 		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
 	}
+	const omittedProjectedIds = new Set(projected.filter(({ messages }) => !messages.length).map(({ sourceEntry }) => sourceEntry.id));
 	const edited = current.flatMap((entry) => {
+		if (entry.id && omittedProjectedIds.has(entry.id)) return [];
 		const edit = entry.id ? edits.get(entry.id) : undefined;
 		if (edit?.replacement === null) return [];
 		if (!edit?.replacement) return [entry];
