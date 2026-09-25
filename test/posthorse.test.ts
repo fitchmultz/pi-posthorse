@@ -55,6 +55,7 @@ function setup() {
 			tools.set(tool.name, tool);
 			toolDefinitions.push(tool);
 		},
+		registerContextWindowHook() {},
 		registerMessageRenderer() {},
 		sendMessage(message: (typeof messages)[number]) {
 			messages.push(message);
@@ -111,7 +112,7 @@ function automaticHandoff(handlers: Map<string, Handler>, context: TestContext, 
 		.map((entry) => ({ sourceEntry: entry, messages: [entry.message] }));
 	return (
 		handlers.get("session_before_auto_compact")!(
-			{ reason: "threshold", branchEntries },
+			{ reason: "threshold", retainedToolResultIds: [], branchEntries },
 			{ ...context, sessionManager: { ...context.sessionManager, buildSessionProjection: () => ({ entries }) } },
 		) as { newContext: { handoff: string } }
 	).newContext.handoff;
@@ -346,6 +347,21 @@ test("disabling compaction filters persisted reminders without changing history 
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 0, "reenabling does not emit another reminder");
 	}
+});
+
+test("hosts without the context-window hook refuse at session start without registering capabilities", () => {
+	const handlers: Array<{ event: string; handler: () => void }> = [];
+	const api = {
+		on(event: string, handler: () => void) { handlers.push({ event, handler }); },
+		registerTool() { assert.fail("unsupported hosts must not expose Posthorse tools"); },
+		registerMessageRenderer() { assert.fail("unsupported hosts must not register Posthorse renderers"); },
+	} as unknown as ExtensionAPI;
+	assert.doesNotThrow(() => posthorse(api), "loading Posthorse must not terminate Pi");
+	assert.deepEqual(handlers.map(({ event }) => event), ["session_start"], "only one refusal handler is registered");
+	assert.throws(
+		() => handlers[0].handler(),
+		/^Error: Posthorse requires the fitchmultz\/pi fork with native context windows.*registerContextWindowHook/,
+	);
 });
 
 test("reminder-free context skips history without hiding native compatibility errors", () => {
@@ -952,7 +968,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		assert.doesNotMatch(guidance.systemPrompt, /% used/);
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 0, `${contextWindow}: no reminder`);
-		assert.equal(handlers.get("session_before_auto_compact")!({ reason: "threshold", branchEntries: [] }, context), undefined, `${contextWindow}: Pi keeps its own compaction`);
+		assert.equal(handlers.get("session_before_auto_compact")!({ reason: "threshold", retainedToolResultIds: [], branchEntries: [] }, context), undefined, `${contextWindow}: Pi keeps its own compaction`);
 		const remaining = toolText(await run(tools, "get_context_remaining", {}, context));
 		assert.match(remaining, /unsupported configuration/);
 		assert.match(remaining, /500 tokens until the configured context limit/);
@@ -976,7 +992,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1);
 		assert.match(messages[0].content, /1,385 tokens remain/);
-		assert.ok(handlers.get("session_before_auto_compact")!({ reason: "threshold", branchEntries: [] }, context));
+		assert.ok(handlers.get("session_before_auto_compact")!({ reason: "threshold", retainedToolResultIds: [], branchEntries: [] }, context));
 	}
 
 	{
@@ -1005,7 +1021,7 @@ test("fresh payload budgets count the system prompt, pending input, and automati
 	await assert.rejects(run(tools, "new_context", { handoff: "h".repeat(10_000) }, context), /limit 0/);
 	assert.equal(
 		handlers.get("session_before_auto_compact")!(
-			{ reason: "threshold", branchEntries: [{ type: "message", id: "owner", message: { role: "user", content: "continue" } }] },
+			{ reason: "threshold", retainedToolResultIds: [], branchEntries: [{ type: "message", id: "owner", message: { role: "user", content: "continue" } }] },
 			context,
 		),
 		undefined,
@@ -1013,6 +1029,7 @@ test("fresh payload budgets count the system prompt, pending input, and automati
 	const pendingContext = { ...usageContext(base, 32_768, 1000), getSystemPrompt: () => "" };
 	const pendingEvent = {
 		reason: "threshold",
+		retainedToolResultIds: [],
 		branchEntries: [],
 		pendingMessages: [{ role: "user", content: "p".repeat(60_000) }],
 	};
@@ -1262,7 +1279,7 @@ test("note replacement keeps the existing checkpoint on a real file-size failure
 		const code = `import assert from "node:assert/strict";
 import posthorse from ${JSON.stringify(new URL("../index.ts", import.meta.url).href)};
 let notes;
-posthorse({ on() {}, registerMessageRenderer() {}, registerTool(tool) { if (tool.name === "notes") notes = tool; } });
+posthorse({ on() {}, registerContextWindowHook() {}, registerMessageRenderer() {}, registerTool(tool) { if (tool.name === "notes") notes = tool; } });
 process.on("SIGXFSZ", () => {});
 await assert.rejects(notes.execute("fault", { op: "write", path: "durable.md", content: "N".repeat(8192) }, new AbortController().signal, undefined, { cwd: process.cwd() }), { code: "EFBIG" });`;
 		execFileSync("/bin/bash", ["-c", 'ulimit -f 2; exec "$@"', "note-publication", process.execPath, "--input-type=module", "-e", code], {
@@ -1647,7 +1664,7 @@ test("appends from concurrent Pi processes never merge records", async () => {
 			await import(${JSON.stringify(new URL("./pi-loader.ts", import.meta.url).href)});
 			const { default: posthorse } = await import(${JSON.stringify(new URL("../index.ts", import.meta.url).href)});
 			const tools = new Map();
-			posthorse({ on() {}, registerTool: (tool) => tools.set(tool.name, tool), registerMessageRenderer() {}, sendMessage() {} });
+			posthorse({ on() {}, registerContextWindowHook() {}, registerTool: (tool) => tools.set(tool.name, tool), registerMessageRenderer() {}, sendMessage() {} });
 			const [cwd, letter] = process.argv.slice(1);
 			const context = { cwd, newContext() {}, getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }), getContextUsage: () => undefined };
 			for (let i = 0; i < 200; i++) {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bound oversized retained native receipts before fresh-window dispatch, including results completed during rollover preparation. Requires the fork's synchronous `registerContextWindowHook`; excerpts share model capacity and preserve complete history or replacement recovery references.
+- Align rollover guidance and request cards with native background work continuing across context resets, while foreground tools must succeed before an explicit rollover commits.
 - Retain native async receipts across later complete responses during rollover, labeled as evidence that may already have been received or handled.
 - Skip circular directory links during note migration, listing, and search while preserving ordinary linked notes.
 - Preserve completed asynchronous tool results during rollover when the response that started them fails or is interrupted.
