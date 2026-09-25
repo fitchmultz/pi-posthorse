@@ -68,7 +68,7 @@ type NativeExtensionAPI = {
 	on(
 		event: "session_before_auto_compact",
 		handler: (
-			event: { reason: "overflow" | "threshold"; branchEntries: EntryLike[]; pendingMessages?: MessageLike[] },
+			event: { reason: "overflow" | "threshold"; branchEntries: EntryLike[]; pendingMessages?: MessageLike[]; retainedToolResultIds: string[] },
 			ctx: unknown,
 		) => { newContext: { handoff?: string } } | undefined,
 	): void;
@@ -1093,10 +1093,12 @@ export default function (pi: ExtensionAPI) {
 		// An unsupported budget would roll over every turn; leave Pi's own behavior in place instead.
 		if (budget && !budget.supported) return undefined;
 		const limit = freshPayloadChars(native, activeToolTokens(), event.pendingMessages);
-		if (limit < MIN_PAGE_CHARS) return undefined;
 		const projected = (ctx as ExtensionContext).sessionManager.buildSessionProjection().entries;
-		const handoff = buildAutoHandoff(event.branchEntries, projected, limit);
-		if (handoff.length > limit) return undefined;
+		const handoff = limit >= MIN_PAGE_CHARS ? buildAutoHandoff(event.branchEntries, projected, limit) : "";
+		if (!handoff || handoff.length > limit) {
+			// Only receipts Pi will retain require shaping; consumed results must not force an empty cut.
+			return event.retainedToolResultIds.length ? { newContext: {} } : undefined;
+		}
 		return { newContext: { handoff } };
 	});
 

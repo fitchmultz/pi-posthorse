@@ -23,7 +23,7 @@ concurrency:
 
 env:
   PI_AUTOMATION_REF: bfe47007194178fdda46c3fc4a0be32113371d53 # reviewed Pi 0.87.0 automation
-  PI_FORK_REF: a2f4fc8cdf820f74554cfed7fde7a51c04549a67 # reviewed native fork
+  PI_FORK_REF: 38b2a5816e030a4ff57379b6db1b882fe8110022 # reviewed native fork
 
 jobs:
   verify:

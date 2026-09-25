@@ -13,6 +13,8 @@ const { createAgentSession, DefaultResourceLoader, estimateTokens, ModelRuntime,
 const aiManifest = pathToFileURL(findPackageJSON("@earendil-works/pi-ai", hostIndex));
 const aiPackage = JSON.parse(readFileSync(aiManifest, "utf8"));
 const { fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, InMemoryCredentialStore } = await import(new URL(aiPackage.exports["."].import, aiManifest).href);
+const { estimateMessageTokens } = await import(new URL(aiPackage.exports["./utils/*"].import.replace("*", "estimate"), aiManifest).href);
+const { clampMaxTokensToContext } = await import(new URL(aiPackage.exports["./api/*"].import.replace("*", "simple-options"), aiManifest).href);
 const root = fileURLToPath(new URL("..", import.meta.url));
 const textOf = (message) => typeof message?.content === "string" ? message.content : message?.content?.map((part) => part.text ?? "").join("\n") ?? "";
 const nextCursor = (text) => text.match(/\[More results; continue with cursor "([^"]+)" and the same query\/scope\.\]$/)?.[1];
@@ -47,7 +49,7 @@ async function fixture(t, options = {}) {
 	const { session } = await createAgentSession({ cwd, agentDir, modelRuntime, model: faux.getModel(), resourceLoader, settingsManager, sessionManager, noTools: "builtin" });
 	t.after(() => session.dispose());
 	await session.bindExtensions({ onError(error) { throw new Error(error.error); } });
-	return { cwd, session, faux, sessionManager, settingsManager, resourceLoader };
+	return { cwd, agentDir, session, faux, sessionManager, settingsManager, resourceLoader, modelRuntime };
 }
 
 function automaticRecovery({ session, sessionManager, resourceLoader }) {
@@ -55,7 +57,7 @@ function automaticRecovery({ session, sessionManager, resourceLoader }) {
 	const handler = extension.handlers.get("session_before_auto_compact")[0];
 	const result = handler({
 		type: "session_before_auto_compact", reason: "threshold",
-		branchEntries: sessionManager.getBranch(), pendingMessages: [], signal: new AbortController().signal,
+		branchEntries: sessionManager.getBranch(), pendingMessages: [], retainedToolResultIds: [], signal: new AbortController().signal,
 	}, session.extensionRunner.createContext());
 	assert.ok(result?.newContext?.handoff);
 	return result.newContext.handoff;
@@ -856,10 +858,144 @@ test("a receipt fitting Pi's reserve stays unchanged despite a large model outpu
 	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
 });
 
-test("fixed input that cannot fit stops an explicit rollover before provider dispatch", async (t) => {
-	const h = await fixture(t, { contextWindow: 40_000, customPrompt: "s".repeat(100_000) });
-	assert.throws(() => h.session.newContext(), /fresh context cannot fit fixed input/);
-	assert.equal(h.faux.state.callCount, 0);
+test("consumed native receipts cannot claim an empty rollover when working context needs a summary", async (t) => {
+	let executions = 0;
+	const retained = [];
+	const requirement = "Preserve the owner working requirement.";
+	const h = await fixture(t, {
+		nativeAsync: true, customPrompt: "s".repeat(88_000),
+		extension(pi) {
+			pi.registerTool({ name: "receipt", async: true, label: "Receipt", description: "Local operation", parameters: { type: "object", properties: {} }, async execute() {
+				executions++;
+				return { content: [{ type: "text", text: "Operation completed" }], details: {} };
+			} });
+			pi.on("session_before_auto_compact", (event) => { retained.push(event.retainedToolResultIds); });
+			pi.on("session_before_compact", (event) => ({
+				compaction: { summary: requirement, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore },
+			}));
+		},
+	});
+	h.session.setActiveToolsByName(["receipt"]);
+	h.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
+	const call = { ...fauxToolCall("receipt", {}), async: true };
+	h.faux.setResponses([
+		fauxAssistantMessage(call, { stopReason: "toolUse" }),
+		(ctx) => {
+			assert.ok(ctx.messages.some((message) => message.role === "toolResult" && message.toolCallId === call.id));
+			return fauxAssistantMessage("Operation acknowledged.");
+		},
+	]);
+	await h.session.prompt(`${requirement} ${"w".repeat(10_000)}`);
+	assert.equal(executions, 1);
+	const receipt = h.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === call.id);
+	assert.ok(h.sessionManager.getBranch().some((entry) => entry.type === "message" && entry.message.role === "assistant" && entry.consumedToolResultIds?.includes(receipt.id)));
+	h.session.agent.state.model = { ...h.session.model, contextWindow: 40_000 };
+	let nextRequest;
+	h.faux.setResponses([(ctx) => { nextRequest = JSON.stringify(ctx.messages); return fauxAssistantMessage("Continued with the working requirement."); }]);
+	await h.session.prompt("Continue the authorized work.");
+	assert.deepEqual(retained, [[]]);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 0);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "compaction").length, 1);
+	assert.match(nextRequest, /Preserve the owner working requirement/);
+	assert.equal(executions, 1);
+});
+
+for (const mode of ["fixed prompt", "carried arguments", "disabled overflow", "disabled fitting"]) test(`failed native receipt preparation admits no oversized follow-up (${mode})`, async (t) => {
+	let executions = 0;
+	const disabled = mode.startsWith("disabled");
+	const argumentsSize = mode === "carried arguments" ? 16_000 : 0;
+	const content = "r".repeat(600_000);
+	const h = await fixture(t, {
+		nativeAsync: true, enabled: !disabled, contextWindow: 40_000, maxTokens: 16_384,
+		customPrompt: "s".repeat(argumentsSize ? 80_000 : 100_000),
+		extension(pi) {
+			pi.registerTool({ name: "receipt", async: true, label: "Receipt", description: "Local operation", parameters: { type: "object", properties: { input: { type: "string" } } }, async execute() {
+				executions++;
+				return { content: [{ type: "text", text: content }], details: {} };
+			} });
+		},
+	});
+	const call = { ...fauxToolCall("receipt", { input: "a".repeat(argumentsSize) }), async: true };
+	call.responsesItem = { type: "function_call", id: "fc_preflight", call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments), async: true, status: "completed" };
+	const inputs = [];
+	const capture = (ctx) => {
+		const tokens = ctx.messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+		assert.ok(tokens < h.session.model.contextWindow, `oversized provider dispatch: ${tokens}`);
+		const output = clampMaxTokensToContext(h.session.model, ctx, h.session.model.maxTokens);
+		assert.ok(tokens + output <= h.session.model.contextWindow);
+		inputs.push({ tokens, output });
+	};
+	h.faux.setResponses([(ctx) => { capture(ctx); return fauxAssistantMessage(call, { responseId: "resp_preflight", stopReason: "aborted" }); }]);
+	await h.session.prompt("Execute the operation once.");
+	assert.equal(executions, 1);
+	assert.equal(inputs.length, 1);
+	const source = h.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === call.id);
+	assert.equal(textOf(source.message), content);
+	if (mode === "disabled overflow") h.session.agent.state.model = { ...h.session.model, contextWindow: 20_000 };
+	const refused = mode !== "disabled fitting";
+	const original = h.sessionManager.getBranch();
+	if (refused) {
+		assert.throws(() => h.session.newContext(), /fresh context cannot fit fixed input/);
+		assert.deepEqual(h.sessionManager.getBranch(), original, "failed preparation publishes nothing");
+	} else h.session.newContext();
+	const expectHistory = () => {
+		assert.equal(textOf(h.sessionManager.getEntry(source.id).message), content);
+		assert.equal(executions, 1, "preparation and prompts cannot replay the operation");
+		assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, refused ? 0 : 1);
+		assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "compaction").length, 0);
+		assert.deepEqual(h.session.messages, h.sessionManager.buildSessionProjection().messages);
+	};
+	for (const prompt of ["First actual follow-up", "Second actual follow-up"]) {
+		h.faux.setResponses([(ctx) => { capture(ctx); return fauxAssistantMessage("Receipt received"); }]);
+		try { await h.session.prompt(prompt); }
+		catch (error) { assert.ok(refused); assert.match(error.message, /fresh context cannot fit fixed input/); }
+		expectHistory();
+		if (refused) assert.equal(h.faux.state.callCount, 1);
+	}
+	const reopened = SessionManager.open(h.sessionManager.getSessionFile());
+	assert.deepEqual(JSON.parse(JSON.stringify(reopened.buildSessionProjection().messages)), JSON.parse(JSON.stringify(h.session.messages)));
+	h.session.dispose();
+	await h.resourceLoader.reload();
+	const { session: restored } = await createAgentSession({ cwd: h.cwd, agentDir: h.agentDir, modelRuntime: h.modelRuntime, model: h.session.model, resourceLoader: h.resourceLoader, settingsManager: h.settingsManager, sessionManager: reopened, noTools: "builtin" });
+	t.after(() => restored.dispose());
+	h.session = restored;
+	h.sessionManager = reopened;
+	await restored.bindExtensions({ onError(error) { throw new Error(error.error); } });
+	if (refused) {
+		h.faux.setResponses([(ctx) => { capture(ctx); return fauxAssistantMessage("must not dispatch"); }]);
+		try { await restored.prompt("Retry after reopening"); }
+		catch (error) { assert.match(error.message, /fresh context cannot fit fixed input/); }
+		assert.equal(h.faux.state.callCount, 1);
+		expectHistory();
+		// Correct the capacity, then use the ordinary reset/request path without a failure latch.
+		restored.agent.state.model = { ...restored.model, contextWindow: 100_000 };
+		restored.newContext();
+		assert.equal(reopened.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+		const projected = reopened.buildSessionProjection().messages;
+		const retained = projected.find((message) => message.role === "toolResult" && message.toolCallId === call.id);
+		assert.match(textOf(retained), new RegExp(`history read id ${source.id}\\.`));
+		const retainedCall = projected.flatMap((message) => message.role === "assistant" ? message.content : []).find((part) => part.id === call.id);
+		assert.deepEqual(retainedCall.responsesItem, call.responsesItem);
+		h.faux.setResponses([(ctx) => { capture(ctx); return fauxAssistantMessage("Recovered receipt received"); }]);
+		await restored.prompt("Continue without repeating the operation");
+		assert.equal(h.faux.state.callCount, 2);
+		assert.equal(executions, 1);
+		assert.equal(textOf(reopened.getEntry(source.id).message), content);
+	}
+	t.diagnostic(JSON.stringify({ mode, inputs, executions }));
+});
+
+for (const enabled of [false, true]) test(`fixed-prompt-only requests allow reduced output (compaction=${enabled})`, async (t) => {
+	const h = await fixture(t, { enabled, contextWindow: 40_000, maxTokens: 16_384, customPrompt: "s".repeat(100_000) });
+	if (enabled) assert.throws(() => h.session.newContext(), /fresh context cannot fit fixed input/);
+	else h.session.newContext();
+	let tokens, output;
+	h.faux.setResponses([(ctx) => { tokens = ctx.messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0); output = clampMaxTokensToContext(h.session.model, ctx, 16_384); return fauxAssistantMessage("Fitting request received"); }]);
+	await h.session.prompt("Continue with reduced output");
+	assert.equal(h.faux.state.callCount, 1);
+	assert.ok(tokens > 40_000 - 16_384, "input intentionally exceeds the compaction reserve line");
+	assert.ok(output > 0 && output < 16_384, "native output clamp leaves a valid reduced allocation");
+	assert.ok(tokens + output <= 40_000);
 });
 
 test("a 600k native receipt completed during the awaited rollover hook is bounded before dispatch", async (t) => {

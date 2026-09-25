@@ -112,7 +112,7 @@ function automaticHandoff(handlers: Map<string, Handler>, context: TestContext, 
 		.map((entry) => ({ sourceEntry: entry, messages: [entry.message] }));
 	return (
 		handlers.get("session_before_auto_compact")!(
-			{ reason: "threshold", branchEntries },
+			{ reason: "threshold", retainedToolResultIds: [], branchEntries },
 			{ ...context, sessionManager: { ...context.sessionManager, buildSessionProjection: () => ({ entries }) } },
 		) as { newContext: { handoff: string } }
 	).newContext.handoff;
@@ -968,7 +968,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		assert.doesNotMatch(guidance.systemPrompt, /% used/);
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 0, `${contextWindow}: no reminder`);
-		assert.equal(handlers.get("session_before_auto_compact")!({ reason: "threshold", branchEntries: [] }, context), undefined, `${contextWindow}: Pi keeps its own compaction`);
+		assert.equal(handlers.get("session_before_auto_compact")!({ reason: "threshold", retainedToolResultIds: [], branchEntries: [] }, context), undefined, `${contextWindow}: Pi keeps its own compaction`);
 		const remaining = toolText(await run(tools, "get_context_remaining", {}, context));
 		assert.match(remaining, /unsupported configuration/);
 		assert.match(remaining, /500 tokens until the configured context limit/);
@@ -992,7 +992,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1);
 		assert.match(messages[0].content, /1,385 tokens remain/);
-		assert.ok(handlers.get("session_before_auto_compact")!({ reason: "threshold", branchEntries: [] }, context));
+		assert.ok(handlers.get("session_before_auto_compact")!({ reason: "threshold", retainedToolResultIds: [], branchEntries: [] }, context));
 	}
 
 	{
@@ -1021,7 +1021,7 @@ test("fresh payload budgets count the system prompt, pending input, and automati
 	await assert.rejects(run(tools, "new_context", { handoff: "h".repeat(10_000) }, context), /limit 0/);
 	assert.equal(
 		handlers.get("session_before_auto_compact")!(
-			{ reason: "threshold", branchEntries: [{ type: "message", id: "owner", message: { role: "user", content: "continue" } }] },
+			{ reason: "threshold", retainedToolResultIds: [], branchEntries: [{ type: "message", id: "owner", message: { role: "user", content: "continue" } }] },
 			context,
 		),
 		undefined,
@@ -1029,6 +1029,7 @@ test("fresh payload budgets count the system prompt, pending input, and automati
 	const pendingContext = { ...usageContext(base, 32_768, 1000), getSystemPrompt: () => "" };
 	const pendingEvent = {
 		reason: "threshold",
+		retainedToolResultIds: [],
 		branchEntries: [],
 		pendingMessages: [{ role: "user", content: "p".repeat(60_000) }],
 	};
