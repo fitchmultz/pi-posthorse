@@ -371,15 +371,14 @@ test("legacy history and malformed display spans fall back to the complete retur
 });
 
 test("owned reminders are compact, expandable, and sanitize terminal control content", () => {
-	for (const customType of ["posthorse-reminder", "headroom-reminder"]) {
-		const renderer = setup().messages.get(customType);
-		assert.equal(typeof renderer, "function");
-		const message = { role: "custom" as const, customType, display: true, timestamp: 0, content: `Checkpoint now\n${"remember\n".repeat(50)}LAST\x1b[2J\x1b]52;c;c2VjcmV0\x07\x00` };
-		const component = new CustomMessageComponent(message, renderer, undefined, 2);
-		assert.ok(lines(component, 24).length <= 10);
-		component.setExpanded(true);
-		assert.match(text(component), /LAST/);
-		const raw = component.render(80).join("\n");
-		assert.doesNotMatch(raw, /\x1b\[2J|\x1b\]52|\x00/);
-	}
+	const customType = "posthorse-reminder";
+	const renderer = setup().messages.get(customType);
+	assert.equal(typeof renderer, "function");
+	const message = { role: "custom" as const, customType, display: true, timestamp: 0, content: `Checkpoint now\n${"remember\n".repeat(50)}LAST\x1b[2J\x1b]52;c;c2VjcmV0\x07\x00` };
+	const component = new CustomMessageComponent(message, renderer, undefined, 2);
+	assert.ok(lines(component, 24).length <= 10);
+	component.setExpanded(true);
+	assert.match(text(component), /LAST/);
+	const raw = component.render(80).join("\n");
+	assert.doesNotMatch(raw, /\x1b\[2J|\x1b\]52|\x00/);
 });

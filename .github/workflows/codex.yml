@@ -16,6 +16,9 @@ concurrency:
   group: codex-adapter-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CODEX_RELEASE: rust-v0.157.1
+
 jobs:
   verify:
     name: Codex stock recovery
@@ -30,17 +33,22 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22.19.0'
+          node-version: '24'
+          check-latest: true
           package-manager-cache: false
+      - name: Lockfile resolves only from the public npm registry
+        run: |
+          ! grep '"resolved": "' package-lock.json | grep -v '"resolved": "https://registry.npmjs.org/'
       - run: npm ci --ignore-scripts --no-audit
       - run: npm test
       - run: npm audit --omit=dev
       - name: Download the pinned Codex runtime
         run: |
-          curl --fail --location --retry 2 https://github.com/openai/codex/releases/download/rust-v0.153.4/codex-x86_64-unknown-linux-musl.tar.gz -o "$RUNNER_TEMP/codex-runtime.tar.gz"
+          base="https://github.com/openai/codex/releases/download/$CODEX_RELEASE"
           mkdir -p "$RUNNER_TEMP/codex-runtime"
+          curl --fail --location --retry 2 "$base/codex-x86_64-unknown-linux-musl.tar.gz" -o "$RUNNER_TEMP/codex-runtime.tar.gz"
           tar -xzf "$RUNNER_TEMP/codex-runtime.tar.gz" -C "$RUNNER_TEMP/codex-runtime"
-          curl --fail --location --retry 2 https://github.com/openai/codex/releases/download/rust-v0.153.4/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz -o "$RUNNER_TEMP/codex-code-mode-host.tar.gz"
+          curl --fail --location --retry 2 "$base/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz" -o "$RUNNER_TEMP/codex-code-mode-host.tar.gz"
           tar -xzf "$RUNNER_TEMP/codex-code-mode-host.tar.gz" -C "$RUNNER_TEMP/codex-runtime"
           mv "$RUNNER_TEMP/codex-runtime/codex-code-mode-host-x86_64-unknown-linux-musl" "$RUNNER_TEMP/codex-runtime/codex-code-mode-host"
       - name: Verify ordinary compaction and stock recovery hooks

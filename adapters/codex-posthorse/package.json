@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Isolated Posthorse context-recovery prototype for Codex.",
   "license": "MIT",
-  "engines": { "node": ">=22.19.0" },
+  "engines": {
+    "node": ">=24.12.0"
+  },
   "scripts": {
     "test": "node --test test/store.test.mjs test/server.test.mjs",
     "test:runtime": "node --test test/runtime.test.mjs",
@@ -14,6 +16,9 @@
     "test:local": "POSTHORSE_LOCAL_RECOVERY=1 POSTHORSE_ACCEPTANCE=1 node --test test/runtime.test.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0"
+    "@modelcontextprotocol/server": "2.1.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.1.0"
   }
 }

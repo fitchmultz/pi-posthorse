@@ -1,6 +1,5 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createStore } from "./store.mjs";
@@ -23,7 +22,7 @@ const properties = {
   offset: { type: "integer", minimum: 0 },
   limit: { type: "integer", minimum: 1 },
 };
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
+server.setRequestHandler("tools/list", async () => ({
   tools: [
     {
       name: "thread_hint",
@@ -62,7 +61,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler("tools/call", async (request) => {
   try {
     const params = request.params.arguments ?? {};
     const threadId = request.params._meta?.threadId ?? params.threadId;

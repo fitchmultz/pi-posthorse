@@ -1,12 +1,14 @@
 {
 	"compilerOptions": {
-		"target": "ES2022",
-		"module": "ESNext",
-		"moduleResolution": "bundler",
-		"allowImportingTsExtensions": true,
+		"target": "esnext",
+		"module": "nodenext",
+		"types": ["node"],
 		"strict": true,
 		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"erasableSyntaxOnly": true,
+		"verbatimModuleSyntax": true,
 		"skipLibCheck": true
 	},
-	"include": ["index.ts", "test/*.ts"]
+	"include": ["index.ts", "ui.ts", "test/*.ts"]
 }
