@@ -22,14 +22,14 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: bfe47007194178fdda46c3fc4a0be32113371d53 # reviewed Pi 0.87.0 automation
-  PI_FORK_REF: 38b2a5816e030a4ff57379b6db1b882fe8110022 # reviewed native fork
+  PI_AUTOMATION_REF: bbc0048a363444cde7890c09e80cea00a47fc463 # fitchmultz/.github#33: dual-host Posthorse
+  PI_FORK_REF: b1b4ac34d807b577d66f5879119a9ed4833c8ed7 # reviewed native fork
 
 jobs:
   verify:
-    name: Pi fork and official refusal
+    name: Pi fork and official
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,8 +49,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22.19.0'
+          node-version: '24'
+          check-latest: true
           package-manager-cache: false
+      - name: Lockfile resolves only from the public npm registry
+        working-directory: extension
+        run: |
+          ! grep '"resolved": "' package-lock.json | grep -v '"resolved": "https://registry.npmjs.org/'
       - name: Use the reviewed npm version
         run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
       - name: Install native test prerequisites
@@ -65,11 +70,20 @@ jobs:
           npm run hydrate:model-data
           PI_OFFLINE=1 PI_TELEMETRY=0 npm run build:offline
           git diff --exit-code
+          node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "$PI_FORK_REF"
+          git diff --exit-code
+      - name: Use the extension npm version
+        run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
       - run: npm ci --ignore-scripts --no-audit
         working-directory: extension
-      - name: Qualify fork behavior and installation
+      - name: Qualify official Pi
         run: |
-          node automation/scripts/pack-fork.mjs fork "$RUNNER_TEMP/fork-package" "$PI_FORK_REF"
+          version="$(node -p 'require("./extension/package.json").devDependencies["@earendil-works/pi-coding-agent"]')"
+          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
+            --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
+            --host official --target "$version" --output "$RUNNER_TEMP/posthorse-official"
+      - name: Qualify fork Pi
+        run: |
           env -u GITHUB_STEP_SUMMARY PI_COMPAT_FORK_REF="$PI_FORK_REF" node automation/scripts/qualify.mjs \
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host fork --target "$RUNNER_TEMP/fork-package" --output "$RUNNER_TEMP/posthorse-fork"
@@ -81,9 +95,3 @@ jobs:
           env -i PATH="$PATH" HOME="$fixture/home" TMPDIR="$fixture/tmp" \
             PI_CODING_AGENT_DIR="$fixture/agent" PI_OFFLINE=1 PI_TELEMETRY=0 \
             PI_FORK="$GITHUB_WORKSPACE/fork" bash scripts/integration.sh
-      - name: Verify official Pi clearly refuses Posthorse
-        run: |
-          version="$(node -p 'require("./extension/package.json").devDependencies["@earendil-works/pi-coding-agent"]')"
-          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
-            --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
-            --host official --target "$version" --output "$RUNNER_TEMP/posthorse-official"

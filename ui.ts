@@ -190,5 +190,5 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 			return { handled: true };
 		});
 	};
-	for (const type of ["context-window", "posthorse-reminder", "headroom-reminder"]) pi.registerMessageRenderer(type, renderer);
+	for (const type of ["context-window", "posthorse-reminder"]) pi.registerMessageRenderer(type, renderer);
 }

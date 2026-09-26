@@ -1,15 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
-- Bound oversized retained native receipts before fresh-window dispatch, including results completed during rollover preparation. Requires the fork's synchronous `registerContextWindowHook`; excerpts share model capacity and preserve complete history or replacement recovery references.
+### Breaking Changes
+
+- Requires Node `>=24.12.0`.
+- Removes pi-headroom compatibility: `headroom-reminder` entries are no longer recognized, and checkout-local notes are no longer imported into the shared notes directory.
+
+### Added
+
+- Runs on official Pi. Rollover there is a compaction entry that keeps no earlier conversation and carries the handoff as its summary, with no summary model call. `new_context` commits at turn end once every tool in the batch succeeds; automatic threshold and overflow rollover answers `session_before_compact`. The fork keeps native context windows. The host is detected when Posthorse loads.
+- `createPosthorse(getPolicy)` lets SDK hosts on official Pi supply their live compaction settings.
+
+### Changed
+
+- Note writes use Posthorse's own same-directory replacement instead of the fork-only `publishLocalFile`, and writes and appends to one note run in order within a Pi process.
+- Development baseline: Pi 0.87.1, TypeScript 7, typebox 1.3.34, npm 12. The Codex prototype uses MCP SDK v2 and is tested against Codex 0.157.1.
+
+### Fixed
+
+- Active tool size estimates count tools on official Pi, which reports tool names but not fork tool ids.
+- On the fork, bound oversized retained native receipts before fresh-window dispatch, including results completed during rollover preparation, through the synchronous `registerContextWindowHook`; excerpts share model capacity and preserve complete history or replacement recovery references.
 - Align rollover guidance and request cards with native background work continuing across context resets, while foreground tools must succeed before an explicit rollover commits.
 - Retain native async receipts across later complete responses during rollover, labeled as evidence that may already have been received or handled.
-- Skip circular directory links during note migration, listing, and search while preserving ordinary linked notes.
+- Skip circular directory links and missing targets during note listing and search while preserving ordinary linked notes.
 - Preserve completed asynchronous tool results during rollover when the response that started them fails or is interrupted.
 - Keep namespaced `ask_question` results as ordinary tool evidence instead of treating them as owner answers during rollover.
-- Skip missing legacy note targets so broken symlinks do not block shared note reads and writes.
-- Prevent legacy note migration from copying the shared destination back through directory symlinks.
 - Read large history records without repeatedly copying and scanning their unfinished lines.
 - Honor Pi context edits and native projection in automatic recovery handoffs, including assistant checkpoints and omitted asynchronous results. Still-visible results remain in the handoff even when their call was edited out or predates the window, without borrowing another call's identity or arguments. Edited handoff references recover replacement text and images through `history read`.
 - Keep `history` searches and reads within the current project's session files and their nested subagents, even when distinct projects share a session directory.
