@@ -306,6 +306,25 @@ test("manual compact remains native and calls the summarization provider", async
 	assert.match(h.sessionManager.getBranch().findLast((entry) => entry.type === "compaction").summary, /NATIVE_MODEL_SUMMARY/);
 });
 
+// PR #51 review: recovery after Pi's own /compact starts at its kept tail and carries its summary.
+test("automatic recovery after a native /compact excludes summarized inputs and keeps the native summary", async (t) => {
+	const h = await fixture(t, { extension: registerDump });
+	h.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
+	h.faux.setResponses([fauxAssistantMessage("First response."), fauxAssistantMessage("Second response."), fauxAssistantMessage("NATIVE_MODEL_SUMMARY"), fauxAssistantMessage("NATIVE_PREFIX_SUMMARY")]);
+	await h.session.prompt("ANCIENT_OWNER_REQUEST");
+	await h.session.prompt("Second owner turn.");
+	await h.session.compact();
+	assert.equal(h.faux.state.callCount, 4);
+	h.faux.setResponses([toolTurn(fauxToolCall("dump", {})), fauxAssistantMessage("Done.")]);
+	await h.session.prompt("AFTER_COMPACT_OWNER: inspect only.");
+	assert.equal(boundaries(h).length, 1);
+	const summary = boundaries(h)[0].summary;
+	assert.match(summary, /AFTER_COMPACT_OWNER/);
+	assert.match(summary, /older checkpoint; possibly stale[\s\S]*NATIVE_MODEL_SUMMARY/);
+	assert.doesNotMatch(summary, /ANCIENT_OWNER_REQUEST/);
+	assert.equal(h.faux.state.callCount, 6, "no summary request for the automatic rollover");
+});
+
 test("cooperating boundary entries and continuation survive automatic rollover", async (t) => {
 	let ownerId;
 	const h = await fixture(t, {

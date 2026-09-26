@@ -694,6 +694,22 @@ test("all-session ranking keeps older originals ahead of newer echoes before app
 	}
 });
 
+// PR #51 review: a reminder that Pi's own compaction summarized away must not block the next one.
+test("a reminder before a native compaction does not suppress the next reminder", () => {
+	const { handlers, messages, context: base } = setup();
+	const branch: Record<string, unknown>[] = [
+		{ type: "custom_message", id: "old-reminder", customType: "posthorse-reminder", details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 } },
+		{ type: "message", id: "kept", message: { role: "user", content: "kept tail" } },
+		{ type: "compaction", id: "native", summary: "native summary", firstKeptEntryId: "kept" },
+	];
+	const context = { ...usageContext(base, 100_000, 76_000), sessionManager: { getBranch: () => branch, getSessionDir: () => tmpdir() } };
+	turnEnd(handlers, context);
+	assert.equal(messages.length, 1);
+	branch.push({ type: "custom_message", id: "new-reminder", customType: "posthorse-reminder", details: messages[0].details });
+	turnEnd(handlers, context);
+	assert.equal(messages.length, 1, "still one reminder per window and budget");
+});
+
 test("new_context beside a failed sibling tool does not suppress the reminder", () => {
 	const { handlers, messages, context: base } = setup();
 	const context = usageContext(base, 100_000, 76_000);

@@ -102,6 +102,7 @@ type EntryLike = {
 	details?: unknown;
 	display?: boolean;
 	handoff?: string;
+	firstKeptEntryId?: string;
 	targetId?: string;
 	replacement?: { content: unknown } | null;
 };
@@ -134,6 +135,19 @@ function isWindow(entry: EntryLike): boolean {
 
 function windowHandoff(entry: EntryLike | undefined): string | undefined {
 	return entry?.type === "compaction" ? entry.summary : entry?.handoff;
+}
+
+/** First branch entry still in model context: after a fork window, or a compaction's kept tail (including Pi's own `/compact`). */
+function contextStart(entries: readonly EntryLike[]): { start: number; boundary?: EntryLike } {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		if (entry.type === "context_window") return { start: i + 1, boundary: entry };
+		if (entry.type === "compaction") {
+			const kept = entries.findIndex((candidate) => candidate.id === entry.firstKeptEntryId);
+			return { start: kept >= 0 ? kept : i + 1, boundary: entry };
+		}
+	}
+	return { start: 0 };
 }
 
 function isReminderType(customType: unknown): boolean {
@@ -629,17 +643,8 @@ function recoverableToolResults(
 }
 
 function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly ProjectedEntry[], maxChars: number): string {
-	let windowStart = 0;
-	let priorWindow: EntryLike | undefined;
-	for (let i = entries.length - 1; i >= 0; i--) {
-		if (isWindow(entries[i])) {
-			windowStart = i + 1;
-			priorWindow = entries[i];
-			break;
-		}
-	}
-
-	const current = entries.slice(windowStart);
+	const { start, boundary: priorWindow } = contextStart(entries);
+	const current = entries.slice(start);
 	const edits = new Map<string, EntryLike>();
 	for (const entry of entries) {
 		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
@@ -1063,7 +1068,8 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 			contextWindow: budget.contextWindow,
 			reserveTokens: budget.reserveTokens,
 		};
-		if (hasReminder(branch, fingerprint)) return;
+		// A reminder a compaction summarized away no longer reaches the model.
+		if (hasReminder(branch.slice(contextStart(branch).start), fingerprint)) return;
 		pi.sendMessage(
 			{
 				customType: REMINDER_TYPE,

@@ -20,6 +20,7 @@
 ### Fixed
 
 - Active tool size estimates count tools on official Pi, which reports tool names but not fork tool ids.
+- After Pi's own `/compact`, automatic recovery records start at the compaction's kept tail and carry its summary as the prior checkpoint instead of re-listing summarized inputs, and a reminder the compaction summarized away no longer suppresses the next one.
 - On the fork, bound oversized retained native receipts before fresh-window dispatch, including results completed during rollover preparation, through the synchronous `registerContextWindowHook`; excerpts share model capacity and preserve complete history or replacement recovery references.
 - Align rollover guidance and request cards with native background work continuing across context resets, while foreground tools must succeed before an explicit rollover commits.
 - Retain native async receipts across later complete responses during rollover, labeled as evidence that may already have been received or handled.
