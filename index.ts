@@ -1,17 +1,15 @@
 /**
  * Posthorse — fresh context, same journey.
  *
- * Experimental no-summary resets for official Pi 0.87.1. Pi owns the persisted
- * boundary. Posthorse owns the policy: sparse budget reminders, rollover tools, durable
- * notes, and history recovery.
+ * No-summary context rollover for Pi. On the fitchmultz/pi fork, Pi persists native context
+ * windows; on official Pi, rollover is a retain-none compaction whose summary is the handoff.
+ * Pi owns the persisted boundary. Posthorse owns the policy: sparse budget reminders, rollover
+ * tools, durable notes, and history recovery.
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { access, lstat, open, readlink, realpath, rename, stat, unlink } from "node:fs/promises";
 import {
 	appendFileSync,
-	constants,
-	copyFileSync,
 	createReadStream,
 	existsSync,
 	mkdirSync,
@@ -20,8 +18,9 @@ import {
 	realpathSync,
 	statSync,
 } from "node:fs";
+import { access, constants, lstat, open, readlink, realpath, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
-import { getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { estimateTokens, getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerPosthorseMessages, toolCards, type PosthorseDisplay } from "./ui.ts";
@@ -37,88 +36,47 @@ const ESTIMATED_IMAGE_CHARS = 4_800;
 /** A window must hold the largest handoff (~5,000 tokens) plus equal working room below Pi's line. */
 const MIN_USABLE_TOKENS = Math.ceil(MAX_HANDOFF_CHARS / 4) * 2;
 const REMINDER_TYPE = "posthorse-reminder";
-/** Persisted by pi-headroom transcripts before the rename; still recognized everywhere. */
-const LEGACY_REMINDER_TYPE = "headroom-reminder";
 const AUTO_HANDOFF_PREFIX = "Automatic context rollover recovery record.";
-const LEGACY_AUTO_HANDOFF_PREFIX =
-	"Automatic context rollover. Continue the current task without asking the user to repeat it.";
+const EMPTY_HANDOFF = "Fresh context. Restore relevant notes and history before continuing.";
 
 type CompactionPolicy = { enabled: boolean; reserveTokens: number };
-type PolicyContext = Pick<ExtensionContext, "model" | "getContextUsage" | "getSystemPrompt"> & { policy: CompactionPolicy };
+type ContextUsage = { tokens: number | null; contextWindow: number; percent: number | null };
 
-/** Matches the fork's local publisher: resolve each link without normalizing away path constraints. */
-async function resolveLocalFileTarget(absolutePath: string): Promise<string> {
-	if (!isAbsolute(absolutePath)) throw new Error("Expected an absolute file path");
-	let target = absolutePath;
-	const links = new Set<string>();
-	for (;;) {
-		// A trailing separator requires an existing directory, never a new regular file.
-		if (target.endsWith(sep) || target.endsWith("/")) {
-			await stat(target);
-			return realpath(target);
-		}
-		const parentInput = dirname(target);
-		// realpath alone can accept regular-file/.. on macOS; stat checks traversal.
-		const parentInfo = await stat(parentInput);
-		if (!parentInfo.isDirectory()) {
-			throw Object.assign(new Error(`Not a directory: ${parentInput}`), { code: "ENOTDIR" });
-		}
-		const parent = await realpath(parentInput);
-		target = join(parent, basename(target));
-		const info = await lstat(target).catch((error: NodeJS.ErrnoException) => {
-			if (error.code !== "ENOENT") throw error;
-			return undefined;
-		});
-		if (!info) return target;
-		if (!info.isSymbolicLink()) return realpath(target);
-		if (links.has(target)) {
-			throw Object.assign(new Error(`Symlink cycle: ${absolutePath}`), { code: "ELOOP" });
-		}
-		links.add(target);
-		const link = await readlink(target);
-		// Preserve ".." until realpath has followed any preceding directory symlinks.
-		target = isAbsolute(link) ? link : `${parent}${sep}${link}`;
-	}
-}
+/** The fork exposes live settings on the context; official Pi gets them from the injected policy. */
+type PolicyContext = {
+	model?: { contextWindow: number };
+	getCompactionSettings(): CompactionPolicy;
+	getContextUsage(): ContextUsage | undefined;
+	getSystemPrompt(): string;
+};
 
-/** Same-directory publication preserves ordinary mode/uid/gid; hardlinks retain the old inode. */
-async function publishLocalFile(path: string, content: string, signal?: AbortSignal): Promise<void> {
-	const throwIfAborted = () => {
-		if (signal?.aborted) throw Object.assign(new Error("Operation aborted", { cause: signal.reason }), { code: "ABORT_ERR" });
-	};
-	throwIfAborted();
-	const target = await resolveLocalFileTarget(path);
-	const previous = await lstat(target).catch((error: NodeJS.ErrnoException) => {
-		if (error.code !== "ENOENT") throw error;
-		return undefined;
-	});
-	if (previous && !previous.isFile()) {
-		throw Object.assign(new Error(`Cannot publish to a non-regular file: ${target}`), {
-			code: previous.isDirectory() ? "EISDIR" : "EINVAL", path: target,
-		});
-	}
-	if (previous) await access(target, constants.W_OK);
-	throwIfAborted();
-	const temporary = join(dirname(target), `.posthorse-${randomUUID()}.tmp`);
-	const file = await open(temporary, "wx", previous ? 0o600 : 0o666);
-	try {
-		await file.writeFile(content, { signal });
-		if (previous) {
-			const staged = await file.stat();
-			if (staged.uid !== previous.uid || staged.gid !== previous.gid) await file.chown(previous.uid, previous.gid);
-			await file.chmod(previous.mode & 0o777);
-		}
-		await file.close();
-		throwIfAborted();
-		await rename(temporary, target);
-	} catch (error) {
-		await file.close().catch(() => {});
-		await unlink(temporary).catch(() => {});
-		throw error;
-	}
-}
+/** Fork-only extension API; the published Pi types do not declare it. */
+type NativeExtensionAPI = {
+	registerContextWindowHook(
+		handler: (
+			event: { contextEntries: ProjectedEntry[]; pendingMessages: MessageLike[] },
+			ctx: ExtensionContext,
+		) => ReceiptEdit[] | undefined,
+	): void;
+	on(
+		event: "session_before_auto_compact",
+		handler: (
+			event: { reason: "overflow" | "threshold"; branchEntries: EntryLike[]; pendingMessages?: MessageLike[]; retainedToolResultIds: string[] },
+			ctx: unknown,
+		) => { newContext: { handoff?: string } } | undefined,
+	): void;
+};
 
 type ImageLike = { type: "image"; data: string; mimeType: string };
+type ToolCallLike = {
+	type?: string;
+	id?: string;
+	name?: string;
+	namespace?: string;
+	arguments?: unknown;
+	executionArguments?: unknown;
+	async?: boolean;
+};
 type MessageLike = {
 	role?: string;
 	stopReason?: string;
@@ -144,15 +102,17 @@ type EntryLike = {
 	details?: unknown;
 	display?: boolean;
 	handoff?: string;
+	firstKeptEntryId?: string;
 	targetId?: string;
 	replacement?: { content: unknown } | null;
 };
 
 type WindowedEntry = { entry: EntryLike; windowId: string; text: string; images: ImageLike[] };
 type ProjectedEntry = { sourceEntry: EntryLike; messages: MessageLike[] };
+type ReceiptEdit = { type: "context_edit"; targetId: string; replacement: { content: string } };
 type HistoryHit = { id: string; text: string; headerLength: number; priority: 0 | 1 };
 type RecoveryRecord = {
-	reference: string;
+	id: string;
 	timestamp: string;
 	kind: "owner" | "coordination";
 	label: string;
@@ -168,6 +128,7 @@ type Budget = {
 	supported: boolean;
 };
 
+/** A fork context window, or the retain-none compaction Posthorse commits on official Pi. */
 function isWindow(entry: EntryLike): boolean {
 	return entry.type === "context_window" || (entry.type === "compaction" && (entry.details as { posthorse?: unknown } | undefined)?.posthorse === 1);
 }
@@ -176,8 +137,83 @@ function windowHandoff(entry: EntryLike | undefined): string | undefined {
 	return entry?.type === "compaction" ? entry.summary : entry?.handoff;
 }
 
+/** First branch entry still in model context: after a fork window, or a compaction's kept tail (including Pi's own `/compact`). */
+function contextStart(entries: readonly EntryLike[]): { start: number; boundary?: EntryLike } {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		if (entry.type === "context_window") return { start: i + 1, boundary: entry };
+		if (entry.type === "compaction") {
+			const kept = entries.findIndex((candidate) => candidate.id === entry.firstKeptEntryId);
+			return { start: kept >= 0 ? kept : i + 1, boundary: entry };
+		}
+	}
+	return { start: 0 };
+}
+
 function isReminderType(customType: unknown): boolean {
-	return customType === REMINDER_TYPE || customType === LEGACY_REMINDER_TYPE;
+	return customType === REMINDER_TYPE;
+}
+
+/** Resolve each link like the fork's publisher: never normalize away a path constraint. */
+async function resolveFileTarget(absolutePath: string): Promise<string> {
+	let target = absolutePath;
+	const links = new Set<string>();
+	for (;;) {
+		// A trailing separator requires an existing directory, never a new regular file.
+		if (target.endsWith(sep) || target.endsWith("/")) {
+			await stat(target);
+			return realpath(target);
+		}
+		const parentInput = dirname(target);
+		// realpath alone can accept regular-file/.. on macOS; stat checks traversal.
+		if (!(await stat(parentInput)).isDirectory()) {
+			throw Object.assign(new Error(`Not a directory: ${parentInput}`), { code: "ENOTDIR" });
+		}
+		const parent = await realpath(parentInput);
+		target = join(parent, basename(target));
+		const info = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+			if (error.code !== "ENOENT") throw error;
+			return undefined;
+		});
+		if (!info) return target;
+		if (!info.isSymbolicLink()) return realpath(target);
+		if (links.has(target)) throw Object.assign(new Error(`Symlink cycle: ${absolutePath}`), { code: "ELOOP" });
+		links.add(target);
+		const link = await readlink(target);
+		// Preserve ".." until realpath has followed any preceding directory symlinks.
+		target = isAbsolute(link) ? link : `${parent}${sep}${link}`;
+	}
+}
+
+/** Same-directory replacement: a failure before rename leaves the previous note; mode/uid/gid are kept. */
+async function publishFile(path: string, content: string, signal?: AbortSignal): Promise<void> {
+	signal?.throwIfAborted();
+	const target = await resolveFileTarget(path);
+	const previous = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+		if (error.code !== "ENOENT") throw error;
+		return undefined;
+	});
+	if (previous && !previous.isFile()) {
+		throw Object.assign(new Error(`Cannot publish to a non-regular file: ${target}`), { code: previous.isDirectory() ? "EISDIR" : "EINVAL", path: target });
+	}
+	if (previous) await access(target, constants.W_OK);
+	const temporary = join(dirname(target), `.posthorse-${randomUUID()}.tmp`);
+	const file = await open(temporary, "wx", previous ? 0o600 : 0o666);
+	try {
+		await file.writeFile(content, { signal });
+		if (previous) {
+			const staged = await file.stat();
+			if (staged.uid !== previous.uid || staged.gid !== previous.gid) await file.chown(previous.uid, previous.gid);
+			await file.chmod(previous.mode & 0o777);
+		}
+		await file.close();
+		signal?.throwIfAborted();
+		await rename(temporary, target);
+	} catch (error) {
+		await file.close().catch(() => {});
+		await unlink(temporary).catch(() => {});
+		throw error;
+	}
 }
 
 function isImage(part: unknown): part is ImageLike {
@@ -203,16 +239,26 @@ function safeJsonStringify(value: unknown): string {
 	}
 }
 
+function toolIdentity(name?: string, namespace?: string): string {
+	return `${name ?? "tool"}${namespace === undefined ? "" : ` (namespace: ${safeJsonStringify(namespace)})`}`;
+}
+
+function executionArgumentsText(call: ToolCallLike): string {
+	return call.executionArguments === undefined ? "" : `\nExecution arguments: ${safeJsonStringify(call.executionArguments)}`;
+}
+
 function textOf(message: MessageLike): string {
 	if (typeof message.content === "string") return message.content;
 	if (!Array.isArray(message.content)) return "";
 	return message.content
 		.map((part) => {
 			if (!part || typeof part !== "object") return "";
-			const block = part as { type?: string; text?: string; thinking?: string; name?: string; arguments?: unknown };
+			const block = part as ToolCallLike & { text?: string; thinking?: string };
 			if (block.type === "text") return block.text ?? "";
 			if (block.type === "thinking") return block.thinking ?? "";
-			if (block.type === "toolCall") return `${block.name ?? "tool"} ${safeJsonStringify(block.arguments ?? {})}`;
+			if (block.type === "toolCall") {
+				return `${toolIdentity(block.name, block.namespace)} ${safeJsonStringify(block.arguments ?? {})}${block.id === undefined ? "" : `\nCall ID: ${block.id}`}${executionArgumentsText(block)}`;
+			}
 			return "";
 		})
 		.filter(Boolean)
@@ -223,44 +269,11 @@ function textResult(text: string, images: ImageLike[] = [], display?: PosthorseD
 	return { content: [{ type: "text" as const, text }, ...images], details: display };
 }
 
-/** Import old checkout-local notes without overwriting shared notes, including concurrent writes. */
-function importLegacyNotes(source: string, target: string, sharedRoot?: string, ancestors = new Set<string>()): void {
-	if (!existsSync(source)) return;
-	const sourceRoot = realpathSync(source);
-	if (ancestors.has(sourceRoot)) return;
-	if (sharedRoot) {
-		// A directory symlink can lead back into the destination being populated.
-		const path = relative(sharedRoot, sourceRoot);
-		if (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`)) return;
-	}
-	if (existsSync(target) && (!statSync(target).isDirectory() || sourceRoot === realpathSync(target))) return;
-	mkdirSync(target, { recursive: true });
-	sharedRoot ??= realpathSync(target);
-	ancestors.add(sourceRoot);
-	for (const name of readdirSync(source)) {
-		const from = join(source, name);
-		const to = join(target, name);
-		const info = statSync(from, { throwIfNoEntry: false });
-		if (!info) continue;
-		if (info.isDirectory()) {
-			importLegacyNotes(from, to, sharedRoot, ancestors);
-		} else {
-			try {
-				copyFileSync(from, to, constants.COPYFILE_EXCL);
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			}
-		}
-	}
-	ancestors.delete(sourceRoot);
-}
-
 /** Conventional repos use the main checkout; separate Git directories are their own shared root. */
 function notesRoot(cwd: string): string {
 	for (let dir = cwd; ; dir = dirname(dir)) {
 		const marker = join(dir, ".git");
 		if (existsSync(marker)) {
-			let root: string;
 			try {
 				let target = marker;
 				if (!statSync(marker).isDirectory()) {
@@ -271,13 +284,11 @@ function notesRoot(cwd: string): string {
 				target = realpathSync(target);
 				const commonFile = join(target, "commondir");
 				const common = realpathSync(existsSync(commonFile) ? resolve(target, readFileSync(commonFile, "utf8").trim()) : target);
-				root = basename(common) === ".git" ? dirname(common) : common;
+				return basename(common) === ".git" ? dirname(common) : common;
 			} catch {
 				// Orphaned/copied worktrees can outlive their Git metadata; local notes still work.
 				return dir;
 			}
-			if (root !== dir) importLegacyNotes(join(dir, ".pi", "notes"), join(root, ".pi", "notes"));
-			return root;
 		}
 		if (dirname(dir) === dir) return cwd;
 	}
@@ -300,18 +311,6 @@ function assistantFailure(message: MessageLike): string {
 	return `[${message.stopReason ?? "error"}]${message.errorMessage ? ` ${message.errorMessage}` : ""}`;
 }
 
-function editHistoryQuery(entry: EntryLike): string {
-	return `[context_edit target ${entry.targetId}]`;
-}
-
-function customHistoryQuery(entry: EntryLike): string {
-	return `[custom-message ${createHash("sha256").update(safeJsonStringify([entry.customType, entry.content])).digest("hex").slice(0, 16)}]`;
-}
-
-function historyReference(entry: EntryLike): string {
-	return `history read id ${entry.id?.slice(0, 120) ?? "unknown"}`;
-}
-
 function flattenEntry(entry: EntryLike): string | undefined {
 	if (entry.type === "message") {
 		const message = entry.message ?? {};
@@ -320,20 +319,23 @@ function flattenEntry(entry: EntryLike): string | undefined {
 			if (message.excludeFromContext === true) return "[bashExecution] (excluded from model context by Pi)";
 			return `[bashExecution] $ ${message.command ?? ""}\n${message.output ?? ""}`;
 		}
-		return `[${message.role ?? "message"}] ${[textOf(message), assistantFailure(message), imageSummary(imagesOf(message.content))].filter(Boolean).join("\n")}`;
+		const resultIdentity = message.role === "toolResult"
+			? `Tool: ${toolIdentity(message.toolName, message.namespace)}${message.toolCallId === undefined ? "" : `\nCall ID: ${message.toolCallId}`}`
+			: "";
+		return `[${message.role ?? "message"}] ${[textOf(message), assistantFailure(message), imageSummary(imagesOf(message.content)), resultIdentity].filter(Boolean).join("\n")}`;
 	}
 	if (entry.type === "compaction" || entry.type === "branch_summary") {
 		return `[${entry.type}] ${entry.summary ?? ""}`;
 	}
 	if (entry.type === "custom_message") {
-		return `[custom:${entry.customType ?? "unknown"}] ${customHistoryQuery(entry)} ${[textOf({ content: entry.content }), imageSummary(imagesOf(entry.content))].filter(Boolean).join("\n")}`;
+		return `[custom:${entry.customType ?? "unknown"}] ${[textOf({ content: entry.content }), imageSummary(imagesOf(entry.content))].filter(Boolean).join("\n")}`;
 	}
 	if (entry.type === "context_window") {
 		return `[context_window] ${entry.handoff ? `Handoff: ${entry.handoff}` : "No handoff"}`;
 	}
 	if (entry.type === "context_edit" && entry.replacement) {
 		const content = entry.replacement.content;
-		return `${editHistoryQuery(entry)} ${[textOf({ content }), imageSummary(imagesOf(content))].filter(Boolean).join("\n")}`;
+		return `[context_edit] ${[textOf({ content }), imageSummary(imagesOf(content))].filter(Boolean).join("\n")}`;
 	}
 	return undefined;
 }
@@ -554,19 +556,19 @@ function recoveryRecord(entry: EntryLike): RecoveryRecord | undefined {
 	} else {
 		return undefined;
 	}
-	const reference = historyReference(entry);
+	const id = entry.id?.slice(0, 120) ?? "unknown";
 	const summary = imageSummary(images);
 	return {
-		reference,
+		id,
 		timestamp: entry.timestamp?.slice(0, 80) ?? "unknown time",
 		kind,
 		label,
-		text: [text, summary && `${summary} — recover with ${reference}`].filter(Boolean).join("\n") || "(non-text content; recover the entry from history)",
+		text: [text, summary && `${summary} — recover with history read id ${id}`].filter(Boolean).join("\n") || "(non-text content; recover the entry from history)",
 	};
 }
 
 function formatRecoveryRecord(record: RecoveryRecord, limit: number): string {
-	return boundedBlock(`[${record.label} | ${record.timestamp} | ${record.reference}]`, record.text, limit);
+	return boundedBlock(`[${record.label} | ${record.timestamp} | entry ${record.id}]`, record.text, limit);
 }
 
 function formatPriorCheckpoint(entry: EntryLike | undefined, limit: number): string | undefined {
@@ -574,7 +576,7 @@ function formatPriorCheckpoint(entry: EntryLike | undefined, limit: number): str
 	if (!entry || !handoff) return undefined;
 	const id = entry.id?.slice(0, 120) ?? "unknown";
 	const header = `[older checkpoint; possibly stale | context-window entry ${id}]`;
-	if (handoff.startsWith(AUTO_HANDOFF_PREFIX) || handoff.startsWith(LEGACY_AUTO_HANDOFF_PREFIX)) {
+	if (handoff.startsWith(AUTO_HANDOFF_PREFIX)) {
 		return boundedBlock(header, `Prior automatic recovery text is not nested here. Use history read with entry ${id} if needed.`, limit);
 	}
 	return boundedBlock(header, handoff, limit);
@@ -583,12 +585,11 @@ function formatPriorCheckpoint(entry: EntryLike | undefined, limit: number): str
 /** Async receipts can arrive during a later response, so its completion cannot establish receipt delivery. */
 function recoverableToolResults(
 	entries: readonly EntryLike[],
-): { callReference?: string; blocks: Array<{ header: string; text: string }> } | undefined {
-	type Call = { type?: string; id?: string; name?: string; arguments?: unknown; async?: boolean };
-	const calls = new Map<string, { entry: EntryLike; block: Call }>();
+): { callId?: string; blocks: Array<{ header: string; text: string }> } | undefined {
+	const calls = new Map<string, { entry: EntryLike; block: ToolCallLike }>();
 	for (const entry of entries) {
 		if (entry.message?.role !== "assistant" || !Array.isArray(entry.message.content)) continue;
-		for (const block of entry.message.content as Call[]) {
+		for (const block of entry.message.content as ToolCallLike[]) {
 			if (block?.type === "toolCall" && typeof block.id === "string") calls.set(block.id, { entry, block });
 		}
 	}
@@ -623,47 +624,39 @@ function recoverableToolResults(
 	const blocks = results.map((result) => {
 		const message = result.message ?? {};
 		const matching = calls.get(message.toolCallId!);
-		const name = (message.toolName ?? matching?.block.name ?? "tool").slice(0, 80);
-		const reference = historyReference(result);
+		const name = toolIdentity(message.toolName ?? matching?.block.name, message.namespace ?? matching?.block.namespace);
+		const resultId = (result.id ?? "unknown").slice(0, 120);
 		const images = imageSummary(imagesOf(message.content));
 		const output =
-			[textOf(message).trim(), images && `${images} — recover with ${reference}`]
+			[textOf(message).trim(), images && `${images} — recover with history read id ${resultId}`]
 				.filter(Boolean)
 				.join("\n") || "(empty result)";
 		const callDetail = matching
-			? `${allLinked ? "" : `\nCall: ${historyReference(matching.entry)}`}\nCall arguments: ${safeJsonStringify(matching.block.arguments ?? {})}`
+			? `${allLinked ? "" : `\nCall entry: ${(matching.entry.id ?? "unknown").slice(0, 120)}`}\nCall arguments: ${safeJsonStringify(matching.block.arguments ?? {})}${executionArgumentsText(matching.block)}`
 			: "\nNo matching projected call";
 		return {
-			header: `[${message.isError ? "error" : "result"}; ${reference}]`,
-			text: `${output}\n\nTool: ${name}${callDetail}`,
+			header: `[${message.isError ? "error" : "result"} entry ${resultId}]`,
+			text: `${output}\n\nTool: ${name}\nCall ID: ${message.toolCallId}${callDetail}`,
 		};
 	});
-	return { callReference: allLinked ? historyReference(call!) : undefined, blocks };
+	return { callId: allLinked ? (call?.id ?? "unknown").slice(0, 120) : undefined, blocks };
 }
 
 function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly ProjectedEntry[], maxChars: number): string {
-	let windowStart = 0;
-	let priorWindow: EntryLike | undefined;
-	for (let i = entries.length - 1; i >= 0; i--) {
-		if (isWindow(entries[i])) {
-			windowStart = i + 1;
-			priorWindow = entries[i];
-			break;
-		}
-	}
-
-	const current = entries.slice(windowStart);
+	const { start, boundary: priorWindow } = contextStart(entries);
+	const current = entries.slice(start);
 	const edits = new Map<string, EntryLike>();
-	for (const entry of current) {
+	for (const entry of entries) {
 		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
 	}
+	const omittedProjectedIds = new Set(projected.filter(({ messages }) => !messages.length).map(({ sourceEntry }) => sourceEntry.id));
 	const edited = current.flatMap((entry) => {
+		if (entry.id && omittedProjectedIds.has(entry.id)) return [];
 		const edit = entry.id ? edits.get(entry.id) : undefined;
 		if (edit?.replacement === null) return [];
 		if (!edit?.replacement) return [entry];
-		const reference = { id: edit.id };
-		if (entry.type === "message") return [{ ...entry, ...reference, message: { ...entry.message, content: edit.replacement.content } }];
-		if (entry.type === "custom_message") return [{ ...entry, ...reference, content: edit.replacement.content }];
+		if (entry.type === "message") return [{ ...entry, id: edit.id, message: { ...entry.message, content: edit.replacement.content } }];
+		if (entry.type === "custom_message") return [{ ...entry, id: edit.id, content: edit.replacement.content }];
 		return [entry];
 	});
 	const records = edited
@@ -682,19 +675,18 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 	const joinedLength = (parts: Array<string | undefined>) =>
 		parts.filter((part): part is string => Boolean(part)).join("\n\n").length;
 
-	const toolEntries = projected.flatMap(({ sourceEntry, messages }) => {
-		const edit = edits.get(sourceEntry.id ?? "");
-		return messages
+	const toolEntries = projected.flatMap(({ sourceEntry, messages }) =>
+		messages
 			.filter((message) => message.role === "assistant" || message.role === "toolResult")
 			.map((message) => ({
 				type: "message",
-				id: edit ? edit.id : sourceEntry.id,
+				id: edits.get(sourceEntry.id ?? "")?.id ?? sourceEntry.id,
 				message,
-			}));
-	});
+			})),
+	);
 	const toolBatch = recoverableToolResults(toolEntries);
 	const batchHeader = toolBatch
-		? `Tool result evidence (current projected window; may already have been received or handled; not current progress).${toolBatch.callReference ? ` Tool-call reference: ${toolBatch.callReference}:` : ""}`
+		? `Tool result evidence (current projected window; may already have been received or handled; not current progress).${toolBatch.callId ? ` Tool-call entry ${toolBatch.callId}:` : ""}`
 		: undefined;
 	const minimumParts = [
 		preamble,
@@ -713,7 +705,7 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 	}
 	const batchBlocks = toolBatch?.blocks.slice(firstBatchBlock) ?? [];
 	const batchOmission = firstBatchBlock
-		? `Omitted ${firstBatchBlock} earlier tool result(s) whose headers could not fit. ${toolBatch!.callReference ? `Use ${toolBatch!.callReference}, then ` : "Use "}history search/read to recover them.`
+		? `Omitted ${firstBatchBlock} earlier tool result(s) whose headers could not fit. ${toolBatch!.callId ? `Use history read with tool-call entry ${toolBatch!.callId}, then ` : "Use "}history search/read to recover them.`
 		: undefined;
 	const bareBatch = batchHeader
 		? [batchHeader, batchOmission, ...batchBlocks.map((block) => block.header)]
@@ -777,53 +769,24 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 	return [...fixedParts(), omission, batch, prior].filter((part): part is string => Boolean(part)).join("\n\n");
 }
 
-/** Legacy reminders carry only windowId; they match on it alone until the model changes. */
 function reminderMatches(details: unknown, fingerprint: ReminderFingerprint): boolean {
 	const stored = (details ?? {}) as Partial<ReminderFingerprint>;
 	return (
 		stored.windowId === fingerprint.windowId &&
-		(stored.contextWindow ?? fingerprint.contextWindow) === fingerprint.contextWindow &&
-		(stored.reserveTokens ?? fingerprint.reserveTokens) === fingerprint.reserveTokens
+		stored.contextWindow === fingerprint.contextWindow &&
+		stored.reserveTokens === fingerprint.reserveTokens
 	);
-}
-
-function reminderIsStale(
-	customType: unknown,
-	details: unknown,
-	fingerprint: ReminderFingerprint,
-	branch: readonly EntryLike[],
-): boolean {
-	if (!reminderMatches(details, fingerprint)) return true;
-	const stored = (details ?? {}) as Partial<ReminderFingerprint>;
-	if (customType !== LEGACY_REMINDER_TYPE || stored.contextWindow !== undefined || stored.reserveTokens !== undefined) {
-		return false;
-	}
-	let reminderIndex = -1;
-	for (let i = 0; i < branch.length; i++) {
-		const entry = branch[i];
-		if (
-			entry.type === "custom_message" &&
-			entry.customType === LEGACY_REMINDER_TYPE &&
-			((entry.details ?? {}) as Partial<ReminderFingerprint>).windowId === stored.windowId
-		) {
-			reminderIndex = i;
-		}
-	}
-	return reminderIndex !== -1 && branch.slice(reminderIndex + 1).some((entry) => entry.type === "model_change");
 }
 
 function hasReminder(entries: readonly EntryLike[], fingerprint: ReminderFingerprint): boolean {
 	return entries.some(
-		(entry) =>
-			entry.type === "custom_message" &&
-			isReminderType(entry.customType) &&
-			!reminderIsStale(entry.customType, entry.details, fingerprint, entries),
+		(entry) => entry.type === "custom_message" && isReminderType(entry.customType) && reminderMatches(entry.details, fingerprint),
 	);
 }
 
 function budgetFor(ctx: PolicyContext, contextWindow = ctx.model?.contextWindow): Budget | undefined {
 	if (!contextWindow || contextWindow <= 0) return undefined;
-	const { enabled, reserveTokens } = ctx.policy;
+	const { enabled, reserveTokens } = ctx.getCompactionSettings();
 	const usable = contextWindow - reserveTokens;
 	return { contextWindow, reserveTokens, enabled, usable, rolloverAt: usable + 1, supported: !enabled || usable >= MIN_USABLE_TOKENS };
 }
@@ -845,9 +808,80 @@ function freshPayloadChars(ctx: PolicyContext, toolTokens: number, pendingMessag
 	);
 }
 
+/** Bound only the carried receipts; edits preserve the journal and native call/result identity. */
+function boundWindowReceipts(
+	ctx: ExtensionContext & PolicyContext,
+	projected: readonly ProjectedEntry[],
+	pending: readonly MessageLike[],
+	toolTokens: number,
+): ReceiptEdit[] | undefined {
+	if (!ctx.model) return undefined;
+	const estimate = estimateTokens as unknown as (message: MessageLike) => number;
+	const messages = projected.flatMap((entry) => entry.messages);
+	const budget = budgetFor(ctx);
+	const reserve = budget?.enabled && budget.supported ? budget.reserveTokens : 0;
+	const overhead =
+		reserve +
+		PAGE_MARGIN_TOKENS +
+		Math.max(
+			Math.ceil(ctx.getSystemPrompt().length / 4) + toolTokens,
+			messages.filter((message) => message.role === "system").reduce((sum, message) => sum + estimate(message), 0),
+		) +
+		pending.reduce((sum, message) => sum + estimate(message), 0);
+	const fixed = messages.filter((message) => message.role !== "system" && message.role !== "toolResult");
+	const available = ctx.model.contextWindow - overhead - fixed.reduce((sum, message) => sum + estimate(message), 0);
+	const edits = new Map<string, EntryLike>();
+	for (const entry of ctx.sessionManager.getBranch() as EntryLike[]) {
+		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
+	}
+	const receipts = projected.flatMap(({ sourceEntry, messages }) =>
+		messages.filter((message) => message.role === "toolResult").map((message) => {
+			if (!sourceEntry.id) throw new Error("Posthorse: retained receipt has no history entry");
+			const recoveryId = edits.get(sourceEntry.id)?.id ?? sourceEntry.id;
+			const images = imageSummary(imagesOf(message.content));
+			const header = `Retained ${message.isError ? "error" : "result"} excerpt. Full content: history read id ${recoveryId}.${images ? `\n${images}` : ""}\n`;
+			const cost = estimate(message);
+			const minimum = Math.min(cost, Math.ceil(header.length / 4));
+			return { id: sourceEntry.id, message, header, cost, minimum };
+		}),
+	);
+	if (receipts.reduce((sum, receipt) => sum + receipt.cost, 0) <= available) return undefined;
+	let extra = available - receipts.reduce((sum, receipt) => sum + receipt.minimum, 0);
+	if (extra < 0) throw new Error("Posthorse: fresh context cannot fit fixed input and receipt recovery references");
+	// Like handoffs, oversized receipt excerpts leave half the remaining capacity for continued work.
+	extra = Math.floor(extra / 2);
+	const drafts: ReceiptEdit[] = [];
+	receipts.sort((a, b) => a.cost - a.minimum - (b.cost - b.minimum));
+	for (const [index, receipt] of receipts.entries()) {
+		const allowance = receipt.minimum + Math.min(receipt.cost - receipt.minimum, Math.floor(extra / (receipts.length - index)));
+		extra -= allowance - receipt.minimum;
+		if (receipt.cost <= allowance) continue;
+		const content = receipt.header + excerpt(textOf(receipt.message), allowance * 4 - receipt.header.length);
+		drafts.push({ type: "context_edit", targetId: receipt.id, replacement: { content } });
+	}
+	const replacements = new Map(drafts.map((draft) => [draft.targetId, draft.replacement.content]));
+	const total = projected.reduce(
+		(sum, entry) =>
+			sum + entry.messages.reduce(
+				(tokens, message) => tokens + (message.role === "system" ? 0 : estimate(
+					replacements.has(entry.sourceEntry.id ?? "")
+						? { ...message, content: replacements.get(entry.sourceEntry.id!) }
+						: message,
+				)),
+				0,
+			),
+		overhead,
+	);
+	if (total > ctx.model.contextWindow) throw new Error("Posthorse: retained receipts exceed fresh context capacity");
+	return drafts;
+}
+
+/** Official Pi cannot expose its live settings to extensions; say so wherever the persisted snapshot is used. */
+const SNAPSHOT_NOTE = "Reminder and budget policy uses available settings (a persisted CLI snapshot by default); Pi's live settings control automatic compaction.";
+
 function unsupportedMessage(budget: Budget): string {
 	const n = (value: number) => value.toLocaleString("en-US");
-	return `Posthorse: unsupported configuration. The model's context window (${n(budget.contextWindow)} tokens) minus the available compaction.reserveTokens (${n(budget.reserveTokens)}) leaves ${n(budget.usable)} usable tokens; Posthorse needs at least ${n(MIN_USABLE_TOKENS)}. Checkpoint reminders are off under these settings. If Pi's live policy matches, automatic compaction remains native and may generate a summary. Lower compaction.reserveTokens in Pi settings or use a larger-context model. new_context remains available with a model-aware handoff limit.`;
+	return `Posthorse: unsupported configuration. The model's context window (${n(budget.contextWindow)} tokens) minus Pi's compaction.reserveTokens (${n(budget.reserveTokens)}) leaves ${n(budget.usable)} usable tokens; Posthorse needs at least ${n(MIN_USABLE_TOKENS)}. Automatic Posthorse rollover and checkpoint reminders are off for this model, so Pi's own compaction applies. Lower compaction.reserveTokens in Pi settings or use a larger-context model. new_context remains available with a model-aware handoff limit.`;
 }
 
 /** Capacity before Pi's automatic line (or configured context limit), including page metadata and refusals. */
@@ -859,49 +893,54 @@ function pageCapacity(ctx: PolicyContext, toolTokens: number): number {
 	return line - usage.tokens;
 }
 
-function buildGuidance(ctx: PolicyContext): string {
+function buildGuidance(ctx: PolicyContext, official: boolean): string {
 	const budget = budgetFor(ctx);
-	const enabled = budget?.enabled ?? ctx.policy.enabled;
+	const enabled = budget?.enabled ?? ctx.getCompactionSettings().enabled;
 	let automatic: string;
 	if (!enabled) {
-		automatic =
-			"Pi compaction is disabled in the available settings, so Posthorse sends no checkpoint reminder. new_context remains available.";
+		automatic = official
+			? "Pi compaction is disabled in the available settings, so Posthorse sends no checkpoint reminder. new_context remains available."
+			: "Pi compaction is disabled, so Posthorse sends no checkpoint reminder and performs no automatic rollover. new_context remains available.";
 	} else if (budget && !budget.supported) {
 		automatic = unsupportedMessage(budget);
 	} else {
 		const deadline = budget
 			? `${Math.max(1, Math.round((budget.rolloverAt / budget.contextWindow) * 100))}% used`
 			: "the configured Pi context limit";
-		automatic = `Automatic Posthorse rollover follows Pi's live compaction policy. At most one best-effort checkpoint reminder may appear before the estimated configured rollover line (${deadline}); a large turn, overflow, restart, or smaller model can skip it.\nWhen reminded, stop normal work, save goal/progress/decisions/next steps, then call new_context now.`;
+		automatic = `Automatic Posthorse rollover follows Pi's enabled compaction setting. At most one best-effort checkpoint reminder may appear before the rollover line (${deadline}); a large turn, overflow, restart, or smaller model can skip it.\nWhen reminded, stop normal work, save goal/progress/decisions/next steps, then call new_context now.`;
 	}
 	return `## Context self-management (Posthorse)
-Experimental official Pi mode: resets use native compaction entries without a generated summary.
-Context windows are finite. Use get_context_remaining for the best available native estimate when it matters; routine turns do not include a changing meter.
-Reminder and budget policy uses available settings (a persisted CLI snapshot by default); Pi's live settings control automatic compaction.
+Context windows are finite. Use get_context_remaining for the best available native estimate when it matters; routine turns do not include a changing meter.${official ? `\n${SNAPSHOT_NOTE}` : ""}
 ${automatic}
-new_context starts a genuinely fresh Pi context after the complete tool batch. Earlier conversation remains in the session transcript and is recoverable with notes and history.
+new_context requests a fresh Pi context after the current foreground tools succeed. Background work continues across the reset. Earlier conversation remains in the session transcript and is recoverable with notes and history.
 Automatic handoffs are emergency recovery records, not proof of current state. Restore notes/todos/history and verify live state before continuing stateful or external work.`;
 }
 
-export type PolicyAccessor = (ctx: ExtensionContext) => CompactionPolicy;
-
-/** SDK hosts can inject their actual live settings rather than the persisted CLI approximation. */
-export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
+function persistedPolicy(ctx: ExtensionContext): CompactionPolicy {
 	const settings = SettingsManager.create(ctx.cwd, getAgentDir(), { projectTrusted: ctx.isProjectTrusted() });
 	const errors = settings.drainErrors();
 	if (errors.length) throw new Error(`Posthorse could not read persisted Pi settings: ${errors.map((error) => error.error.message).join("; ")}`);
 	return settings.getCompactionSettings(ctx.model);
-}) => (pi: ExtensionAPI) => {
-	const policyContext = (ctx: ExtensionContext): PolicyContext => ({
-		model: ctx.model, policy: getPolicy(ctx),
-		getContextUsage: () => ctx.getContextUsage(), getSystemPrompt: () => ctx.getSystemPrompt(),
-	});
+}
+
+/** SDK hosts on official Pi can inject their live settings instead of the persisted snapshot; the fork always uses its own. */
+export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => CompactionPolicy = persistedPolicy) => (pi: ExtensionAPI) => {
+	const nativePi = pi as unknown as NativeExtensionAPI;
+	const native = typeof nativePi.registerContextWindowHook === "function";
+	const policy = (ctx: ExtensionContext): PolicyContext =>
+		native ? (ctx as ExtensionContext & PolicyContext) : {
+			model: ctx.model,
+			getCompactionSettings: () => getPolicy(ctx),
+			getContextUsage: () => ctx.getContextUsage(),
+			getSystemPrompt: () => ctx.getSystemPrompt(),
+		};
 	registerPosthorseMessages(pi);
 	const activeToolTokens = () => {
 		const active = new Set(pi.getActiveTools());
 		return pi
 			.getAllTools()
-			.filter((tool) => active.has(tool.name))
+			// The fork identifies namespaced tools by id; official Pi only has names.
+			.filter((tool) => active.has((tool as typeof tool & { id?: string }).id ?? tool.name))
 			.reduce(
 				(total, tool) =>
 					total +
@@ -912,6 +951,12 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 				0,
 			);
 	};
+
+	if (native) {
+		nativePi.registerContextWindowHook((event, ctx) =>
+			boundWindowReceipts(ctx as ExtensionContext & PolicyContext, event.contextEntries, event.pendingMessages, activeToolTokens()),
+		);
+	}
 
 	let pendingPageTokens = 0;
 	let previousPageUsage: number | null | undefined;
@@ -970,14 +1015,13 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 		previousPageUsage = undefined;
 	});
 
-	pi.on("session_start", (_event, ctx) => {
+	pi.on("session_start", () => {
 		pendingPageTokens = 0;
 		previousPageUsage = undefined;
-		policyContext(ctx);
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
-		const guidance = buildGuidance(policyContext(ctx));
+		const guidance = buildGuidance(policy(ctx), !native);
 		// An earlier full-prompt override makes section edits invisible to Pi.
 		if (event.systemPromptOptions.forceSystemPrompt !== undefined) {
 			return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };
@@ -986,39 +1030,50 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 	});
 
 	pi.on("turn_end", (event, ctx) => {
-		const native = policyContext(ctx);
-		if (event.outcome === "aborted" || ctx.signal?.aborted || event.message.role !== "assistant") return;
-		const branch = ctx.sessionManager.getBranch() as EntryLike[];
-		if (event.message.stopReason === "error" || event.message.stopReason === "aborted") return;
-		const usage = native.getContextUsage();
-		const budget = budgetFor(native);
-		const requested = event.toolResults.filter((result) => result.toolName === "new_context");
-		if (requested.length && event.toolResults.some((result) => result.isError)) return;
-		const limit = freshPayloadChars(native, activeToolTokens(), event.context.pendingMessages);
-		const explicit = requested[0]?.details as { posthorseHandoff?: string } | undefined;
-		if (typeof explicit?.posthorseHandoff === "string") {
-			const handoff = explicit.posthorseHandoff || "Fresh context. Restore relevant notes and history before continuing.";
-			// Pending steering may arrive after execute() checks capacity.
-			if (handoff.length > limit) return { entries: [...event.entries, { type: "custom_message" as const, customType: "posthorse-reset-deferred", display: true,
-				content: "Posthorse reset deferred: queued messages leave too little room for the requested handoff. The current context is unchanged; process those messages, then request a shorter handoff." }] };
-			return { entries: [...event.entries, { type: "compaction" as const, summary: handoff, firstKeptEntryId: null, details: { posthorse: 1, reason: "explicit" } }], continue: true };
+		const host = policy(ctx);
+		if (
+			event.message.role === "assistant" &&
+			(event.message.stopReason === "error" || event.message.stopReason === "aborted")
+		)
+			return;
+		const requested = event.toolResults.find((result) => result.toolName === "new_context");
+		// Suppress clear successes; turn_end can also include unrelated background errors.
+		// If Pi still rolls over, context filtering below removes any stale reminder.
+		if (requested && !event.toolResults.some((result) => result.isError)) {
+			// The fork commits new_context from the tool result; official Pi needs a retain-none compaction draft.
+			if (native || event.outcome === "aborted" || ctx.signal?.aborted) return;
+			const content = (event.message as MessageLike).content;
+			const call = (Array.isArray(content) ? content as ToolCallLike[] : []).find((block) => block?.type === "toolCall" && block.id === requested.toolCallId);
+			const handoff = (call?.arguments as { handoff?: unknown } | undefined)?.handoff;
+			const summary = (typeof handoff === "string" && handoff.trim()) || EMPTY_HANDOFF;
+			// Input steered in after execute() checked capacity can leave too little room.
+			if (summary.length > freshPayloadChars(host, activeToolTokens(), event.context.pendingMessages)) {
+				return { entries: [...event.entries, { type: "custom_message" as const, customType: "posthorse-reset-deferred", display: true,
+					content: "Posthorse reset deferred: queued messages leave too little room for the requested handoff. The current context is unchanged; process those messages, then request a shorter handoff." }] };
+			}
+			return { entries: [...event.entries, { type: "compaction" as const, summary, firstKeptEntryId: null, details: { posthorse: 1, reason: "explicit" } }], continue: true };
 		}
-		if (!budget?.enabled || !budget.supported) return;
-		if (!usage || usage.tokens == null || usage.tokens >= budget.rolloverAt) return;
+		const usage = host.getContextUsage();
+		if (!usage || usage.tokens == null || usage.contextWindow <= 0) return;
+		const budget = budgetFor(host, usage.contextWindow);
+		if (!budget || !budget.enabled || !budget.supported) return;
+		if (usage.tokens >= budget.rolloverAt) return;
 		const reminderBuffer = Math.min(REMINDER_BUFFER_TOKENS, Math.floor(budget.usable * 0.1));
 		const remindAt = budget.rolloverAt - reminderBuffer;
 		if (usage.tokens < remindAt) return;
 
+		const branch = ctx.sessionManager.getBranch() as EntryLike[];
 		const fingerprint: ReminderFingerprint = {
 			windowId: currentWindowId(branch),
 			contextWindow: budget.contextWindow,
 			reserveTokens: budget.reserveTokens,
 		};
-		if (hasReminder(branch, fingerprint)) return;
+		// A reminder a compaction summarized away no longer reaches the model.
+		if (hasReminder(branch.slice(contextStart(branch).start), fingerprint)) return;
 		pi.sendMessage(
 			{
 				customType: REMINDER_TYPE,
-				content: `[posthorse] Checkpoint now: approximately ${(budget.rolloverAt - usage.tokens).toLocaleString("en-US")} tokens remain before the configured automatic rollover line. Stop normal work, save goal/progress/decisions/next steps, then call new_context now. This reminder uses available settings and is best-effort; a large turn, overflow, restart, or smaller model can reach rollover without one.`,
+				content: `[posthorse] Checkpoint now: ${(budget.rolloverAt - usage.tokens).toLocaleString("en-US")} tokens remain before Pi's automatic rollover line. Stop normal work, save goal/progress/decisions/next steps, then call new_context now. This reminder is best-effort; a large turn, overflow, restart, or smaller model can reach rollover without one.`,
 				display: true,
 				details: fingerprint,
 			},
@@ -1028,70 +1083,82 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 
 	// Filter active input only; raw reminders remain in history for deduplication and recovery.
 	pi.on("context", (event, ctx) => {
-		const native = policyContext(ctx);
 		if (!event.messages.some((message) => message.role === "custom" && isReminderType(message.customType))) return;
-		const budget = budgetFor(native);
-		const branch = ctx.sessionManager.getBranch() as EntryLike[];
+		let windowId: unknown;
+		if (native) {
+			const marker = event.messages.find((message) => message.role === "custom" && message.customType === "context-window");
+			windowId = marker?.role === "custom" ? (marker.details as { windowId?: unknown } | undefined)?.windowId : "initial";
+			if (typeof windowId !== "string") return;
+		}
+		const host = policy(ctx);
+		const budget = budgetFor(host);
 		const fingerprint: ReminderFingerprint = {
-			windowId: currentWindowId(branch),
+			windowId: native ? windowId as string : currentWindowId(ctx.sessionManager.getBranch() as EntryLike[]),
 			contextWindow: budget?.contextWindow,
 			reserveTokens: budget?.reserveTokens,
 		};
 		const stale = (message: (typeof event.messages)[number]) =>
 			message.role === "custom" &&
 			isReminderType(message.customType) &&
-			(!native.policy.enabled || reminderIsStale(message.customType, message.details, fingerprint, branch));
+			(!host.getCompactionSettings().enabled || !reminderMatches(message.details, fingerprint));
 		if (event.messages.some(stale)) return { messages: event.messages.filter((message) => !stale(message)) };
 	});
 
-	// Pi owns automatic thresholds, recovery retries, and when another request is needed.
-	pi.on("session_before_compact", (event, ctx) => {
-		if (event.reason === "manual") return;
-		const cancelled = () => event.signal.aborted || ctx.signal?.aborted;
-		if (cancelled()) return { cancel: true };
-		try {
-			const native: PolicyContext = {
-				model: ctx.model, policy: event.preparation.settings,
-				getContextUsage: () => ctx.getContextUsage(), getSystemPrompt: () => ctx.getSystemPrompt(),
-			};
-			// Small/unknown context windows deliberately retain native compaction.
-			if (!budgetFor(native)?.supported) return;
-			const limit = freshPayloadChars(native, activeToolTokens());
-			const handoff = buildAutoHandoff(
-				ctx.sessionManager.getBranch(),
-				ctx.sessionManager.buildSessionProjection().entries,
-				limit,
-			);
-			if (limit < MIN_PAGE_CHARS || handoff.length > limit) {
-				throw new Error("Too little fresh context capacity for an automatic recovery record.");
+	if (native) {
+		// Claim Pi's automatic threshold/overflow trigger with a fresh window: no summary, no summarization auth.
+		nativePi.on("session_before_auto_compact", (event, ctx) => {
+			const host = policy(ctx as ExtensionContext);
+			const budget = budgetFor(host);
+			// An unsupported budget would roll over every turn; leave Pi's own behavior in place instead.
+			if (budget && !budget.supported) return undefined;
+			const limit = freshPayloadChars(host, activeToolTokens(), event.pendingMessages);
+			const projected = (ctx as ExtensionContext).sessionManager.buildSessionProjection().entries;
+			const handoff = limit >= MIN_PAGE_CHARS ? buildAutoHandoff(event.branchEntries, projected, limit) : "";
+			if (!handoff || handoff.length > limit) {
+				// Only receipts Pi will retain require shaping; consumed results must not force an empty cut.
+				return event.retainedToolResultIds.length ? { newContext: {} } : undefined;
 			}
+			return { newContext: { handoff } };
+		});
+	} else {
+		// Official Pi owns thresholds, recovery retries, and whether another request follows.
+		pi.on("session_before_compact", (event, ctx) => {
+			if (event.reason === "manual") return;
+			const cancelled = () => event.signal.aborted || ctx.signal?.aborted;
 			if (cancelled()) return { cancel: true };
-			// The first kept entry is invisible metadata: retain no prior conversation.
-			pi.appendEntry("posthorse-boundary", {});
-			const firstKeptEntryId = ctx.sessionManager.getLeafId();
-			if (!firstKeptEntryId) throw new Error("Pi did not persist the context boundary.");
-			return { compaction: {
-				summary: handoff, firstKeptEntryId, tokensBefore: event.preparation.tokensBefore,
-				details: { posthorse: 1, reason: event.reason },
-			} };
-		} catch (error) {
-			// Throwing here is swallowed by Pi's event runner and would invoke its summarizer.
-			if (!cancelled()) {
-				const message = `Posthorse automatic rollover cancelled: ${error instanceof Error ? error.message : String(error)}`;
-				if (ctx.hasUI) ctx.ui.notify(message, "error");
-				else console.error(message);
+			try {
+				// The event carries Pi's live settings; prefer them over the persisted snapshot.
+				const host: PolicyContext = { ...policy(ctx), getCompactionSettings: () => event.preparation.settings };
+				// Small/unknown context windows deliberately keep Pi's own compaction.
+				if (!budgetFor(host)?.supported) return;
+				const limit = freshPayloadChars(host, activeToolTokens());
+				const handoff = buildAutoHandoff(ctx.sessionManager.getBranch() as EntryLike[], ctx.sessionManager.buildSessionProjection().entries, limit);
+				if (limit < MIN_PAGE_CHARS || handoff.length > limit) throw new Error("Too little fresh context capacity for an automatic recovery record.");
+				if (cancelled()) return { cancel: true };
+				// firstKeptEntryId must name an entry; an invisible sentinel retains no prior conversation.
+				pi.appendEntry("posthorse-boundary", {});
+				const firstKeptEntryId = ctx.sessionManager.getLeafId();
+				if (!firstKeptEntryId) throw new Error("Pi did not persist the context boundary.");
+				return { compaction: { summary: handoff, firstKeptEntryId, tokensBefore: event.preparation.tokensBefore, details: { posthorse: 1, reason: event.reason } } };
+			} catch (error) {
+				// Pi swallows handler errors and would then run its summarizer; cancel instead.
+				if (!cancelled()) {
+					const message = `Posthorse automatic rollover cancelled: ${error instanceof Error ? error.message : String(error)}`;
+					if (ctx.hasUI) ctx.ui.notify(message, "error");
+					else console.error(message);
+				}
+				return { cancel: true };
 			}
-			return { cancel: true };
-		}
-	});
+		});
+	}
 
 	pi.registerTool({
 		name: "new_context",
 		label: "New Context",
 		...toolCards("new_context"),
 		description:
-			"Start a genuinely fresh context window after this tool batch. Earlier conversation leaves active context without a generated summary but remains recoverable through history. Pass concise continuation state in handoff, or save richer state with notes first.",
-		promptSnippet: "start a fresh context window with an optional atomic handoff",
+			"Request a fresh context window after the current foreground tools succeed. Background work continues across the reset. Earlier conversation leaves active context without a generated summary but remains recoverable through history. Pass concise continuation state in handoff, or save richer state with notes first.",
+		promptSnippet: "request a fresh context window with an optional atomic handoff",
 		promptGuidelines: [
 			"Before calling new_context, pass concise continuation state in handoff or save durable goal/progress/decisions/next-steps with notes",
 		],
@@ -1104,22 +1171,20 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 			),
 		}),
 		async execute(_id, { handoff }, _signal, _onUpdate, ctx) {
-			const native = policyContext(ctx);
 			const trimmed = handoff?.trim() || undefined;
-			const limit = freshPayloadChars(native, activeToolTokens());
+			const limit = freshPayloadChars(policy(ctx), activeToolTokens());
 			if (trimmed && trimmed.length > limit) {
 				throw new Error(
 					`Handoff is too large for the active model (${trimmed.length.toLocaleString("en-US")} characters; limit ${limit.toLocaleString("en-US")}). Save fuller state in notes, then retry with a shorter handoff or no handoff.`,
 				);
 			}
-			return {
-				...textResult(
-					"Requested a fresh Pi context after this complete tool batch succeeds. Earlier conversation stays in session history.",
-					[],
-					{ kind: "new-context" },
-				),
-				details: { kind: "new-context" as const, posthorseHandoff: trimmed ?? "" },
-			};
+			const result = textResult(
+				"Requested a fresh Pi context after the current foreground tools succeed. Background work continues across the reset. Earlier conversation stays in session history.",
+				[],
+				{ kind: "new-context" },
+			);
+			// Official Pi ignores this field; its reset is committed at turn_end from the call arguments.
+			return native ? { ...result, newContext: { handoff: trimmed } } : result;
 		},
 	});
 
@@ -1128,25 +1193,25 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 		label: "Context Remaining",
 		...toolCards("get_context_remaining"),
 		description:
-			"Best available native context estimate, with rollover budget based on available settings (a persisted CLI snapshot by default).",
+			"Best available native estimate of the context budget: tokens until Pi's automatic rollover line and until the configured context limit.",
 		promptSnippet: "check the remaining context budget only when needed",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
-			const native = policyContext(ctx);
-			const usage = native.getContextUsage();
+			const host = policy(ctx);
+			const usage = host.getContextUsage();
 			if (!usage || usage.tokens == null) return textResult("Context usage is not known until the next model response.", [], { kind: "context" });
 			const n = (value: number) => value.toLocaleString("en-US");
-			const budget = budgetFor(native, usage.contextWindow);
+			const budget = budgetFor(host, usage.contextWindow);
 			const display: PosthorseDisplay = {
 				kind: "context", usage,
 				rollover: !budget?.enabled ? "disabled" : budget.supported ? "enabled" : "unsupported",
 				rolloverAt: budget?.rolloverAt,
 			};
-			const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%).\nBest available native estimate. Rollover policy uses available settings (a persisted CLI snapshot by default).`;
-			if (!budget?.enabled) return textResult(`Automatic rollover is disabled in the available settings (Pi compaction.enabled=false). ${configured}`, [], display);
+			const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate.${native ? "" : ` ${SNAPSHOT_NOTE}`}`;
+			if (!budget?.enabled) return textResult(`Automatic rollover is disabled${native ? "" : " in the available settings"} (Pi compaction.enabled=false). ${configured}`, [], display);
 			if (!budget.supported) return textResult(`${unsupportedMessage(budget)} ${configured}`, [], display);
 			return textResult(
-				`≈${n(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until the configured automatic rollover line (${n(budget.rolloverAt)}); ${configured}`,
+				`≈${n(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until automatic rollover (line at ${n(budget.rolloverAt)}); ${configured}`,
 				[], display,
 			);
 		},
@@ -1157,7 +1222,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 		label: "Notes",
 		...toolCards("notes"),
 		description:
-			"Persistent notes in .pi/notes/ that survive context resets. Ops: list/read/search (paged; repeat with offset to continue), write (create/replace; empty content clears), append. Search matches case-insensitive substrings over note lines. Git worktrees share notes: at the main checkout for conventional .git layouts, or in the common Git directory when metadata is stored separately. Old checkout-local notes are imported without overwriting shared notes.",
+			"Persistent notes in .pi/notes/ that survive context resets. Ops: list/read/search (paged; repeat with offset to continue), write (create/replace; empty content clears), append. Search matches case-insensitive substrings over note lines. Git worktrees share notes: at the main checkout for conventional .git layouts, or in the common Git directory when metadata is stored separately.",
 		promptSnippet: "save and recall durable state that survives context resets",
 		promptGuidelines: [
 			"Use notes for durable state too large for a new_context handoff",
@@ -1188,7 +1253,9 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 				ancestors.add(root);
 				for (const file of readdirSync(directory)) {
 					const path = join(directory, file);
-					if (statSync(path).isDirectory()) walk(path, output, ancestors);
+					const info = statSync(path, { throwIfNoEntry: false });
+					if (!info) continue;
+					if (info.isDirectory()) walk(path, output, ancestors);
 					else output.push(path);
 				}
 				ancestors.delete(root);
@@ -1198,7 +1265,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 				case "list": {
 					const files: string[] = [];
 					if (existsSync(dir)) walk(dir, files);
-					return notesPage(policyContext(ctx), files.map((file) => file.slice(dir.length + 1)), params.offset ?? 0, "notes-list", "(no notes yet)");
+					return notesPage(policy(ctx), files.map((file) => file.slice(dir.length + 1)), params.offset ?? 0, "notes-list", "(no notes yet)");
 				}
 				case "read": {
 					const relative = requireValue(params.path, "path", params.op);
@@ -1209,7 +1276,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 					if (offset && offset >= text.length) {
 						throw new Error(`Offset ${offset} is past the end of ${relative} (${text.length} chars).`);
 					}
-					const end = Math.min(text.length, offset + pageSize(policyContext(ctx), offset, 0));
+					const end = Math.min(text.length, offset + pageSize(policy(ctx), offset, 0));
 					const more =
 						end < text.length ? `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]` : "";
 					return pageResult(`${text.slice(offset, end)}${more}`, [], { kind: "note-read", offset, end, total: text.length });
@@ -1219,7 +1286,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 					if (params.content === undefined) throw new Error(`"content" is required for op "write" (use "" to clear a note).`);
 					const path = safeJoin(relative);
 					mkdirSync(dirname(path), { recursive: true });
-					await withFileMutationQueue(path, () => publishLocalFile(path, params.content!, signal));
+					await withFileMutationQueue(path, () => publishFile(path, params.content!, signal));
 					return textResult(`Wrote ${path}`, [], { kind: "note-write" });
 				}
 				case "append": {
@@ -1252,7 +1319,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 							}
 						}
 					}
-					return notesPage(policyContext(ctx), hits, params.offset ?? 0, "notes-search", `No notes match "${excerpt(params.query!, 200)}".`);
+					return notesPage(policy(ctx), hits, params.offset ?? 0, "notes-search", `No notes match "${excerpt(params.query!, 200)}".`);
 				}
 			}
 		},
@@ -1291,7 +1358,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 						const value = JSON.parse(Buffer.from(params.cursor, "base64url").toString());
 						if (!Array.isArray(value) || value.length !== 4 || typeof value[0] !== "string" || !value[0] || ![0, 1].includes(value[1]) || !Number.isSafeInteger(value[2]) || value[2] < 0 || value[3] !== searchKey) throw new Error();
 						cursor = value as typeof cursor;
-					} catch { pageError(policyContext(ctx), "Invalid history cursor or changed query/scope; restart the search without it.", params.cursor); }
+					} catch { pageError(policy(ctx), "Invalid history cursor or changed query/scope; restart the search without it.", params.cursor); }
 				}
 				const hits: HistoryHit[][] = [[], []];
 				let found = !cursor;
@@ -1301,7 +1368,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 					if (cursor && hit.priority === cursor[1] && !found) {
 						if (hit.id !== cursor[0]) return;
 						found = true;
-						if (cursor[2] > hit.text.length) pageError(policyContext(ctx), "History cursor is past the entry; restart the search without it.", params.cursor);
+						if (cursor[2] > hit.text.length) pageError(policy(ctx), "History cursor is past the entry; restart the search without it.", params.cursor);
 						if (cursor[2] === hit.text.length) return;
 					}
 					if (hits[hit.priority].length <= limit) hits[hit.priority].push(hit);
@@ -1334,13 +1401,13 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 						if (hits[0].length > limit) break;
 					}
 				}
-				const chars = pageSize(policyContext(ctx), 0, 0, params.cursor);
-				if (!found) pageError(policyContext(ctx), "History cursor entry no longer matches; restart the search without it.", params.cursor);
+				const chars = pageSize(policy(ctx), 0, 0, params.cursor);
+				if (!found) pageError(policy(ctx), "History cursor entry no longer matches; restart the search without it.", params.cursor);
 				const results = hits.flat();
 				const cursorFor = (hit: HistoryHit, offset: number) => Buffer.from(JSON.stringify([hit.id, hit.priority, offset, searchKey])).toString("base64url");
 				const footer = (next: string) => `\n[More results; continue with cursor "${next}" and the same query/scope.]`;
 				const reserve = Math.max(0, ...results.map((hit) => footer(cursorFor(hit, hit.text.length)).length));
-				if (reserve >= chars) pageError(policyContext(ctx), "History entry id is too large for pagination.", params.cursor);
+				if (reserve >= chars) pageError(policy(ctx), "History entry id is too large for pagination.", params.cursor);
 				const parts: string[] = [];
 				const spans: Array<{ headerLength: number; length: number }> = [];
 				let available = chars - reserve;
@@ -1379,7 +1446,7 @@ export const createPosthorse = (getPolicy: PolicyAccessor = (ctx) => {
 				}
 				// Reserve one image first so an image-only continuation either advances or asks for fresh context.
 				const firstImage = imageOffset < item.images.length ? 1 : 0;
-				const chars = pageSize(policyContext(ctx), offset, firstImage, undefined, item.images.length ? imageOffset : undefined);
+				const chars = pageSize(policy(ctx), offset, firstImage, undefined, item.images.length ? imageOffset : undefined);
 				const imageEnd = Math.min(item.images.length, imageOffset + firstImage + Math.floor((chars - MIN_PAGE_CHARS) / ESTIMATED_IMAGE_CHARS));
 				const images = item.images.slice(imageOffset, imageEnd);
 				const end = Math.min(

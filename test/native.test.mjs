@@ -7,12 +7,14 @@ import { basename, dirname, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const hostIndex = process.env.PI_HOST_INDEX ? pathToFileURL(process.env.PI_HOST_INDEX).href : import.meta.resolve("@earendil-works/pi-coding-agent");
-const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(hostIndex);
+const { createAgentSession, DefaultResourceLoader, estimateTokens, ModelRuntime, SessionManager, SettingsManager } = await import(hostIndex);
 
 // Resolve the faux provider from the selected host's graph as well.
 const aiManifest = pathToFileURL(findPackageJSON("@earendil-works/pi-ai", hostIndex));
 const aiPackage = JSON.parse(readFileSync(aiManifest, "utf8"));
 const { fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, InMemoryCredentialStore } = await import(new URL(aiPackage.exports["."].import, aiManifest).href);
+const { estimateMessageTokens } = await import(new URL(aiPackage.exports["./utils/*"].import.replace("*", "estimate"), aiManifest).href);
+const { clampMaxTokensToContext } = await import(new URL(aiPackage.exports["./api/*"].import.replace("*", "simple-options"), aiManifest).href);
 const root = fileURLToPath(new URL("..", import.meta.url));
 const textOf = (message) => typeof message?.content === "string" ? message.content : message?.content?.map((part) => part.text ?? "").join("\n") ?? "";
 const nextCursor = (text) => text.match(/\[More results; continue with cursor "([^"]+)" and the same query\/scope\.\]$/)?.[1];
@@ -24,7 +26,7 @@ async function fixture(t, options = {}) {
 	t.diagnostic(`fixture: ${temp}`);
 	const cwd = join(temp, "project"), agentDir = join(temp, "agent");
 	mkdirSync(cwd); mkdirSync(agentDir);
-	const faux = fauxProvider({ api: options.nativeAsync ? "openai-responses" : undefined, models: [{ id: "posthorse-regression", contextWindow: options.contextWindow ?? 100_000, maxTokens: 1000 }] });
+	const faux = fauxProvider({ api: options.nativeAsync ? "openai-responses" : undefined, models: [{ id: "posthorse-regression", contextWindow: options.contextWindow ?? 100_000, maxTokens: options.maxTokens ?? 1000 }] });
 	if (options.nativeAsync) faux.getModel().compat = { supportsAsyncTools: true };
 	const setResponses = faux.setResponses;
 	faux.setResponses = (steps) => setResponses(steps.map((step) => (ctx, opts) => {
@@ -47,7 +49,7 @@ async function fixture(t, options = {}) {
 	const { session } = await createAgentSession({ cwd, agentDir, modelRuntime, model: faux.getModel(), resourceLoader, settingsManager, sessionManager, noTools: "builtin" });
 	t.after(() => session.dispose());
 	await session.bindExtensions({ onError(error) { throw new Error(error.error); } });
-	return { cwd, session, faux, sessionManager, settingsManager, resourceLoader };
+	return { cwd, agentDir, session, faux, sessionManager, settingsManager, resourceLoader, modelRuntime };
 }
 
 function automaticRecovery({ session, sessionManager, resourceLoader }) {
@@ -55,7 +57,7 @@ function automaticRecovery({ session, sessionManager, resourceLoader }) {
 	const handler = extension.handlers.get("session_before_auto_compact")[0];
 	const result = handler({
 		type: "session_before_auto_compact", reason: "threshold",
-		branchEntries: sessionManager.getBranch(), pendingMessages: [], signal: new AbortController().signal,
+		branchEntries: sessionManager.getBranch(), pendingMessages: [], retainedToolResultIds: [], signal: new AbortController().signal,
 	}, session.extensionRunner.createContext());
 	assert.ok(result?.newContext?.handoff);
 	return result.newContext.handoff;
@@ -174,6 +176,73 @@ test("automatic rollover keeps namespaced ask_question output as tool evidence, 
 	}
 });
 
+test("recovery and history retain native tool identity and admitted arguments after rollover", async (t) => {
+	const executed = [];
+	const h = await fixture(t, {
+		nativeAsync: true,
+		extension(pi) {
+			for (const namespace of ["ENVIRONMENT_A", "ENVIRONMENT_B"]) pi.registerTool({
+				namespace, name: "record", async: true, label: "Record", description: "In-memory fixture operation",
+				parameters: { type: "object", properties: { target: { type: "string" } }, required: ["target"] },
+				prepareArguments(args) { return { ...args, target: `${namespace}_ACTUAL_RESOURCE` }; },
+				async execute(id, args) {
+					executed.push({ namespace, id, args });
+					return { content: [{ type: "text", text: "Fixture operation complete" }], details: {} };
+				},
+			});
+		},
+	});
+	const calls = ["ENVIRONMENT_A", "ENVIRONMENT_B"].map((namespace, i) => {
+		const call = { ...fauxToolCall("record", { target: "REQUESTED_ALIAS" }), namespace, async: true };
+		call.responsesItem = { type: "function_call", id: `fc_identity_${i}`, call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments), async: true, status: "completed" };
+		return call;
+	});
+	h.faux.setResponses([
+		fauxAssistantMessage(calls, { responseId: "resp_identity", stopReason: "toolUse" }),
+		fauxAssistantMessage("Done"),
+	]);
+	await h.session.prompt("Run both in-memory fixture operations exactly once.");
+	assert.deepEqual(executed, calls.map((call) => ({
+		namespace: call.namespace, id: call.id, args: { target: `${call.namespace}_ACTUAL_RESOURCE` },
+	})));
+	// History reads raw journal entries; each call's execution checkpoint holds its admitted input.
+	const callEntries = calls.map((call) => h.sessionManager.getBranch().findLast((entry) =>
+		entry.type === "message" && entry.message.role === "assistant" &&
+		entry.message.content.some((part) => part.id === call.id && part.executionArguments)));
+	const resultEntries = h.sessionManager.getBranch().filter((entry) =>
+		entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "record");
+	const handoff = automaticRecovery(h);
+	h.session.newContext({ handoff });
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+	assert.ok(!h.sessionManager.buildSessionProjection().messages.some((message) =>
+		message.role === "assistant" && message.content.some((part) => part.id === calls[0].id)));
+
+	const lookups = [
+		...callEntries.map((entry) => fauxToolCall("history", { op: "read", id: entry.id })),
+		...resultEntries.map((entry) => fauxToolCall("history", { op: "read", id: entry.id })),
+		fauxToolCall("history", { op: "search", query: "ENVIRONMENT_A" }),
+		fauxToolCall("history", { op: "search", query: "ACTUAL_RESOURCE" }),
+	];
+	h.faux.setResponses([fauxAssistantMessage(lookups, { stopReason: "toolUse" }), fauxAssistantMessage("History recovered")]);
+	await h.session.prompt("Recover the earlier operations from history.");
+	const reads = lookups.map((lookup) => textOf(h.sessionManager.getBranch().find((entry) =>
+		entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === lookup.id)?.message));
+	for (const [i, call] of calls.entries()) {
+		for (const text of [handoff, reads[i]]) {
+			assert.ok(text.includes(`record (namespace: "${call.namespace}")`), text);
+			assert.ok(text.includes(`Call ID: ${call.id}`), text);
+			assert.ok(text.includes('{"target":"REQUESTED_ALIAS"}'), text);
+			assert.ok(text.includes(`Execution arguments: {"target":"${call.namespace}_ACTUAL_RESOURCE"}`), text);
+		}
+		const resultText = reads[calls.length + resultEntries.findIndex((entry) => entry.message.toolCallId === call.id)];
+		assert.ok(resultText.includes(`record (namespace: "${call.namespace}")`), resultText);
+		assert.ok(resultText.includes(`Call ID: ${call.id}`), resultText);
+	}
+	assert.ok(reads.at(-2).includes(`[${callEntries[0].id}]`), reads.at(-2));
+	assert.ok(reads.at(-1).includes(`[${callEntries[1].id}]`), reads.at(-1));
+	assert.equal(executed.length, 2, "recovery does not execute the operations again");
+});
+
 test("automatic rollover respects context edits in its recovery handoff", async (t) => {
 	const { session, faux, sessionManager } = await fixture(t, {
 		contextWindow: 128_000,
@@ -254,9 +323,10 @@ test("a projected orphan result is not attributed to an older assistant", async 
 });
 
 test("recovery keeps a projected result whose call predates the window", async (t) => {
+	let callEntry;
 	const h = await fixture(t, { seed(manager) {
 		const call = { ...fauxToolCall("work", {}), async: true };
-		manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+		callEntry = manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
 		manager.appendContextWindow("Fresh window", null);
 		manager.appendMessage(fauxAssistantMessage("Unrelated response"));
 		manager.appendMessage({
@@ -267,7 +337,10 @@ test("recovery keeps a projected result whose call predates the window", async (
 	assert.match(JSON.stringify(h.sessionManager.buildSessionProjection().messages), /CROSS_WINDOW_RESULT/);
 	const handoff = automaticRecovery(h);
 	assert.match(handoff, /CROSS_WINDOW_RESULT/);
-	assert.match(handoff, /No matching projected call/);
+	assert.ok(h.sessionManager.buildSessionProjection().entries.some((entry) =>
+		entry.sourceEntry.id === callEntry && entry.messages.some((message) => message.role === "assistant")));
+	assert.match(handoff, new RegExp(`Tool-call entry ${callEntry}:`));
+	assert.match(handoff, /Call arguments: \{\}/);
 });
 
 test("mixed projected results retain their own call provenance", async (t) => {
@@ -336,13 +409,13 @@ test("interleaved async receipts retain projected provenance across complete res
 	assert.ok(handoff.indexOf("EDITED_FIRST_RECEIPT") < handoff.indexOf("SECOND_ASYNC_RECEIPT"));
 });
 
-test("recovery excludes results dependent on an omitted async call", async (t) => {
+for (const toolName of ["work", "ask_question"]) test(`recovery excludes ${toolName} results dependent on an omitted async call`, async (t) => {
 	const h = await fixture(t, { seed(manager) {
-		const call = { ...fauxToolCall("work", {}), async: true, executionStarted: true };
+		const call = { ...fauxToolCall(toolName, {}), async: true, executionStarted: true };
 		const callId = manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
 		const laterId = manager.appendMessage(fauxAssistantMessage("Unrelated complete response"));
 		manager.appendMessage({
-			role: "toolResult", toolName: "work", toolCallId: call.id,
+			role: "toolResult", toolName, toolCallId: call.id,
 			content: [{ type: "text", text: "PRIVATE_ASYNC_RESULT" }], isError: false, timestamp: Date.now(),
 		});
 		manager.appendCompaction("Previous context", laterId, 100);
@@ -652,9 +725,11 @@ test("recovery retains the owner correction and a receipt journaled during a com
 	assert.doesNotMatch(handoff, /HANDLED_DUMP|Waiting for receipt/);
 });
 
-for (const stopReason of ["error", "aborted", "length"]) test(`completed native async results survive ${stopReason} and rollover`, async (t) => {
+for (const [stopReason, pendingChars] of [["error", 0], ["aborted", 0], ["length", 0], ["aborted", 240_000]]) test(`completed native async results survive ${stopReason} and rollover (new input=${pendingChars})`, async (t) => {
 	let executions = 0, recovery = "";
-	const h = await fixture(t, { nativeAsync: true, extension(pi) {
+	let recoveredMessages;
+	const reserve = 16_384;
+	const h = await fixture(t, { nativeAsync: true, maxTokens: stopReason === "length" ? 24_000 : 1000, extension(pi) {
 		pi.registerTool({ name: "receipt", async: true, label: "Receipt", description: "Local receipt", parameters: { type: "object", properties: {} }, async execute() {
 			executions++;
 			return { content: [{ type: "text", text: `COMPLETED_ACTION_RECEIPT ${stopReason === "error" ? "" : "r".repeat(600_000)}` }], details: {} };
@@ -667,16 +742,385 @@ for (const stopReason of ["error", "aborted", "length"]) test(`completed native 
 			responseId: "resp_receipt", stopReason,
 			...(stopReason === "error" ? { errorMessage: "context_length_exceeded: Your input exceeds the context window of this model" } : {}),
 		}),
-		(ctx) => { recovery = ctx.messages.map(textOf).join("\n"); return fauxAssistantMessage("Continued"); },
+		(ctx) => {
+			recoveredMessages = structuredClone(ctx.messages);
+			recovery = ctx.messages.map(textOf).join("\n");
+			return fauxAssistantMessage("Continued");
+		},
 	]);
 	await h.session.prompt("Perform the local operation exactly once and check its receipt.");
-	if (stopReason === "aborted") await h.session.prompt("Continue without repeating the operation.");
+	if (stopReason === "aborted") await h.session.prompt(`Continue without repeating the operation. ${"p".repeat(pendingChars)}`);
 	const branch = h.sessionManager.getBranch();
+	const inputTokens = recoveredMessages.reduce((sum, message) => sum + estimateTokens(message), 0);
+	assert.ok(inputTokens + reserve <= 100_000, `fresh provider input ${inputTokens} plus reserve exceeds capacity`);
+	assert.equal(h.faux.state.callCount, 2, "rollover must not add a provider request");
 	assert.equal(executions, 1);
 	assert.ok(branch.some((entry) => entry.type === "message" && entry.message.role === "toolResult" && !entry.message.isError && textOf(entry.message).includes("COMPLETED_ACTION_RECEIPT")));
-	assert.equal(branch.filter((entry) => entry.type === "context_window").length, 1);
+	// The large new prompt needs another window after the first rollover retained its receipt.
+	assert.equal(branch.filter((entry) => entry.type === "context_window").length, pendingChars ? 2 : 1);
 	assert.match(recovery, /Tool result evidence/);
 	assert.match(recovery, /COMPLETED_ACTION_RECEIPT/);
+	const receipt = recoveredMessages.find((message) => message.role === "toolResult" && message.toolCallId === call.id);
+	assert.equal(receipt?.isError, false);
+	assert.equal(receipt?.toolName, "receipt");
+	if (stopReason !== "error") {
+		const sourceId = textOf(receipt).match(/history read id ([a-f0-9]+)\./)?.[1];
+		assert.ok(sourceId, "bounded receipt must expose its full-history reference");
+		let source = h.sessionManager.getEntry(sourceId);
+		if (pendingChars) {
+			assert.equal(source.type, "context_edit", "the second window must preserve the prior replacement as its recovery source");
+			source = h.sessionManager.getEntry(textOf(source.replacement).match(/history read id ([a-f0-9]+)\./)?.[1]);
+		}
+		assert.equal(textOf(source.message), `COMPLETED_ACTION_RECEIPT ${"r".repeat(600_000)}`);
+		if (stopReason === "length") {
+			let offset = 0, recovered = "";
+			for (;;) {
+				h.session.newContext({ handoff: "Recover the original receipt without repeating the operation." });
+				h.faux.setResponses([
+					fauxAssistantMessage(fauxToolCall("history", { op: "read", id: sourceId, offset }), { stopReason: "toolUse" }),
+					fauxAssistantMessage("Page received"),
+				]);
+				await h.session.prompt("Read the next receipt page.");
+				const page = h.sessionManager.getBranch().findLast((entry) =>
+					entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "history").message;
+				assert.equal(page.isError, false);
+				const { headerLength, end, total } = page.details;
+				recovered += textOf(page).slice(headerLength, headerLength + end - offset);
+				assert.ok(end > offset, "history paging must progress");
+				offset = end;
+				if (end === total) break;
+			}
+			assert.equal(recovered, `[toolResult] COMPLETED_ACTION_RECEIPT ${"r".repeat(600_000)}\nTool: receipt\nCall ID: ${call.id}`);
+			assert.equal(executions, 1, "history recovery cannot repeat the operation");
+		}
+	}
+	t.diagnostic(JSON.stringify({ stopReason, pendingChars, inputTokens, reserve }));
+});
+
+for (const mode of ["explicit", "automatic"]) test(`large model output ceilings allow ${mode} rollover`, async (t) => {
+	const h = await fixture(t, {
+		maxTokens: mode === "explicit" ? 100_000 : 150_000,
+		extension(pi) {
+			pi.registerTool({
+				name: "dump", label: "Dump", description: "Trigger automatic rollover",
+				parameters: { type: "object", properties: {} },
+				async execute() { return { content: [{ type: "text", text: "d".repeat(600_000) }], details: {} }; },
+			});
+		},
+	});
+	if (mode === "explicit") h.session.newContext({ handoff: "Continue in a fresh window" });
+	let observed = false;
+	h.faux.setResponses([
+		...(mode === "automatic" ? [fauxAssistantMessage(fauxToolCall("dump", {}), { stopReason: "toolUse" })] : []),
+		(ctx) => {
+			observed = true;
+			assert.equal(ctx.messages.filter((message) => message.role === "toolResult").length, 0);
+			const tokens = ctx.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+			assert.ok(tokens + 16_384 <= 100_000, "fresh input fits Pi's configured reserve");
+			return fauxAssistantMessage("Fresh window received");
+		},
+	]);
+	await h.session.prompt("Continue the local work.");
+	assert.equal(observed, true);
+	assert.equal(h.faux.state.callCount, mode === "explicit" ? 1 : 2);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_edit").length, 0);
+});
+
+test("a receipt fitting Pi's reserve stays unchanged despite a large model output ceiling", async (t) => {
+	const content = [{ type: "text", text: `FITTING_RECEIPT ${"r".repeat(200_000)}` }];
+	const call = { ...fauxToolCall("receipt", {}), async: true };
+	call.responsesItem = { type: "function_call", id: "fc_fitting", call_id: call.id, name: call.name, arguments: "{}", async: true, status: "completed" };
+	const h = await fixture(t, {
+		maxTokens: 60_000, nativeAsync: true,
+		seed(manager) {
+			manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+			manager.appendMessage({
+				role: "toolResult", toolName: call.name, toolCallId: call.id,
+				content, isError: false, timestamp: Date.now(),
+			});
+		},
+	});
+	h.session.newContext({ handoff: "Inspect the retained receipt." });
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_edit").length, 0);
+	let observed = false;
+	h.faux.setResponses([(ctx) => {
+		observed = true;
+		const receipt = ctx.messages.find((message) => message.role === "toolResult" && message.toolCallId === call.id);
+		assert.deepEqual(receipt?.content, content);
+		const tokens = ctx.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+		assert.ok(tokens + 16_384 <= 100_000);
+		return fauxAssistantMessage("Receipt received");
+	}]);
+	await h.session.prompt("Check the receipt without repeating the action.");
+	assert.equal(observed, true);
+	assert.equal(h.faux.state.callCount, 1);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+});
+
+test("consumed native receipts cannot claim an empty rollover when working context needs a summary", async (t) => {
+	let executions = 0;
+	const retained = [];
+	const requirement = "Preserve the owner working requirement.";
+	const h = await fixture(t, {
+		nativeAsync: true, customPrompt: "s".repeat(88_000),
+		extension(pi) {
+			pi.registerTool({ name: "receipt", async: true, label: "Receipt", description: "Local operation", parameters: { type: "object", properties: {} }, async execute() {
+				executions++;
+				return { content: [{ type: "text", text: "Operation completed" }], details: {} };
+			} });
+			pi.on("session_before_auto_compact", (event) => { retained.push(event.retainedToolResultIds); });
+			pi.on("session_before_compact", (event) => ({
+				compaction: { summary: requirement, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore },
+			}));
+		},
+	});
+	h.session.setActiveToolsByName(["receipt"]);
+	h.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
+	const call = { ...fauxToolCall("receipt", {}), async: true };
+	h.faux.setResponses([
+		fauxAssistantMessage(call, { stopReason: "toolUse" }),
+		(ctx) => {
+			assert.ok(ctx.messages.some((message) => message.role === "toolResult" && message.toolCallId === call.id));
+			return fauxAssistantMessage("Operation acknowledged.");
+		},
+	]);
+	await h.session.prompt(`${requirement} ${"w".repeat(10_000)}`);
+	assert.equal(executions, 1);
+	const receipt = h.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === call.id);
+	assert.ok(h.sessionManager.getBranch().some((entry) => entry.type === "message" && entry.message.role === "assistant" && entry.consumedToolResultIds?.includes(receipt.id)));
+	h.session.agent.state.model = { ...h.session.model, contextWindow: 40_000 };
+	let nextRequest;
+	h.faux.setResponses([(ctx) => { nextRequest = JSON.stringify(ctx.messages); return fauxAssistantMessage("Continued with the working requirement."); }]);
+	await h.session.prompt("Continue the authorized work.");
+	assert.deepEqual(retained, [[]]);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 0);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "compaction").length, 1);
+	assert.match(nextRequest, /Preserve the owner working requirement/);
+	assert.equal(executions, 1);
+});
+
+for (const mode of ["fixed prompt", "carried arguments", "disabled overflow", "disabled fitting"]) test(`failed native receipt preparation admits no oversized follow-up (${mode})`, async (t) => {
+	let executions = 0;
+	const disabled = mode.startsWith("disabled");
+	const argumentsSize = mode === "carried arguments" ? 16_000 : 0;
+	const content = "r".repeat(600_000);
+	const h = await fixture(t, {
+		nativeAsync: true, enabled: !disabled, contextWindow: 40_000, maxTokens: 16_384,
+		customPrompt: "s".repeat(argumentsSize ? 80_000 : 100_000),
+		extension(pi) {
+			pi.registerTool({ name: "receipt", async: true, label: "Receipt", description: "Local operation", parameters: { type: "object", properties: { input: { type: "string" } } }, async execute() {
+				executions++;
+				return { content: [{ type: "text", text: content }], details: {} };
+			} });
+		},
+	});
+	const call = { ...fauxToolCall("receipt", { input: "a".repeat(argumentsSize) }), async: true };
+	call.responsesItem = { type: "function_call", id: "fc_preflight", call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments), async: true, status: "completed" };
+	const inputs = [];
+	const capture = (ctx) => {
+		const tokens = ctx.messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+		assert.ok(tokens < h.session.model.contextWindow, `oversized provider dispatch: ${tokens}`);
+		const output = clampMaxTokensToContext(h.session.model, ctx, h.session.model.maxTokens);
+		assert.ok(tokens + output <= h.session.model.contextWindow);
+		inputs.push({ tokens, output });
+	};
+	h.faux.setResponses([(ctx) => { capture(ctx); return fauxAssistantMessage(call, { responseId: "resp_preflight", stopReason: "aborted" }); }]);
+	await h.session.prompt("Execute the operation once.");
+	assert.equal(executions, 1);
+	assert.equal(inputs.length, 1);
+	const source = h.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === call.id);
+	assert.equal(textOf(source.message), content);
+	if (mode === "disabled overflow") h.session.agent.state.model = { ...h.session.model, contextWindow: 20_000 };
+	const refused = mode !== "disabled fitting";
+	const original = h.sessionManager.getBranch();
+	if (refused) {
+		assert.throws(() => h.session.newContext(), /fresh context cannot fit fixed input/);
+		assert.deepEqual(h.sessionManager.getBranch(), original, "failed preparation publishes nothing");
+	} else h.session.newContext();
+	const expectHistory = () => {
+		assert.equal(textOf(h.sessionManager.getEntry(source.id).message), content);
+		assert.equal(executions, 1, "preparation and prompts cannot replay the operation");
+		assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, refused ? 0 : 1);
+		assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "compaction").length, 0);
+		assert.deepEqual(h.session.messages, h.sessionManager.buildSessionProjection().messages);
+	};
+	for (const prompt of ["First actual follow-up", "Second actual follow-up"]) {
+		h.faux.setResponses([(ctx) => { capture(ctx); return fauxAssistantMessage("Receipt received"); }]);
+		try { await h.session.prompt(prompt); }
+		catch (error) { assert.ok(refused); assert.match(error.message, /fresh context cannot fit fixed input/); }
+		expectHistory();
+		if (refused) assert.equal(h.faux.state.callCount, 1);
+	}
+	const reopened = SessionManager.open(h.sessionManager.getSessionFile());
+	assert.deepEqual(JSON.parse(JSON.stringify(reopened.buildSessionProjection().messages)), JSON.parse(JSON.stringify(h.session.messages)));
+	h.session.dispose();
+	await h.resourceLoader.reload();
+	const { session: restored } = await createAgentSession({ cwd: h.cwd, agentDir: h.agentDir, modelRuntime: h.modelRuntime, model: h.session.model, resourceLoader: h.resourceLoader, settingsManager: h.settingsManager, sessionManager: reopened, noTools: "builtin" });
+	t.after(() => restored.dispose());
+	h.session = restored;
+	h.sessionManager = reopened;
+	await restored.bindExtensions({ onError(error) { throw new Error(error.error); } });
+	if (refused) {
+		h.faux.setResponses([(ctx) => { capture(ctx); return fauxAssistantMessage("must not dispatch"); }]);
+		try { await restored.prompt("Retry after reopening"); }
+		catch (error) { assert.match(error.message, /fresh context cannot fit fixed input/); }
+		assert.equal(h.faux.state.callCount, 1);
+		expectHistory();
+		// Correct the capacity, then use the ordinary reset/request path without a failure latch.
+		restored.agent.state.model = { ...restored.model, contextWindow: 100_000 };
+		restored.newContext();
+		assert.equal(reopened.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+		const projected = reopened.buildSessionProjection().messages;
+		const retained = projected.find((message) => message.role === "toolResult" && message.toolCallId === call.id);
+		assert.match(textOf(retained), new RegExp(`history read id ${source.id}\\.`));
+		const retainedCall = projected.flatMap((message) => message.role === "assistant" ? message.content : []).find((part) => part.id === call.id);
+		assert.deepEqual(retainedCall.responsesItem, call.responsesItem);
+		h.faux.setResponses([(ctx) => { capture(ctx); return fauxAssistantMessage("Recovered receipt received"); }]);
+		await restored.prompt("Continue without repeating the operation");
+		assert.equal(h.faux.state.callCount, 2);
+		assert.equal(executions, 1);
+		assert.equal(textOf(reopened.getEntry(source.id).message), content);
+	}
+	t.diagnostic(JSON.stringify({ mode, inputs, executions }));
+});
+
+for (const enabled of [false, true]) test(`fixed-prompt-only requests allow reduced output (compaction=${enabled})`, async (t) => {
+	const h = await fixture(t, { enabled, contextWindow: 40_000, maxTokens: 16_384, customPrompt: "s".repeat(100_000) });
+	if (enabled) assert.throws(() => h.session.newContext(), /fresh context cannot fit fixed input/);
+	else h.session.newContext();
+	let tokens, output;
+	h.faux.setResponses([(ctx) => { tokens = ctx.messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0); output = clampMaxTokensToContext(h.session.model, ctx, 16_384); return fauxAssistantMessage("Fitting request received"); }]);
+	await h.session.prompt("Continue with reduced output");
+	assert.equal(h.faux.state.callCount, 1);
+	assert.ok(tokens > 40_000 - 16_384, "input intentionally exceeds the compaction reserve line");
+	assert.ok(output > 0 && output < 16_384, "native output clamp leaves a valid reduced allocation");
+	assert.ok(tokens + output <= 40_000);
+});
+
+test("a 600k native receipt completed during the awaited rollover hook is bounded before dispatch", async (t) => {
+	const gate = Promise.withResolvers(), written = Promise.withResolvers();
+	let executions = 0, requests = 0;
+	const content = `DURING_HOOK_HEAD ${"r".repeat(600_000)} DURING_HOOK_TAIL`;
+	const h = await fixture(t, { nativeAsync: true, extension(pi) {
+		pi.registerTool({
+			name: "late", async: true, label: "Late", description: "Receipt arriving during rollover",
+			parameters: { type: "object", properties: {} },
+			async execute() {
+				executions++;
+				await gate.promise;
+				return { content: [{ type: "text", text: content }], details: {} };
+			},
+		});
+		pi.registerTool({
+			name: "dump", label: "Dump", description: "Trigger automatic rollover",
+			parameters: { type: "object", properties: {} },
+			async execute() { return { content: [{ type: "text", text: "d".repeat(340_000) }], details: {} }; },
+		});
+		pi.on("session_before_auto_compact", async () => {
+			gate.resolve();
+			await written.promise;
+		});
+	} });
+	const call = { ...fauxToolCall("late", {}), async: true };
+	call.responsesItem = { type: "function_call", id: "fc_late", call_id: call.id, name: call.name, arguments: "{}", async: true, status: "completed" };
+	h.session.subscribe((event) => {
+		if (event.type === "message_end" && event.message.role === "toolResult" && event.message.toolCallId === call.id) written.resolve();
+	});
+	h.faux.setResponses([
+		() => { requests++; return fauxAssistantMessage([call, fauxToolCall("dump", {})], { stopReason: "toolUse" }); },
+		(ctx) => {
+			requests++;
+			const tokens = ctx.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+			assert.ok(tokens + 16_384 <= 100_000, `late receipt input ${tokens} plus reserve exceeds capacity`);
+			const receipt = ctx.messages.find((message) => message.role === "toolResult" && message.toolCallId === call.id);
+			assert.equal(receipt?.isError, false);
+			assert.match(textOf(receipt), /DURING_HOOK_HEAD/);
+			assert.match(textOf(receipt), /DURING_HOOK_TAIL/);
+			const sourceId = textOf(receipt).match(/history read id ([a-f0-9]+)\./)?.[1];
+			assert.equal(textOf(h.sessionManager.getEntry(sourceId).message), content);
+			return fauxAssistantMessage("Receipt checked");
+		},
+	]);
+	await h.session.prompt("Execute both local operations once.");
+	assert.equal(executions, 1);
+	assert.equal(requests, 2);
+	assert.equal(h.faux.state.callCount, 2);
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
+});
+
+test("explicit windows share receipt capacity, preserve edited provenance, and reopen without growth", async (t) => {
+	const ids = [], calls = [];
+	let approvedId;
+	const h = await fixture(t, {
+		contextWindow: 100_000,
+		nativeAsync: true,
+		extension(pi) {
+			pi.registerTool({
+				name: "catalog", namespace: "large", label: "Catalog", description: "d".repeat(20_000),
+				parameters: { type: "object", properties: {} },
+				async execute() { throw new Error("Receipt recovery must not execute a tool"); },
+			});
+		},
+		seed(manager) {
+			for (const [index, content] of [
+				[{ type: "text", text: "PRIVATE_ORIGINAL" }],
+				Array.from({ length: 120 }, () => ({ type: "image", mimeType: "image/png", data: "PRIVATE_IMAGE" })),
+				[{ type: "text", text: "small receipt" }],
+			].entries()) {
+				const call = { ...fauxToolCall("catalog", { index }), namespace: "large", async: true, executionStarted: true };
+				call.responsesItem = { type: "function_call", id: `fc_multi_${index}`, call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments), async: true, status: "completed" };
+				calls.push(call);
+				manager.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+				ids.push(manager.appendMessage({
+					role: "toolResult", toolName: "catalog", namespace: "large", toolCallId: call.id,
+					content, isError: index === 0, timestamp: Date.now(),
+				}));
+			}
+			approvedId = manager.appendContextEdit(ids[0], { content: `APPROVED_HEAD ${"a".repeat(600_000)} APPROVED_TAIL` });
+			manager.appendContextWindow("Prior retained window", null, ids);
+		},
+	});
+	const handoff = automaticRecovery(h);
+	assert.ok(handoff.includes(`entry ${approvedId}`), "handoffs must use edits from before the prior window");
+	h.session.newContext({ handoff });
+	const projection = h.sessionManager.buildSessionProjection();
+	const results = projection.messages.filter((message) => message.role === "toolResult");
+	assert.deepEqual(results.map((message) => message.toolCallId), calls.map((call) => call.id));
+	assert.deepEqual(results.map((message) => message.isError), [true, false, false]);
+	assert.ok(results.every((message) => message.namespace === "large"));
+	assert.match(textOf(results[0]), new RegExp(`history read id ${approvedId}\\.`));
+	assert.match(textOf(results[0]), /APPROVED_HEAD/);
+	assert.match(textOf(results[0]), /APPROVED_TAIL/);
+	assert.doesNotMatch(JSON.stringify(results), /PRIVATE_ORIGINAL|PRIVATE_IMAGE/);
+	assert.match(textOf(results[1]), new RegExp(`history read id ${ids[1]}\\.`));
+	assert.match(textOf(results[1]), /120 images/);
+	assert.equal(textOf(results[2]), "small receipt");
+	assert.deepEqual(
+		SessionManager.open(h.sessionManager.getSessionFile()).buildSessionProjection().messages.filter((message) => message.role === "toolResult"),
+		results,
+	);
+	const edits = h.sessionManager.getBranch().filter((entry) => entry.type === "context_edit");
+	h.session.newContext({ handoff: "Same capacity" });
+	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_edit").length, edits.length);
+	h.session.agent.state.model = { ...h.session.model, contextWindow: 40_000 };
+	h.session.newContext({ handoff: "Smaller model" });
+	const smaller = h.sessionManager.buildSessionProjection().messages.filter((message) => message.role === "toolResult");
+	const priorExcerpt = edits.findLast((entry) => entry.targetId === ids[0]);
+	assert.match(textOf(smaller[0]), new RegExp(`history read id ${priorExcerpt.id}\\.`));
+	assert.doesNotMatch(JSON.stringify(smaller), /PRIVATE_ORIGINAL|PRIVATE_IMAGE/);
+	assert.deepEqual(
+		SessionManager.open(h.sessionManager.getSessionFile()).buildSessionProjection().messages.filter((message) => message.role === "toolResult"),
+		smaller,
+	);
+	h.faux.setResponses([(ctx) => {
+		const tokens = ctx.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+		assert.ok(tokens + 16_384 <= 40_000, `complete multi-receipt input ${tokens} plus reserve exceeds capacity`);
+		assert.equal(ctx.messages.filter((message) => message.role === "toolResult").length, 3);
+		return fauxAssistantMessage("Checked the retained receipts");
+	}]);
+	await h.session.prompt("Check the retained receipts.");
+	assert.equal(h.faux.state.callCount, 1);
 });
 
 for (const stopReason of ["error", "length", "aborted"]) test(`native delivered tool results remain recoverable after ${stopReason} without an unseen claim`, async (t) => {

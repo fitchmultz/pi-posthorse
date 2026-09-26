@@ -1,8 +1,8 @@
 {
 	"name": "pi-posthorse",
-	"version": "0.5.0-official.1",
+	"version": "0.6.0",
 	"type": "module",
-	"description": "Posthorse beta for official Pi 0.87.1: no-summary context resets, handoffs, notes, and history.",
+	"description": "Posthorse: fresh context, same journey. No-summary context rollover for Pi, with sparse budget reminders, handoffs, notes, and history.",
 	"keywords": ["pi-package", "pi-extension", "context", "posthorse", "rollover"],
 	"repository": {
 		"type": "git",
@@ -11,29 +11,26 @@
 	"license": "MIT",
 	"files": ["index.ts", "ui.ts"],
 	"engines": {
-		"node": ">=22.19.0"
+		"node": ">=24.12.0"
 	},
+	"packageManager": "npm@12.1.0",
 	"pi": {
 		"extensions": ["./index.ts"],
-		"image": "https://raw.githubusercontent.com/fitchmultz/pi-posthorse/upstream/diagram.png"
+		"image": "https://raw.githubusercontent.com/fitchmultz/pi-posthorse/main/diagram.png"
 	},
 	"scripts": {
-		"check": "tsc --noEmit",
-		"check:compat": "npm run check && npm test",
-		"test:native": "node --import ./test/pi-loader.ts --test test/official.test.mjs",
-		"test": "npm run test:native && node --import ./test/pi-loader.ts --test test/renderers.test.ts",
+		"check": "tsc",
+		"check:compat": "npm run check && npm test && npm run test:native",
+		"test:native": "node --import ./test/pi-loader.ts --test test/host.test.mjs",
+		"test": "node --import ./test/pi-loader.ts --test test/*.test.ts",
 		"prepublishOnly": "npm test && npm run check"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-ai": "*",
 		"@earendil-works/pi-coding-agent": "*",
 		"@earendil-works/pi-tui": "*",
 		"typebox": "*"
 	},
 	"peerDependenciesMeta": {
-		"@earendil-works/pi-ai": {
-			"optional": true
-		},
 		"@earendil-works/pi-coding-agent": {
 			"optional": true
 		},
@@ -48,7 +45,8 @@
 		"@earendil-works/pi-ai": "0.87.1",
 		"@earendil-works/pi-coding-agent": "0.87.1",
 		"@earendil-works/pi-tui": "0.87.1",
-		"typebox": "1.3.7",
-		"typescript": "^5.5.0"
+		"@types/node": "24.19.0",
+		"typebox": "1.3.34",
+		"typescript": "7.0.2"
 	}
 }

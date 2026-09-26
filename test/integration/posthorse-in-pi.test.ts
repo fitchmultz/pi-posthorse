@@ -193,20 +193,22 @@ describe("Posthorse inside the Pi fork", () => {
 		expect(recovered).toMatchObject({ content: expect.arrayContaining([{ type: "image", data: PNG, mimeType: "image/png" }]) });
 	});
 
-	it("rolls over a single oversized first owner turn on overflow and retries once", async () => {
+	it.each(["local", "provider"])("rolls over a %s-refused first owner turn and retries once", async (refusal) => {
 		const harness = await createHarness({ extensionFactories: [posthorse] });
 		harnesses.push(harness);
 		forbidSummarizationAuth(harness);
 		let retryTexts: string[] = [];
 		harness.setResponses([
-			fauxAssistantMessage("", { stopReason: "error", errorMessage: "prompt is too long: 300000 tokens > 128000 maximum" }),
+			...(refusal === "provider" ? [fauxAssistantMessage("", { stopReason: "error", errorMessage: "prompt is too long: 300000 tokens > 128000 maximum" })] : []),
 			(context) => {
 				retryTexts = context.messages.filter((message) => message.role !== "system").map(getMessageText);
 				return fauxAssistantMessage("continued");
 			},
 		]);
 
-		await harness.session.prompt(`OWNER HEAD ${"x".repeat(600_000)} OWNER TAIL`);
+		await harness.session.prompt(`OWNER HEAD ${"x".repeat(refusal === "local" ? 600_000 : 400_000)} OWNER TAIL`);
+
+		expect(harness.faux.state.callCount).toBe(refusal === "local" ? 1 : 2);
 
 		expect(contextWindows(harness)).toBe(1);
 		expect(retryTexts).toHaveLength(1);
@@ -395,7 +397,8 @@ describe("Posthorse inside the Pi fork", () => {
 
 	it("leaves Pi alone when compaction is disabled but keeps new_context available", async () => {
 		const harness = await createHarness({
-			tools: [dump],
+			// Cross the automatic reserve line while still fitting physical provider input.
+			tools: [tool("dump", async () => text("r".repeat(460_000)))],
 			extensionFactories: [posthorse],
 			settings: { compaction: { enabled: false } },
 		});

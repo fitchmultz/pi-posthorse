@@ -1,8 +1,6 @@
-name: Official Pi beta
+name: Pi
 
 on:
-  push:
-    branches: [upstream]
   pull_request:
     branches: [main]
     paths:
@@ -12,6 +10,7 @@ on:
       - package.json
       - package-lock.json
       - tsconfig.json
+      - scripts/**
       - test/**
   workflow_dispatch:
 
@@ -19,24 +18,80 @@ permissions:
   contents: read
 
 concurrency:
-  group: official-pi-${{ github.ref }}
+  group: pi-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  PI_AUTOMATION_REF: bbc0048a363444cde7890c09e80cea00a47fc463 # fitchmultz/.github#33: dual-host Posthorse
+  PI_FORK_REF: b1b4ac34d807b577d66f5879119a9ed4833c8ed7 # reviewed native fork
 
 jobs:
   verify:
-    name: Official Pi 0.87.1
+    name: Pi fork and official
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    env:
-      PI_OFFLINE: '1'
-      PI_TELEMETRY: '0'
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          path: extension
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fitchmultz/.github
+          ref: ${{ env.PI_AUTOMATION_REF }}
+          path: automation
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fitchmultz/pi
+          ref: ${{ env.PI_FORK_REF }}
+          path: fork
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22.19.0'
+          node-version: '24'
+          check-latest: true
           package-manager-cache: false
-      - run: npm ci --ignore-scripts --no-audit --registry=https://registry.npmjs.org
-      - run: npm run check:compat
+      - name: Lockfile resolves only from the public npm registry
+        working-directory: extension
+        run: |
+          ! grep '"resolved": "' package-lock.json | grep -v '"resolved": "https://registry.npmjs.org/'
+      - name: Use the reviewed npm version
+        run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
+      - name: Install native test prerequisites
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
+      - name: Build the pinned fork
+        working-directory: fork
+        run: |
+          npm ci --ignore-scripts --no-audit
+          npm run hydrate:model-data
+          PI_OFFLINE=1 PI_TELEMETRY=0 npm run build:offline
+          git diff --exit-code
+          node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "$PI_FORK_REF"
+          git diff --exit-code
+      - name: Use the extension npm version
+        run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
+      - run: npm ci --ignore-scripts --no-audit
+        working-directory: extension
+      - name: Qualify official Pi
+        run: |
+          version="$(node -p 'require("./extension/package.json").devDependencies["@earendil-works/pi-coding-agent"]')"
+          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
+            --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
+            --host official --target "$version" --output "$RUNNER_TEMP/posthorse-official"
+      - name: Qualify fork Pi
+        run: |
+          env -u GITHUB_STEP_SUMMARY PI_COMPAT_FORK_REF="$PI_FORK_REF" node automation/scripts/qualify.mjs \
+            --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
+            --host fork --target "$RUNNER_TEMP/fork-package" --output "$RUNNER_TEMP/posthorse-fork"
+      - name: Verify source-harness integration without credentials
+        working-directory: extension
+        run: |
+          fixture="$(mktemp -d /tmp/posthorse-source.XXXXXX)"
+          mkdir -p "$fixture/home" "$fixture/agent" "$fixture/tmp"
+          env -i PATH="$PATH" HOME="$fixture/home" TMPDIR="$fixture/tmp" \
+            PI_CODING_AGENT_DIR="$fixture/agent" PI_OFFLINE=1 PI_TELEMETRY=0 \
+            PI_FORK="$GITHUB_WORKSPACE/fork" bash scripts/integration.sh

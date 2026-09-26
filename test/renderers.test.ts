@@ -12,23 +12,21 @@ import {
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, visibleWidth, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { createPosthorse } from "../index.ts";
+import posthorse from "../index.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 
 initTheme("dark");
-
-const policies = new WeakMap<ExtensionContext, { enabled: boolean; reserveTokens: number }>();
-const posthorse = createPosthorse((ctx) => policies.get(ctx) ?? { enabled: true, reserveTokens: 16_384 });
 
 function setup() {
 	const tools = new Map<string, ToolDefinition>();
 	const messages = new Map<string, MessageRenderer>();
 	posthorse({
 		on() {},
+		registerContextWindowHook() {},
 		registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
 		registerMessageRenderer: (name: string, renderer: MessageRenderer) => messages.set(name, renderer),
 		getActiveTools: () => [...tools.keys()],
-		getAllTools: () => [...tools.values()],
+		getAllTools: () => [...tools.values()].map((tool) => ({ ...tool, id: tool.name })),
 	} as unknown as ExtensionAPI);
 	return { tools, messages };
 }
@@ -55,6 +53,8 @@ function context(cwd: string, branch: unknown[] = []): ExtensionContext {
 	return {
 		cwd,
 		model: { contextWindow: 100_000 },
+		newContext() {},
+		getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }),
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
 		getSystemPrompt: () => "test",
 		sessionManager: { getBranch: () => branch, getSessionDir: () => cwd },
@@ -211,8 +211,7 @@ test("paginated searches retain accurate counts, spans, identifiers and continua
 	try {
 		const ctx = context(cwd);
 		await execute("notes", { op: "write", path: "ledger.md", content: Array.from({ length: 30 }, (_, index) => `needle ${index} ${"n".repeat(150)}`).join("\n") }, ctx);
-		Object.assign(ctx, { getContextUsage: () => ({ tokens: 98_700, contextWindow: 100_000, percent: 98.7 }) });
-		policies.set(ctx, { enabled: false, reserveTokens: 16_384 });
+		Object.assign(ctx, { getContextUsage: () => ({ tokens: 98_700, contextWindow: 100_000, percent: 98.7 }), getCompactionSettings: () => ({ enabled: false, reserveTokens: 16_384 }) });
 		const result = await execute("notes", { op: "search", query: "needle" }, ctx);
 		const details = result.details as PosthorseDisplay;
 		assert.equal(details.kind, "notes-search");
@@ -237,9 +236,8 @@ test("context summaries preserve approximation and native disabled, unsupported,
 		const ctx = context(tmpdir());
 		Object.assign(ctx, {
 			getContextUsage: () => ({ tokens, contextWindow: window, percent: null }),
-
+			getCompactionSettings: () => ({ enabled, reserveTokens: 16_384 }),
 		});
-		policies.set(ctx, { enabled, reserveTokens: 16_384 });
 		const output = await execute("get_context_remaining", {}, ctx);
 		const component = card("get_context_remaining");
 		component.updateResult({ ...output, isError: false });
@@ -251,14 +249,15 @@ test("context summaries preserve approximation and native disabled, unsupported,
 	}
 });
 
-test("new_context remains conditional and legacy fork context-window cards still render", async () => {
+test("new_context remains a conditional request and only its committed message says the window started", async () => {
 	const handoff = Array.from({ length: 60 }, (_, i) => `Handoff line ${i + 1}`).join("\n");
 	const args = { handoff };
 	const output = await execute("new_context", args, context(tmpdir()));
-	assert.deepEqual(output.content, [{ type: "text", text: "Requested a fresh Pi context after this complete tool batch succeeds. Earlier conversation stays in session history." }]);
+	assert.match(output.content.map((part) => part.type === "text" ? part.text : "").join("\n"), /Requested.*foreground tools succeed.*Background work continues/s);
 	const component = card("new_context", args);
 	component.updateResult({ ...output, isError: false });
-	assert.match(text(component), /Requested.*batch succeeds/s);
+	assert.match(text(component), /Requested.*foreground tools succeed/s);
+	assert.match(text(component), /Background work continues/);
 	assert.doesNotMatch(text(component), /committed|window started/i);
 	component.setExpanded(true);
 	assert.match(text(component), /Handoff line 60/);
@@ -372,15 +371,14 @@ test("legacy history and malformed display spans fall back to the complete retur
 });
 
 test("owned reminders are compact, expandable, and sanitize terminal control content", () => {
-	for (const customType of ["posthorse-reminder", "headroom-reminder"]) {
-		const renderer = setup().messages.get(customType);
-		assert.equal(typeof renderer, "function");
-		const message = { role: "custom" as const, customType, display: true, timestamp: 0, content: `Checkpoint now\n${"remember\n".repeat(50)}LAST\x1b[2J\x1b]52;c;c2VjcmV0\x07\x00` };
-		const component = new CustomMessageComponent(message, renderer, undefined, 2);
-		assert.ok(lines(component, 24).length <= 10);
-		component.setExpanded(true);
-		assert.match(text(component), /LAST/);
-		const raw = component.render(80).join("\n");
-		assert.doesNotMatch(raw, /\x1b\[2J|\x1b\]52|\x00/);
-	}
+	const customType = "posthorse-reminder";
+	const renderer = setup().messages.get(customType);
+	assert.equal(typeof renderer, "function");
+	const message = { role: "custom" as const, customType, display: true, timestamp: 0, content: `Checkpoint now\n${"remember\n".repeat(50)}LAST\x1b[2J\x1b]52;c;c2VjcmV0\x07\x00` };
+	const component = new CustomMessageComponent(message, renderer, undefined, 2);
+	assert.ok(lines(component, 24).length <= 10);
+	component.setExpanded(true);
+	assert.match(text(component), /LAST/);
+	const raw = component.render(80).join("\n");
+	assert.doesNotMatch(raw, /\x1b\[2J|\x1b\]52|\x00/);
 });

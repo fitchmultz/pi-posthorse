@@ -6,7 +6,7 @@ An isolated proof of Posthorse-style context recovery using Codex's local tool s
 
 ## What has been proved
 
-Tests run the actual app-server, command tools, hooks, local MCP server, and matching code-mode host. Stock baselines include Codex `0.153.4` and upstream commit `4f2449b4b21988d5015ce6edf755fbd6a37a4908`. A local HTTP fixture supplies scripted model replies and usage counts. No real model inference or account credentials are involved.
+Tests run the actual app-server, command tools, hooks, local MCP server, and matching code-mode host. Stock baselines include Codex `0.157.1` and upstream commit `4f2449b4b21988d5015ce6edf755fbd6a37a4908`. A local HTTP fixture supplies scripted model replies and usage counts. No real model inference or account credentials are involved.
 
 | Requirement | Stock token-budget mode | Patched local recovery |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ The tool server does not make network requests. Returned notes and history becom
 
 ## Run the isolated tests
 
-Requirements: Node `>=22.19.0`, stock Codex `0.153.4` and its matching code-mode host for stock tests, or the companion patched CLI and matching host for local acceptance. From this directory:
+Requirements: Node `>=24.12.0`, stock Codex `0.157.1` and its matching code-mode host for stock tests, or the companion patched CLI and matching host for local acceptance. From this directory:
 
 ```bash
 npm ci --ignore-scripts

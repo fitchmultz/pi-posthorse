@@ -55,6 +55,7 @@ function setup() {
 			tools.set(tool.name, tool);
 			toolDefinitions.push(tool);
 		},
+		registerContextWindowHook() {},
 		registerMessageRenderer() {},
 		sendMessage(message: (typeof messages)[number]) {
 			messages.push(message);
@@ -111,7 +112,7 @@ function automaticHandoff(handlers: Map<string, Handler>, context: TestContext, 
 		.map((entry) => ({ sourceEntry: entry, messages: [entry.message] }));
 	return (
 		handlers.get("session_before_auto_compact")!(
-			{ reason: "threshold", branchEntries },
+			{ reason: "threshold", retainedToolResultIds: [], branchEntries },
 			{ ...context, sessionManager: { ...context.sessionManager, buildSessionProjection: () => ({ entries }) } },
 		) as { newContext: { handoff: string } }
 	).newContext.handoff;
@@ -158,7 +159,7 @@ test("automatic recovery keeps owner anchors and visible coordination without st
 		{ type: "message", id: "old", message: { role: "user", content: "old completed task" } },
 		{ type: "context_window", id: "window-2", timestamp: "2026-09-02T10:00:00Z", handoff: "Original approved goal" },
 		{ type: "custom_message", id: "hidden", timestamp: "2026-09-02T10:01:00Z", customType: "todo-list-context", content: "hidden state", display: false },
-		{ type: "custom_message", id: "reminder", timestamp: "2026-09-02T10:02:00Z", customType: "headroom-reminder", content: "stale reminder", display: true },
+		{ type: "custom_message", id: "reminder", timestamp: "2026-09-02T10:02:00Z", customType: "posthorse-reminder", content: "stale reminder", display: true },
 		{ type: "message", id: "owner-start", timestamp: "2026-09-02T10:03:00Z", message: { role: "user", content: `FIRST OWNER REQUEST ${"a".repeat(9_000)} OWNER REQUEST TAIL` } },
 		{ type: "message", id: "ordinary-tool", timestamp: "2026-09-02T10:04:00Z", message: { role: "toolResult", toolName: "bash", content: "assistant-derived state" } },
 	];
@@ -332,59 +333,59 @@ test("disabled Pi compaction disables automatic Posthorse behavior but not new_c
 
 test("disabling compaction filters persisted reminders without changing history or deduplication", () => {
 	const { handlers, context: base, messages } = setup();
-	for (const customType of ["posthorse-reminder", "headroom-reminder"]) {
-		let enabled = true;
-		const reminder = { role: "custom", customType, content: "Checkpoint now", details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 } };
-		const branch = [{ ...reminder, type: "custom_message", id: "reminder" }];
-		const context = { ...usageContext(base, 100_000, 76_000), getCompactionSettings: () => ({ enabled, reserveTokens: 16_384 }), sessionManager: { getBranch: () => branch, getSessionDir: () => tmpdir() } };
-		const owner = { role: "user", content: "continue" };
-		assert.equal(handlers.get("context")!({ messages: [owner, reminder] }, context), undefined);
-		enabled = false;
-		assert.deepEqual(handlers.get("context")!({ messages: [owner, reminder] }, context), { messages: [owner] });
-		assert.equal(branch[0].content, "Checkpoint now", "raw history stays intact");
-		enabled = true;
-		turnEnd(handlers, context);
-		assert.equal(messages.length, 0, "reenabling does not emit another reminder");
-	}
+	let enabled = true;
+	const reminder = { role: "custom", customType: "posthorse-reminder", content: "Checkpoint now", details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 } };
+	const branch = [{ ...reminder, type: "custom_message", id: "reminder" }];
+	const context = { ...usageContext(base, 100_000, 76_000), getCompactionSettings: () => ({ enabled, reserveTokens: 16_384 }), sessionManager: { getBranch: () => branch, getSessionDir: () => tmpdir() } };
+	const owner = { role: "user", content: "continue" };
+	assert.equal(handlers.get("context")!({ messages: [owner, reminder] }, context), undefined);
+	enabled = false;
+	assert.deepEqual(handlers.get("context")!({ messages: [owner, reminder] }, context), { messages: [owner] });
+	assert.equal(branch[0].content, "Checkpoint now", "raw history stays intact");
+	enabled = true;
+	turnEnd(handlers, context);
+	assert.equal(messages.length, 0, "reenabling does not emit another reminder");
 });
 
-test("reminder-free context skips history without hiding native compatibility errors", () => {
+test("hosts without the context-window hook load every capability with official compaction rollover", () => {
+	const events: string[] = [];
+	const tools: string[] = [];
+	const api = {
+		on(event: string) { events.push(event); },
+		registerTool(tool: { name: string }) { tools.push(tool.name); },
+		registerMessageRenderer() {},
+	} as unknown as ExtensionAPI;
+	posthorse(api);
+	assert.deepEqual(tools, ["new_context", "get_context_remaining", "notes", "history"]);
+	assert.ok(events.includes("session_before_compact"));
+	assert.ok(!events.includes("session_before_auto_compact"));
+});
+
+test("reminder-free context and fork reminder filtering never read history", () => {
 	const { handlers, context } = setup();
 	const marker = { role: "custom", customType: "context-window", content: "new", details: { windowId: "new" } };
-	const user = { role: "user", content: "posthorse-reminder and headroom-reminder are just text here" };
+	const user = { role: "user", content: "posthorse-reminder is just text here" };
 	const other = { role: "custom", customType: "intercom_message", content: "keep" };
 	let branchReads = 0;
 	context.sessionManager.getBranch = () => {
 		branchReads++;
-		return [{ type: "custom_message", customType: "headroom-reminder", details: { windowId: "old" } }];
+		return [];
 	};
-	for (const method of ["newContext", "getCompactionSettings", "getSystemPrompt"]) {
-		const incompatible = { ...context };
-		Reflect.deleteProperty(incompatible, method);
-		assert.throws(
-			() => handlers.get("context")!({ messages: [marker, user, other] }, incompatible),
-			/Posthorse requires the fitchmultz\/pi fork/,
-		);
-	}
 	for (const messages of [[], [user, other], [marker, user, other]]) {
 		const original = structuredClone(messages);
 		assert.equal(handlers.get("context")!({ messages }, context), undefined);
 		assert.deepEqual(messages, original, "unrelated messages remain unchanged");
 	}
-	assert.equal(branchReads, 0, "no history is needed even if old reminders remain in the transcript");
-	for (const customType of ["posthorse-reminder", "headroom-reminder"]) {
-		const current = { role: "custom", customType, content: "current", details: { windowId: "new" } };
-		const stale = { ...current, content: "stale", details: { windowId: "old" } };
-		assert.deepEqual(
-			handlers.get("context")!({ messages: [marker, user, other, stale, current] }, context),
-			{ messages: [marker, user, other, current] },
-			`${customType} alone must still trigger stale filtering`,
-		);
-	}
-	assert.equal(branchReads, 2, "both reminder types still consult history when present");
+	const current = { role: "custom", customType: "posthorse-reminder", content: "current", details: { windowId: "new", contextWindow: 100_000, reserveTokens: 16_384 } };
+	const stale = { ...current, content: "stale", details: { ...current.details, windowId: "old" } };
+	assert.deepEqual(
+		handlers.get("context")!({ messages: [marker, user, other, stale, current] }, context),
+		{ messages: [marker, user, other, current] },
+	);
+	assert.equal(branchReads, 0, "the fork's window marker identifies the window");
 });
 
-test("context filtering removes reminders from an older window or a different budget, legacy ids included", () => {
+test("context filtering removes reminders from an older window or a different budget", () => {
 	const { handlers, context } = setup();
 	const marker = { role: "custom", customType: "context-window", content: "new", details: { windowId: "new" } };
 	const current = {
@@ -393,18 +394,16 @@ test("context filtering removes reminders from an older window or a different bu
 		content: "current",
 		details: { windowId: "new", contextWindow: 100_000, reserveTokens: 16_384 },
 	};
-	const legacyCurrent = { role: "custom", customType: "headroom-reminder", content: "legacy current", details: { windowId: "new" } };
 	const old = { role: "custom", customType: "posthorse-reminder", content: "old", details: { windowId: "old", contextWindow: 100_000, reserveTokens: 16_384 } };
-	const legacyOld = { role: "custom", customType: "headroom-reminder", content: "legacy old", details: { windowId: "old" } };
 	const otherModel = { role: "custom", customType: "posthorse-reminder", content: "smaller model", details: { windowId: "new", contextWindow: 50_000, reserveTokens: 16_384 } };
 	const otherReserve = { role: "custom", customType: "posthorse-reminder", content: "other reserve", details: { windowId: "new", contextWindow: 100_000, reserveTokens: 64_000 } };
 	const other = { role: "custom", customType: "intercom_message", content: "keep" };
 	const filtered = handlers.get("context")!(
-		{ messages: [marker, old, legacyOld, otherModel, otherReserve, other, current, legacyCurrent] },
+		{ messages: [marker, old, otherModel, otherReserve, other, current] },
 		context,
 	) as { messages: unknown[] };
-	assert.deepEqual(filtered.messages, [marker, other, current, legacyCurrent]);
-	assert.equal(handlers.get("context")!({ messages: [marker, other, current, legacyCurrent] }, context), undefined);
+	assert.deepEqual(filtered.messages, [marker, other, current]);
+	assert.equal(handlers.get("context")!({ messages: [marker, other, current] }, context), undefined);
 	// Before any rollover the window is "initial"; a reminder computed for another model size is still stale.
 	const initial = { role: "custom", customType: "posthorse-reminder", content: "initial", details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 } };
 	const filteredInitial = handlers.get("context")!({ messages: [otherModel, initial] }, context) as { messages: unknown[] };
@@ -576,7 +575,6 @@ test("history ranks matching original content before recovery and lookup echoes 
 		{ type: "compaction", id: "summary", summary: "needle summary" },
 		{ type: "branch_summary", id: "branch-summary", summary: "needle branch summary" },
 		{ type: "custom_message", id: "reminder", customType: "posthorse-reminder", content: "needle reminder" },
-		{ type: "custom_message", id: "legacy", customType: "headroom-reminder", content: "needle legacy reminder" },
 		{ type: "message", id: "notes", message: { role: "toolResult", toolName: "notes", content: "needle saved note" } },
 		{ type: "message", id: "lookup", message: { role: "toolResult", toolName: "history", content: [{ type: "text", text: "needle recovered output" }, image] } },
 		{ type: "message", id: "rollover", message: { role: "assistant", content: [{ type: "toolCall", name: "new_context", arguments: { handoff: "needle" } }] } },
@@ -601,7 +599,7 @@ test("history ranks matching original content before recovery and lookup echoes 
 	const all = await search("NEEDLE");
 	assert.deepEqual(ids(all), [
 		"mixed-prose", "mixed-call", "result", "assistant", "owner",
-		"current-search", "mixed-echo", "rollover", "lookup", "notes", "legacy", "reminder", "branch-summary", "summary", "window",
+		"current-search", "mixed-echo", "rollover", "lookup", "notes", "reminder", "branch-summary", "summary", "window",
 	]);
 	const originals = await search("needle", 5);
 	assert.deepEqual(ids(originals), ids(all).slice(0, 5));
@@ -696,30 +694,20 @@ test("all-session ranking keeps older originals ahead of newer echoes before app
 	}
 });
 
-test("a persisted legacy headroom-reminder still deduplicates, and a model switch invalidates it", () => {
+// PR #51 review: a reminder that Pi's own compaction summarized away must not block the next one.
+test("a reminder before a native compaction does not suppress the next reminder", () => {
 	const { handlers, messages, context: base } = setup();
 	const branch: Record<string, unknown>[] = [
-		{ type: "context_window", id: "window-2" },
-		{ type: "custom_message", id: "legacy", customType: "headroom-reminder", details: { windowId: "window-2" } },
+		{ type: "custom_message", id: "old-reminder", customType: "posthorse-reminder", details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 } },
+		{ type: "message", id: "kept", message: { role: "user", content: "kept tail" } },
+		{ type: "compaction", id: "native", summary: "native summary", firstKeptEntryId: "kept" },
 	];
 	const context = { ...usageContext(base, 100_000, 76_000), sessionManager: { getBranch: () => branch, getSessionDir: () => tmpdir() } };
 	turnEnd(handlers, context);
-	assert.equal(messages.length, 0, "legacy reminder in the same window counts");
-
-	branch.push({ type: "model_change", id: "switch", provider: "test", modelId: "larger" });
-	const switched = { ...context, ...usageContext(base, 200_000, 175_000), sessionManager: context.sessionManager };
-	turnEnd(handlers, switched);
 	assert.equal(messages.length, 1);
-	assert.deepEqual(messages[0].details, { windowId: "window-2", contextWindow: 200_000, reserveTokens: 16_384 });
-	branch.push({ type: "custom_message", id: "current", customType: "posthorse-reminder", details: messages[0].details });
-	turnEnd(handlers, switched);
-	assert.equal(messages.length, 1, "one reminder per window and budget");
-
-	const marker = { role: "custom", customType: "context-window", content: "new", details: { windowId: "window-2" } };
-	const legacy = { role: "custom", customType: "headroom-reminder", content: "legacy", details: { windowId: "window-2" } };
-	const current = { role: "custom", customType: "posthorse-reminder", content: "current", details: messages[0].details };
-	const filtered = handlers.get("context")!({ messages: [marker, legacy, current] }, switched) as { messages: unknown[] };
-	assert.deepEqual(filtered.messages, [marker, current]);
+	branch.push({ type: "custom_message", id: "new-reminder", customType: "posthorse-reminder", details: messages[0].details });
+	turnEnd(handlers, context);
+	assert.equal(messages.length, 1, "still one reminder per window and budget");
 });
 
 test("new_context beside a failed sibling tool does not suppress the reminder", () => {
@@ -952,7 +940,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		assert.doesNotMatch(guidance.systemPrompt, /% used/);
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 0, `${contextWindow}: no reminder`);
-		assert.equal(handlers.get("session_before_auto_compact")!({ reason: "threshold", branchEntries: [] }, context), undefined, `${contextWindow}: Pi keeps its own compaction`);
+		assert.equal(handlers.get("session_before_auto_compact")!({ reason: "threshold", retainedToolResultIds: [], branchEntries: [] }, context), undefined, `${contextWindow}: Pi keeps its own compaction`);
 		const remaining = toolText(await run(tools, "get_context_remaining", {}, context));
 		assert.match(remaining, /unsupported configuration/);
 		assert.match(remaining, /500 tokens until the configured context limit/);
@@ -976,7 +964,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1);
 		assert.match(messages[0].content, /1,385 tokens remain/);
-		assert.ok(handlers.get("session_before_auto_compact")!({ reason: "threshold", branchEntries: [] }, context));
+		assert.ok(handlers.get("session_before_auto_compact")!({ reason: "threshold", retainedToolResultIds: [], branchEntries: [] }, context));
 	}
 
 	{
@@ -1005,7 +993,7 @@ test("fresh payload budgets count the system prompt, pending input, and automati
 	await assert.rejects(run(tools, "new_context", { handoff: "h".repeat(10_000) }, context), /limit 0/);
 	assert.equal(
 		handlers.get("session_before_auto_compact")!(
-			{ reason: "threshold", branchEntries: [{ type: "message", id: "owner", message: { role: "user", content: "continue" } }] },
+			{ reason: "threshold", retainedToolResultIds: [], branchEntries: [{ type: "message", id: "owner", message: { role: "user", content: "continue" } }] },
 			context,
 		),
 		undefined,
@@ -1013,6 +1001,7 @@ test("fresh payload budgets count the system prompt, pending input, and automati
 	const pendingContext = { ...usageContext(base, 32_768, 1000), getSystemPrompt: () => "" };
 	const pendingEvent = {
 		reason: "threshold",
+		retainedToolResultIds: [],
 		branchEntries: [],
 		pendingMessages: [{ role: "user", content: "p".repeat(60_000) }],
 	};
@@ -1262,7 +1251,7 @@ test("note replacement keeps the existing checkpoint on a real file-size failure
 		const code = `import assert from "node:assert/strict";
 import posthorse from ${JSON.stringify(new URL("../index.ts", import.meta.url).href)};
 let notes;
-posthorse({ on() {}, registerMessageRenderer() {}, registerTool(tool) { if (tool.name === "notes") notes = tool; } });
+posthorse({ on() {}, registerContextWindowHook() {}, registerMessageRenderer() {}, registerTool(tool) { if (tool.name === "notes") notes = tool; } });
 process.on("SIGXFSZ", () => {});
 await assert.rejects(notes.execute("fault", { op: "write", path: "durable.md", content: "N".repeat(8192) }, new AbortController().signal, undefined, { cwd: process.cwd() }), { code: "EFBIG" });`;
 		execFileSync("/bin/bash", ["-c", 'ulimit -f 2; exec "$@"', "note-publication", process.execPath, "--input-type=module", "-e", code], {
@@ -1318,37 +1307,7 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 	}
 });
 
-test("legacy note migration skips symlink cycles and missing targets", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-migration-"));
-	try {
-		const main = join(dir, "main");
-		const worktree = join(dir, "worktree");
-		mkdirSync(join(main, ".git", "worktrees", "wt"), { recursive: true });
-		writeFileSync(join(main, ".git", "worktrees", "wt", "commondir"), "../..\n");
-		mkdirSync(join(main, ".pi"));
-		writeFileSync(join(main, ".pi", "context.md"), "linked state");
-		mkdirSync(join(worktree, ".pi", "notes"), { recursive: true });
-		writeFileSync(join(worktree, ".git"), `gitdir: ${join(main, ".git", "worktrees", "wt")}\n`);
-		writeFileSync(join(worktree, ".pi", "notes", "local.md"), "local state");
-		symlinkSync(".", join(worktree, ".pi", "notes", "loop"), "dir");
-		symlinkSync(join(main, ".pi"), join(worktree, ".pi", "notes", "projectState"), "dir");
-		symlinkSync(join(dir, "deleted.md"), join(worktree, ".pi", "notes", "old-state.md"));
-		const { tools, context } = setup();
-		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: worktree });
-
-		assert.equal(toolText(await notes({ op: "list" })), "local.md\nprojectState/context.md");
-		assert.equal(toolText(await notes({ op: "read", path: "projectState/context.md" })), "linked state");
-		await notes({ op: "write", path: "checkpoint.md", content: "current checkpoint" });
-		assert.equal(toolText(await notes({ op: "read", path: "checkpoint.md" })), "current checkpoint");
-		await notes({ op: "append", path: "checkpoint.md", content: "next step" });
-		assert.match(toolText(await notes({ op: "search", query: "next step" })), /checkpoint\.md:2: next step/);
-		assert.equal(toolText(await notes({ op: "list" })), "checkpoint.md\nlocal.md\nprojectState/context.md");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
-
-test("notes list and search follow directory aliases without following cycles", async () => {
+test("notes list and search follow aliases while skipping cycles and missing targets", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-cycles-"));
 	try {
 		const notesDir = join(dir, ".pi", "notes");
@@ -1356,6 +1315,8 @@ test("notes list and search follow directory aliases without following cycles", 
 		writeFileSync(join(notesDir, "nested", "state.md"), "checkpoint");
 		symlinkSync("nested", join(notesDir, "alias"), "dir");
 		symlinkSync("..", join(notesDir, "nested", "back"), "dir");
+		symlinkSync("deleted.md", join(notesDir, "missing.md"));
+		symlinkSync("deleted-directory", join(notesDir, "missing-directory"), "dir");
 		const { tools, context } = setup();
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: dir });
 
@@ -1366,7 +1327,7 @@ test("notes list and search follow directory aliases without following cycles", 
 	}
 });
 
-for (const marker of ["file", "directory symlink"]) test(`separate Git directories share notes and preserve old local notes (${marker})`, async () => {
+for (const marker of ["file", "directory symlink"]) test(`separate Git directories share notes in the common Git directory (${marker})`, async () => {
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-separate-git-")));
 	try {
 		const main = join(dir, "main");
@@ -1382,23 +1343,13 @@ for (const marker of ["file", "directory symlink"]) test(`separate Git directori
 		git("-C", main, "worktree", "add", "--detach", worktree);
 		const { tools, context } = setup();
 		const notes = (cwd: string, params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd });
-		mkdirSync(join(main, ".pi", "notes"), { recursive: true });
-		writeFileSync(join(main, ".pi", "notes", "shared.md"), "original state");
-		assert.equal(toolText(await notes(main, { op: "read", path: "shared.md" })), "original state");
+		await notes(main, { op: "write", path: "shared.md", content: "original state" });
 		assert.equal(toolText(await notes(worktree, { op: "read", path: "shared.md" })), "original state");
 		const append = toolText(await notes(worktree, { op: "append", path: "shared.md", content: "worktree update" }));
 		assert.ok(append.includes(join(gitdir, ".pi", "notes", "shared.md")));
 		assert.equal(toolText(await notes(main, { op: "read", path: "shared.md" })), "original state\nworktree update\n");
-		assert.equal(readFileSync(join(main, ".pi", "notes", "shared.md"), "utf8"), "original state", "legacy originals stay intact");
-		assert.equal(existsSync(join(worktree, ".pi")), false, "new writes do not create a worktree-local copy");
-
-		mkdirSync(join(worktree, ".pi", "notes", "nested"), { recursive: true });
-		writeFileSync(join(worktree, ".pi", "notes", "shared.md"), "older divergent copy");
-		writeFileSync(join(worktree, ".pi", "notes", "nested", "worker.md"), "old worker note");
-		assert.equal(toolText(await notes(worktree, { op: "read", path: "nested/worker.md" })), "old worker note");
-		assert.equal(toolText(await notes(worktree, { op: "read", path: "shared.md" })), "original state\nworktree update\n");
-		await notes(main, { op: "write", path: "shared.md", content: "" });
-		assert.equal(toolText(await notes(worktree, { op: "read", path: "shared.md" })), "", "imports cannot resurrect a cleared note");
+		assert.equal(existsSync(join(main, ".pi")), false, "notes live in the common Git directory");
+		assert.equal(existsSync(join(worktree, ".pi")), false, "writes do not create a worktree-local copy");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -1645,7 +1596,7 @@ test("appends from concurrent Pi processes never merge records", async () => {
 			await import(${JSON.stringify(new URL("./pi-loader.ts", import.meta.url).href)});
 			const { default: posthorse } = await import(${JSON.stringify(new URL("../index.ts", import.meta.url).href)});
 			const tools = new Map();
-			posthorse({ on() {}, registerTool: (tool) => tools.set(tool.name, tool), registerMessageRenderer() {}, sendMessage() {} });
+			posthorse({ on() {}, registerContextWindowHook() {}, registerTool: (tool) => tools.set(tool.name, tool), registerMessageRenderer() {}, sendMessage() {} });
 			const [cwd, letter] = process.argv.slice(1);
 			const context = { cwd, newContext() {}, getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }), getContextUsage: () => undefined };
 			for (let i = 0; i < 200; i++) {
