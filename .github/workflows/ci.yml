@@ -23,7 +23,6 @@ concurrency:
 
 env:
   PI_AUTOMATION_REF: bbc0048a363444cde7890c09e80cea00a47fc463 # fitchmultz/.github#33: dual-host Posthorse
-  PI_FORK_REF: b1b4ac34d807b577d66f5879119a9ed4833c8ed7 # reviewed native fork
 
 jobs:
   verify:
@@ -42,9 +41,10 @@ jobs:
           path: automation
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: fork
         with:
           repository: fitchmultz/pi
-          ref: ${{ env.PI_FORK_REF }}
+          ref: main
           path: fork
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -63,8 +63,10 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
-      - name: Build the pinned fork
+      - name: Build the current fork
         working-directory: fork
+        env:
+          PI_FORK_REF: ${{ steps.fork.outputs.commit }}
         run: |
           npm ci --ignore-scripts --no-audit
           npm run hydrate:model-data
@@ -83,8 +85,10 @@ jobs:
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host official --target "$version" --output "$RUNNER_TEMP/posthorse-official"
       - name: Qualify fork Pi
+        env:
+          PI_COMPAT_FORK_REF: ${{ steps.fork.outputs.commit }}
         run: |
-          env -u GITHUB_STEP_SUMMARY PI_COMPAT_FORK_REF="$PI_FORK_REF" node automation/scripts/qualify.mjs \
+          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host fork --target "$RUNNER_TEMP/fork-package" --output "$RUNNER_TEMP/posthorse-fork"
       - name: Verify source-harness integration without credentials
