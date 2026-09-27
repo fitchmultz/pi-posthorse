@@ -49,6 +49,23 @@ async function fixture(t, options = {}) {
 	const { session } = await createAgentSession({ cwd, agentDir, modelRuntime, model: faux.getModel(), resourceLoader, settingsManager, sessionManager, noTools: "builtin" });
 	t.after(() => session.dispose());
 	await session.bindExtensions({ onError(error) { throw new Error(error.error); } });
+	if (options.knownNativeInput) {
+		// Faux has no payload rewrite/transport stage. Model the native provider's
+		// post-payload membership event, leaving consumption proof to the real host.
+		const streamFunction = session.agent.streamFunction;
+		session.agent.streamFunction = async (model, context, opts) => {
+			const inputToolCallIds = context.messages.flatMap((message) =>
+				message.role === "toolResult" ? [message.toolCallId.split("|")[0]] : []);
+			const stream = await streamFunction(model, context, opts);
+			const iterate = stream[Symbol.asyncIterator].bind(stream);
+			stream[Symbol.asyncIterator] = async function* () {
+				for await (const event of { [Symbol.asyncIterator]: iterate }) {
+					yield event.type === "start" ? { ...event, inputToolCallIds } : event;
+				}
+			};
+			return stream;
+		};
+	}
 	return { cwd, agentDir, session, faux, sessionManager, settingsManager, resourceLoader, modelRuntime };
 }
 
@@ -176,10 +193,10 @@ test("automatic rollover keeps namespaced ask_question output as tool evidence, 
 	}
 });
 
-test("recovery and history retain native tool identity and admitted arguments after rollover", async (t) => {
+for (const knownNativeInput of [false, true]) test(`recovery and history retain native tool identity and admitted arguments after rollover (input membership ${knownNativeInput ? "known" : "unknown"})`, async (t) => {
 	const executed = [];
 	const h = await fixture(t, {
-		nativeAsync: true,
+		nativeAsync: true, knownNativeInput,
 		extension(pi) {
 			for (const namespace of ["ENVIRONMENT_A", "ENVIRONMENT_B"]) pi.registerTool({
 				namespace, name: "record", async: true, label: "Record", description: "In-memory fixture operation",
@@ -214,8 +231,15 @@ test("recovery and history retain native tool identity and admitted arguments af
 	const handoff = automaticRecovery(h);
 	h.session.newContext({ handoff });
 	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
-	assert.ok(!h.sessionManager.buildSessionProjection().messages.some((message) =>
-		message.role === "assistant" && message.content.some((part) => part.id === calls[0].id)));
+	const projected = h.sessionManager.buildSessionProjection().messages;
+	for (const call of calls) {
+		assert.equal(projected.some((message) => message.role === "assistant" &&
+			message.content.some((part) => part.id === call.id)), !knownNativeInput);
+		assert.equal(projected.some((message) => message.role === "toolResult" &&
+			message.toolCallId === call.id), !knownNativeInput);
+	}
+	assert.ok(!projected.some((message) => message.role === "assistant" && textOf(message).includes("Done")),
+		"retaining unproven receipts must not revive old assistant prose");
 
 	const lookups = [
 		...callEntries.map((entry) => fauxToolCall("history", { op: "read", id: entry.id })),
@@ -863,7 +887,7 @@ test("consumed native receipts cannot claim an empty rollover when working conte
 	const retained = [];
 	const requirement = "Preserve the owner working requirement.";
 	const h = await fixture(t, {
-		nativeAsync: true, customPrompt: "s".repeat(88_000),
+		nativeAsync: true, knownNativeInput: true, customPrompt: "s".repeat(88_000),
 		extension(pi) {
 			pi.registerTool({ name: "receipt", async: true, label: "Receipt", description: "Local operation", parameters: { type: "object", properties: {} }, async execute() {
 				executions++;
@@ -887,8 +911,6 @@ test("consumed native receipts cannot claim an empty rollover when working conte
 	]);
 	await h.session.prompt(`${requirement} ${"w".repeat(10_000)}`);
 	assert.equal(executions, 1);
-	const receipt = h.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === call.id);
-	assert.ok(h.sessionManager.getBranch().some((entry) => entry.type === "message" && entry.message.role === "assistant" && entry.consumedToolResultIds?.includes(receipt.id)));
 	h.session.agent.state.model = { ...h.session.model, contextWindow: 40_000 };
 	let nextRequest;
 	h.faux.setResponses([(ctx) => { nextRequest = JSON.stringify(ctx.messages); return fauxAssistantMessage("Continued with the working requirement."); }]);
