@@ -123,11 +123,15 @@ describe("Posthorse inside the Pi fork", () => {
 		const harness = await createHarness({ extensionFactories: [posthorse] });
 		harnesses.push(harness);
 		const results: string[] = [];
+		const search = (query: string, limit: number) => fauxAssistantMessage(fauxToolCall("history", { op: "search", query, limit }), { stopReason: "toolUse" });
 		harness.setResponses([
-			fauxAssistantMessage(fauxToolCall("history", { op: "search", query: "needle", limit: 1 }), { stopReason: "toolUse" }),
+			// Search skips the active context, so the fresh window recovers the request and this first call.
+			search("needle", 1),
+			fauxAssistantMessage(fauxToolCall("new_context", {}), { stopReason: "toolUse" }),
+			search("needle", 1),
 			(context) => {
 				results.push(getMessageText(context.messages.at(-1)));
-				return fauxAssistantMessage(fauxToolCall("history", { op: "search", query: '"limit":1', limit: 5 }), { stopReason: "toolUse" });
+				return search('"limit":1', 5);
 			},
 			(context) => {
 				results.push(getMessageText(context.messages.at(-1)));
@@ -362,11 +366,11 @@ describe("Posthorse inside the Pi fork", () => {
 		harnesses.push(harness);
 		mkdirSync(join(harness.tempDir, ".pi", "notes"), { recursive: true });
 		for (const path of ["current.md", "decisions.md", "requests.md"]) {
-			writeFileSync(join(harness.tempDir, ".pi", "notes", path), "n".repeat(25_000));
+			writeFileSync(join(harness.tempDir, ".pi", "notes", path), "n".repeat(45_000));
 		}
 		let startingTokens = 0;
 		let afterPages = 0;
-		let resultTexts: string[] = [];
+		let pages: Array<{ text: string; offset: number }> = [];
 		harness.setResponses([
 			() => {
 				const user = harness.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "user")!;
@@ -381,7 +385,14 @@ describe("Posthorse inside the Pi fork", () => {
 				const call = context.messages.find((message) => message.role === "assistant")!;
 				if (call.role === "assistant") startingTokens = call.usage.totalTokens;
 				afterPages = harness.session.getContextUsage()!.tokens!;
-				resultTexts = results.map(getMessageText);
+				const offsets = new Map<string, number>();
+				if (call.role === "assistant") {
+					for (const part of call.content) if (part.type === "toolCall") offsets.set(part.id, Number(part.arguments.offset ?? 0));
+				}
+				pages = results.map((result) => ({
+					text: getMessageText(result),
+					offset: result.role === "toolResult" ? offsets.get(result.toolCallId.split("|")[0]) ?? -1 : -1,
+				}));
 				expect(results).toHaveLength(count);
 				expect(results.some((result) => result.isError)).toBe(true);
 				return fauxAssistantMessage("Saved pages recovered; remaining offsets can be retried after rollover.");
@@ -391,8 +402,12 @@ describe("Posthorse inside the Pi fork", () => {
 		await harness.session.prompt("p".repeat(300_000));
 		expect(startingTokens).toBeGreaterThan(75_000);
 		expect(afterPages).toBeLessThan(100_000);
-		expect(resultTexts.some((result) => result.includes("continue with offset 20000"))).toBe(true);
-		expect(resultTexts.some((result) => result.includes("retry with offset 40000"))).toBe(true);
+		// Siblings share one budget in whatever order they run: partial pages name their continuation,
+		// and every refusal keeps its own call's offset.
+		expect(pages.some(({ text }) => /continue with offset \d+|and offset \d+/.test(text))).toBe(true);
+		const refusals = pages.filter(({ text }) => text.includes("Too little context remains"));
+		expect(refusals.length).toBeGreaterThan(0);
+		for (const { text, offset } of refusals) expect(text).toContain(`retry with offset ${offset}`);
 	});
 
 	it("leaves Pi alone when compaction is disabled but keeps new_context available", async () => {

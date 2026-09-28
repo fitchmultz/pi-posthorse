@@ -57,7 +57,7 @@ function context(cwd: string, branch: unknown[] = []): ExtensionContext {
 		getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }),
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
 		getSystemPrompt: () => "test",
-		sessionManager: { getBranch: () => branch, getSessionDir: () => cwd },
+		sessionManager: { buildSessionProjection: () => ({ entries: [] }), getBranch: () => branch, getSessionDir: () => cwd },
 	} as unknown as ExtensionContext;
 }
 async function execute(name: string, args: Record<string, unknown>, ctx: ExtensionContext) {
@@ -116,11 +116,11 @@ test("notes show page range and next offset even when the preview fills the comp
 		const component = card("notes", args);
 		component.updateResult({ ...output, isError: false });
 		const compact = text(component, 40);
-		assert.match(compact, /0[–-]20,000.*56,186/s);
-		assert.match(compact, /offset 20,000/);
+		assert.match(compact, /0[–-]40,000.*56,186/s);
+		assert.match(compact, /offset 40,000/);
 		assert.ok(lines(component, 40).length <= 10);
 		assert.equal(click(component, 40, 4)?.handled, true, "the visible body also expands");
-		assert.match(text(component), /continue with offset 20000/);
+		assert.match(text(component), /continue with offset 40000/);
 		assert.deepEqual(output, snapshot, "rendering must not mutate model-visible output");
 		assert.ok(JSON.stringify(output.details).length < 200, "page metadata must not duplicate the note");
 	} finally {
@@ -189,7 +189,9 @@ test("paginated searches retain accurate counts, spans, identifiers and continua
 		message: { role: "user", content: `needle station ${index} ${"r".repeat(500)}` },
 	}));
 	const args = { op: "search", query: "needle", limit: 50 };
-	const output = await execute("history", args, context(tmpdir(), branch));
+	// Late in the window, the remaining budget rather than the result limit ends the page.
+	const late = Object.assign(context(tmpdir(), branch), { getContextUsage: () => ({ tokens: 78_000, contextWindow: 100_000, percent: 78 }) });
+	const output = await execute("history", args, late);
 	const display = output.details as PosthorseDisplay;
 	assert.equal(display.kind, "history-search");
 	if (display.kind !== "history-search") throw new Error("missing search spans");
@@ -321,14 +323,14 @@ test("partial and error results cannot inherit a success summary or terminal con
 
 test("history pages keep paging, metadata, and native image attachments without copied bodies", async () => {
 	const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" };
-	const body = `ENTRY HEAD ${"route ".repeat(5000)} ENTRY TAIL`;
+	const body = `ENTRY HEAD ${"route ".repeat(8000)} ENTRY TAIL`;
 	const branch = [{ type: "message", id: "picture-entry", timestamp: "2026-09-06T17:43:46Z", message: { role: "user", content: [{ type: "text", text: body }, image] } }];
 	const args = { op: "read", id: "picture-entry" };
 	const output = await execute("history", args, context(tmpdir(), branch));
 	const component = card("history", args);
 	component.updateResult({ ...output, isError: false });
 	component.setShowImages(false);
-	assert.match(text(component, 40), /Next offset 20,000/);
+	assert.match(text(component, 40), /Next offset 40,000/);
 	assert.match(text(component, 40), /1 image attached/);
 	assert.ok(lines(component, 40).length <= 10);
 	assert.deepEqual(output.content.slice(1), [image]);
@@ -338,7 +340,7 @@ test("history pages keep paging, metadata, and native image attachments without 
 	assert.ok(expanded.indexOf("ENTRY HEAD") < expanded.indexOf("2026-09-06T17"));
 	assert.match(expanded, /\[picture-entry\]/);
 	assert.match(expanded, /More remains; call history read/);
-	const continuation = await execute("history", { ...args, offset: 20_000 }, context(tmpdir(), branch));
+	const continuation = await execute("history", { ...args, offset: 40_000 }, context(tmpdir(), branch));
 	assert.equal(continuation.content.length, 1);
 
 	const manyImages = [{ ...branch[0], message: { role: "user", content: [{ type: "text", text: body }, ...Array.from({ length: 13 }, () => image)] } }];

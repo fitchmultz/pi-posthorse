@@ -215,11 +215,28 @@ test("automatic handoff preserves projected edits and marks compactions as histo
 		const id = manager.appendMessage({ role: "user", content: "PRIVATE_ORIGINAL", timestamp: Date.now() });
 		manager.appendContextEdit(id, { content: "APPROVED_REPLACEMENT" });
 	} });
-	h.faux.setResponses([toolTurn(fauxToolCall("dump", {})), toolTurn(fauxToolCall("history", { op: "search", query: "Automatic context rollover recovery record" })), fauxAssistantMessage("Done.")]);
+	// The fresh window's own boundary is in context, so read it rather than search for it.
+	h.faux.setResponses([toolTurn(fauxToolCall("dump", {})), () => toolTurn(fauxToolCall("history", { op: "read", id: boundaries(h)[0].id })), fauxAssistantMessage("Done.")]);
 	await h.session.prompt("Inspect only.");
 	assert.match(boundaries(h)[0].summary, /APPROVED_REPLACEMENT/);
 	assert.doesNotMatch(boundaries(h)[0].summary, /PRIVATE_ORIGINAL/);
-	assert.match(textOf(result(h, "history")), new RegExp(`\\[window ${boundaries(h)[0].id}\\]`));
+	assert.match(textOf(result(h, "history")), new RegExp(`\\[window ${boundaries(h)[0].id}\\] \\[${boundaries(h)[0].id}\\]`));
+});
+
+test("history search skips entries still in the active context", async (t) => {
+	const h = await fixture(t, { seed(manager) {
+		manager.appendMessage({ role: "user", content: "IN_CONTEXT_NEEDLE summarized", timestamp: 1 });
+		manager.appendMessage(fauxAssistantMessage("ok"));
+		const kept = manager.appendMessage({ role: "user", content: "IN_CONTEXT_NEEDLE kept", timestamp: 2 });
+		manager.appendMessage(fauxAssistantMessage("ok"));
+		manager.appendCompaction("Earlier work summarized", kept, 100);
+	} });
+	h.faux.setResponses([toolTurn(fauxToolCall("history", { op: "search", query: "in_context_needle" })), fauxAssistantMessage("Done.")]);
+	await h.session.prompt("Look back.");
+	const text = textOf(result(h, "history"));
+	assert.match(text, /\[user\] IN_CONTEXT_NEEDLE summarized/);
+	assert.doesNotMatch(text, /IN_CONTEXT_NEEDLE kept/);
+	assert.match(text, /\[Skipped \d+ match(es)? already in your active context\.\]/);
 });
 
 test("note publication retains symlinks/modes, serializes write+append, and propagates failure", async (t) => {
@@ -611,7 +628,6 @@ test("automatic recovery uses event settings even when proactive settings disagr
 	assert.equal(boundaries(h)[0].details.reason, "threshold");
 	assert.equal(h.faux.state.callCount, 2);
 	assert.match(guidance, /disabled in the available settings/);
-	assert.match(guidance, /live settings control automatic compaction/);
 	assert.match(textOf(result(h, "get_context_remaining")), /disabled in the available settings/);
 	assert.match(textOf(result(h, "get_context_remaining")), /persisted CLI snapshot/);
 });

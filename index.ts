@@ -7,6 +7,7 @@
  * tools, durable notes, and history recovery.
  */
 
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
 	appendFileSync,
@@ -20,15 +21,18 @@ import {
 } from "node:fs";
 import { access, constants, lstat, open, readlink, realpath, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
-import { estimateTokens, getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { promisify } from "node:util";
+import { estimateTokens, formatSize, getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerPosthorseMessages, toolCards, type PosthorseDisplay } from "./ui.ts";
 
 const REMINDER_BUFFER_TOKENS = 32_000;
-/** Absolute ceiling for handoffs and recovery pages; pages shrink to the live remaining budget. */
+/** Absolute ceilings; handoffs and pages shrink to the live remaining budget. */
 const MAX_HANDOFF_CHARS = 20_000;
+const MAX_PAGE_CHARS = 40_000;
 const MAX_RECOVERY_RECORD_CHARS = 4_000;
+const MAX_RECOVERY_RESULT_CHARS = 1_500;
 const HANDOFF_OVERHEAD_RESERVE = 1_000;
 const PAGE_MARGIN_TOKENS = 1_000;
 const MIN_PAGE_CHARS = 1_000;
@@ -82,6 +86,7 @@ type MessageLike = {
 	stopReason?: string;
 	errorMessage?: string;
 	content?: unknown;
+	summary?: string;
 	toolName?: string;
 	namespace?: string;
 	toolCallId?: string;
@@ -119,6 +124,7 @@ type RecoveryRecord = {
 	text: string;
 };
 type ReminderFingerprint = { windowId: string; contextWindow?: number; reserveTokens?: number };
+type NoteFile = { path: string; size: number; mtimeMs: number };
 type Budget = {
 	contextWindow: number;
 	reserveTokens: number;
@@ -349,8 +355,22 @@ function isRecoveryCall(part: unknown): boolean {
 	return block?.type === "toolCall" && isRecoveryTool(block.name);
 }
 
-function historyFileKey(source: string): string {
-	return createHash("sha256").update(source).digest("base64url");
+/** Ten base64url characters of SHA-256; 0.6 file keys were the whole digest, which starts with these. */
+function shortKey(text: string): string {
+	return createHash("sha256").update(text).digest("base64url").slice(0, 10);
+}
+
+/** Nested session files are subagent runs, whose user-role input came from a parent agent. */
+function sourceTag(source: string): string {
+	return source.includes(sep) ? " [subagent]" : "";
+}
+
+function contextEdits(entries: readonly EntryLike[]): Map<string, EntryLike> {
+	const edits = new Map<string, EntryLike>();
+	for (const entry of entries) {
+		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
+	}
+	return edits;
 }
 
 function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit | undefined {
@@ -391,8 +411,8 @@ function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit
 			matchIndex = text.toLowerCase().indexOf(query);
 		}
 	}
-	const id = source ? `${entry.id}@${historyFileKey(source)}` : entry.id!;
-	const header = `${source ? `${source} ` : ""}${entry.timestamp ?? ""} [window ${item.windowId}] [${id}] `;
+	const id = source ? `${entry.id}@${shortKey(source)}` : entry.id!;
+	const header = `${entry.timestamp ?? ""}${sourceTag(source)} [window ${item.windowId}] [${id}] `;
 	return {
 		id,
 		priority,
@@ -419,8 +439,8 @@ function* windowEntries(entries: Iterable<EntryLike>): Generator<WindowedEntry> 
 	}
 }
 
-/** JSONL splits on LF, not the Unicode separators that Node's readline also recognizes. */
-async function* jsonlLines(file: string, signal?: AbortSignal): AsyncGenerator<string> {
+/** Split on LF only: JSONL strings and notes can contain Unicode separators that Node's readline also splits on. */
+async function* lfLines(file: string, signal?: AbortSignal): AsyncGenerator<string> {
 	const stream = createReadStream(file, { encoding: "utf8", signal });
 	let pending: string[] = [];
 	for await (const chunk of stream) {
@@ -436,10 +456,56 @@ async function* jsonlLines(file: string, signal?: AbortSignal): AsyncGenerator<s
 	if (last) yield last;
 }
 
+/** Git's heuristic: a NUL byte in the first 8,000 bytes marks binary content. */
+async function isBinaryFile(path: string): Promise<boolean> {
+	const file = await open(path, "r");
+	try {
+		const { buffer, bytesRead } = await file.read(Buffer.alloc(8_000), 0, 8_000, 0);
+		return buffer.subarray(0, bytesRead).includes(0);
+	} finally {
+		await file.close();
+	}
+}
+
+const execFileAsync = promisify(execFile);
+/**
+ * ripgrep needles whose raw JSONL matches cover every normalized match, or undefined when only a full scan is exact.
+ * Raw JSONL escapes quotes, backslashes, and control characters; flattenEntry adds brackets, parentheses, braces,
+ * colons, `$`, spaces beside those labels, and label-only phrases. Image summaries ("3 images: image/png,
+ * image/jpeg") come only from entries with an image block, so their text needs that block instead.
+ */
+function prefilterNeedles(query: string): string[] | undefined {
+	if (/["\\[\](){}:$\p{Cc}]/u.test(query) || query.trim() !== query) return undefined;
+	if (["call id", "execution arguments", "no handoff", "excluded from model context by pi"].some((phrase) => phrase.includes(query))) return undefined;
+	const image = query.includes(",") || /^\d+ ?i?m?a?g?e?s?$/.test(query) || ["images", "unknown type"].some((phrase) => phrase.includes(query));
+	return image ? [query, '"type":"image"'] : [query];
+}
+
+/** Session files whose raw JSONL contains any needle in any case, via Pi's managed ripgrep or PATH; undefined means scan every file. */
+async function filesContaining(dir: string, needles: string[], signal?: AbortSignal): Promise<Set<string> | undefined> {
+	const args = [
+		"--files-with-matches", "--fixed-strings", "--ignore-case", "--no-ignore", "--hidden", "--no-messages",
+		"--glob", "*.jsonl", ...needles.flatMap((needle) => ["--regexp", needle]), dir,
+	];
+	for (const rg of [join(getAgentDir(), "bin", "rg"), "rg"]) {
+		try {
+			const { stdout } = await execFileAsync(rg, args, { signal, maxBuffer: 64 * 1024 * 1024 });
+			return new Set(stdout.split("\n").filter(Boolean).map((file) => resolve(file)));
+		} catch (error) {
+			const { code } = error as { code?: unknown };
+			if (code === 1) return new Set();
+			if (code === "ENOENT") continue;
+			signal?.throwIfAborted();
+			return undefined;
+		}
+	}
+	return undefined;
+}
+
 async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncGenerator<WindowedEntry> {
 	if (!existsSync(file)) return;
 	const windows = new Map<string, string>();
-	for await (const line of jsonlLines(file, signal)) {
+	for await (const line of lfLines(file, signal)) {
 		let entry: EntryLike;
 		try {
 			entry = JSON.parse(line) as EntryLike;
@@ -454,18 +520,15 @@ async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncG
 
 function sessionFiles(dir: string): string[] {
 	if (!existsSync(dir)) return [];
-	const files = readdirSync(dir, { recursive: true, withFileTypes: true })
+	return readdirSync(dir, { recursive: true, withFileTypes: true })
 		.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl") && !entry.name.includes(".intent."))
 		.map((entry) => join(entry.parentPath, entry.name));
-	if (files.length < 2) return files;
-	return files
-		.map((file) => ({ file, mtime: statSync(file).mtimeMs }))
-		.sort((a, b) => b.mtime - a.mtime)
-		.map(({ file }) => file);
 }
 
+/** Project session files, newest-modified first, optionally limited to one file key or to prefiltered candidates. */
 async function* scopedSessionFiles(
-	dir: string, cwd: string, currentFile: string | undefined, signal?: AbortSignal, fileKey?: string,
+	dir: string, cwd: string, currentFile: string | undefined, signal?: AbortSignal,
+	{ fileKey, candidates }: { fileKey?: string; candidates?: Set<string> } = {},
 ): AsyncGenerator<string> {
 	const files = sessionFiles(dir);
 	const fileSet = new Set(files);
@@ -474,7 +537,7 @@ async function* scopedSessionFiles(
 		const known = visible.get(file);
 		if (known !== undefined) return known;
 		let header: { cwd?: string } | null = null;
-		for await (const line of jsonlLines(file, signal)) {
+		for await (const line of lfLines(file, signal)) {
 			try {
 				const entry = JSON.parse(line) as { type?: string; id?: unknown; cwd?: unknown } | null;
 				if (!entry) continue;
@@ -501,8 +564,12 @@ async function* scopedSessionFiles(
 		visible.set(file, allowed);
 		return allowed;
 	};
-	for (const file of files) {
-		if (fileKey !== undefined && historyFileKey(relative(dir, file)) !== fileKey) continue;
+	const selected = files
+		.filter((file) => (!candidates || candidates.has(resolve(file))) &&
+			(fileKey === undefined || fileKey.startsWith(shortKey(relative(dir, file)))))
+		.map((file) => ({ file, mtime: statSync(file).mtimeMs }))
+		.sort((a, b) => b.mtime - a.mtime);
+	for (const { file } of selected) {
 		if (await belongs(file)) yield file;
 	}
 }
@@ -569,6 +636,14 @@ function recoveryRecord(entry: EntryLike): RecoveryRecord | undefined {
 
 function formatRecoveryRecord(record: RecoveryRecord, limit: number): string {
 	return boundedBlock(`[${record.label} | ${record.timestamp} | entry ${record.id}]`, record.text, limit);
+}
+
+/** Owner inputs keep a one-line preview: they are direct intent, and most are short. */
+function indexLine(record: RecoveryRecord): string {
+	const header = formatRecoveryRecord(record, 0);
+	if (record.kind !== "owner") return header;
+	const preview = record.text.replace(/\s+/g, " ").trim();
+	return `${header} ${preview.length > 120 ? `${preview.slice(0, 119)}…` : preview}`;
 }
 
 function formatPriorCheckpoint(entry: EntryLike | undefined, limit: number): string | undefined {
@@ -645,10 +720,7 @@ function recoverableToolResults(
 function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly ProjectedEntry[], maxChars: number): string {
 	const { start, boundary: priorWindow } = contextStart(entries);
 	const current = entries.slice(start);
-	const edits = new Map<string, EntryLike>();
-	for (const entry of entries) {
-		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
-	}
+	const edits = contextEdits(entries);
 	const omittedProjectedIds = new Set(projected.filter(({ messages }) => !messages.length).map(({ sourceEntry }) => sourceEntry.id));
 	const edited = current.flatMap((entry) => {
 		if (entry.id && omittedProjectedIds.has(entry.id)) return [];
@@ -721,16 +793,10 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 		? Math.min(MAX_RECOVERY_RECORD_CHARS, Math.floor(fixedBudget / fixedCount))
 		: MAX_RECOVERY_RECORD_CHARS;
 	const prior = formatPriorCheckpoint(priorWindow, fixedLimit);
-	const formatted = new Map(
-		records.map((record) => [
-			record,
-			formatRecoveryRecord(record, selected.has(record) ? fixedLimit : MAX_RECOVERY_RECORD_CHARS),
-		]),
-	);
-	const fixedParts = () => [
+	const fixedParts = [
 		preamble,
 		currentHeader,
-		...records.filter((record) => selected.has(record)).map((record) => formatted.get(record)!),
+		...records.filter((record) => selected.has(record)).map((record) => formatRecoveryRecord(record, fixedLimit)),
 	];
 
 	let batch: string | undefined;
@@ -738,11 +804,11 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 		const availableText = Math.max(
 			0,
 			maxChars -
-				joinedLength([...fixedParts(), bareBatch, prior]) -
+				joinedLength([...fixedParts, bareBatch, prior]) -
 				HANDOFF_OVERHEAD_RESERVE -
 				batchBlocks.length,
 		);
-		const perBlock = Math.min(MAX_RECOVERY_RECORD_CHARS, Math.floor(availableText / batchBlocks.length));
+		const perBlock = Math.min(MAX_RECOVERY_RESULT_CHARS, Math.floor(availableText / batchBlocks.length));
 		batch = [
 			batchHeader,
 			batchOmission,
@@ -752,21 +818,22 @@ function buildAutoHandoff(entries: readonly EntryLike[], projected: readonly Pro
 			.join("\n\n");
 	}
 
-	let optionalBudget = Math.max(0, maxChars - joinedLength([...fixedParts(), batch, prior]) - HANDOFF_OVERHEAD_RESERVE);
-	for (let i = records.length - 1; i >= 0; i--) {
-		const record = records[i];
-		if (selected.has(record)) continue;
-		const length = formatted.get(record)!.length + 2;
-		if (length > optionalBudget) continue;
-		selected.add(record);
-		optionalBudget -= length;
+	// Other inputs are indexed, newest kept first when space runs out; history read recovers their full text.
+	const others = records.filter((record) => !selected.has(record));
+	const indexHeader = "Other current-window inputs, oldest first (recover with history read):";
+	let indexBudget = Math.max(0, maxChars - joinedLength([...fixedParts, indexHeader, batch, prior]) - HANDOFF_OVERHEAD_RESERVE);
+	const listed: string[] = [];
+	for (let i = others.length - 1; i >= 0; i--) {
+		const line = indexLine(others[i]);
+		if (line.length + 1 > indexBudget) break;
+		listed.unshift(line);
+		indexBudget -= line.length + 1;
 	}
-
-	const omitted = records.filter((record) => !selected.has(record));
-	const omission = omitted.length
-		? `Omitted ${omitted.length} current-window input(s) to stay within the handoff limit (${omitted.filter((record) => record.kind === "owner").length} owner, ${omitted.filter((record) => record.kind === "coordination").length} coordination; ${omitted[0].timestamp} through ${omitted.at(-1)!.timestamp}). Use history search/read to recover them.`
+	const unlisted = others.length - listed.length;
+	const index = others.length
+		? [indexHeader, ...(unlisted ? [`${unlisted} earlier input(s) not listed; use history search to find them.`] : []), ...listed].join("\n")
 		: undefined;
-	return [...fixedParts(), omission, batch, prior].filter((part): part is string => Boolean(part)).join("\n\n");
+	return [...fixedParts, index, batch, prior].filter((part): part is string => Boolean(part)).join("\n\n");
 }
 
 function reminderMatches(details: unknown, fingerprint: ReminderFingerprint): boolean {
@@ -792,9 +859,9 @@ function budgetFor(ctx: PolicyContext, contextWindow = ctx.model?.contextWindow)
 }
 
 /** Half the fresh capacity after prompt/tool/input overhead remains for continued work. */
-function freshPayloadChars(ctx: PolicyContext, toolTokens: number, pendingMessages: readonly MessageLike[] = []): number {
+function freshPayloadChars(ctx: PolicyContext, toolTokens: number, pendingMessages: readonly MessageLike[] = [], cap = MAX_HANDOFF_CHARS): number {
 	const contextWindow = ctx.model?.contextWindow;
-	if (!contextWindow || contextWindow <= 0) return MAX_HANDOFF_CHARS;
+	if (!contextWindow || contextWindow <= 0) return cap;
 	const budget = budgetFor(ctx, contextWindow);
 	const line = budget?.enabled && budget.supported ? budget.rolloverAt : contextWindow;
 	const promptTokens = Math.ceil(ctx.getSystemPrompt().length / 4);
@@ -803,7 +870,7 @@ function freshPayloadChars(ctx: PolicyContext, toolTokens: number, pendingMessag
 		0,
 	);
 	return Math.min(
-		MAX_HANDOFF_CHARS,
+		cap,
 		Math.max(0, Math.floor((line - PAGE_MARGIN_TOKENS - promptTokens - toolTokens - pendingTokens) / 2)) * 4,
 	);
 }
@@ -830,10 +897,7 @@ function boundWindowReceipts(
 		pending.reduce((sum, message) => sum + estimate(message), 0);
 	const fixed = messages.filter((message) => message.role !== "system" && message.role !== "toolResult");
 	const available = ctx.model.contextWindow - overhead - fixed.reduce((sum, message) => sum + estimate(message), 0);
-	const edits = new Map<string, EntryLike>();
-	for (const entry of ctx.sessionManager.getBranch() as EntryLike[]) {
-		if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry);
-	}
+	const edits = contextEdits(ctx.sessionManager.getBranch() as EntryLike[]);
 	const receipts = projected.flatMap(({ sourceEntry, messages }) =>
 		messages.filter((message) => message.role === "toolResult").map((message) => {
 			if (!sourceEntry.id) throw new Error("Posthorse: retained receipt has no history entry");
@@ -876,8 +940,9 @@ function boundWindowReceipts(
 	return drafts;
 }
 
-/** Official Pi cannot expose its live settings to extensions; say so wherever the persisted snapshot is used. */
+/** Official Pi cannot expose its live settings to extensions; budget reports say when they used the persisted snapshot. */
 const SNAPSHOT_NOTE = "Reminder and budget policy uses available settings (a persisted CLI snapshot by default); Pi's live settings control automatic compaction.";
+const CHECKPOINT_STEPS = "rewrite the task's current-state note in place with notes write (goal, progress, decisions, next steps), then call new_context";
 
 function unsupportedMessage(budget: Budget): string {
 	const n = (value: number) => value.toLocaleString("en-US");
@@ -887,7 +952,7 @@ function unsupportedMessage(budget: Budget): string {
 /** Capacity before Pi's automatic line (or configured context limit), including page metadata and refusals. */
 function pageCapacity(ctx: PolicyContext, toolTokens: number): number {
 	const usage = ctx.getContextUsage();
-	if (!usage || usage.tokens == null) return freshPayloadChars(ctx, toolTokens) / 4 + PAGE_MARGIN_TOKENS;
+	if (!usage || usage.tokens == null) return freshPayloadChars(ctx, toolTokens, [], MAX_PAGE_CHARS) / 4 + PAGE_MARGIN_TOKENS;
 	const budget = budgetFor(ctx, usage.contextWindow);
 	const line = budget?.enabled && budget.supported ? budget.rolloverAt : usage.contextWindow;
 	return line - usage.tokens;
@@ -907,13 +972,12 @@ function buildGuidance(ctx: PolicyContext, official: boolean): string {
 		const deadline = budget
 			? `${Math.max(1, Math.round((budget.rolloverAt / budget.contextWindow) * 100))}% used`
 			: "the configured Pi context limit";
-		automatic = `Automatic Posthorse rollover follows Pi's enabled compaction setting. At most one best-effort checkpoint reminder may appear before the rollover line (${deadline}); a large turn, overflow, restart, or smaller model can skip it.\nWhen reminded, stop normal work, save goal/progress/decisions/next steps, then call new_context now.`;
+		automatic = `Automatic rollover follows Pi's compaction setting. At most one checkpoint reminder may arrive before the rollover line (${deadline}); when it does, stop normal work, ${CHECKPOINT_STEPS}.`;
 	}
 	return `## Context self-management (Posthorse)
-Context windows are finite. Use get_context_remaining for the best available native estimate when it matters; routine turns do not include a changing meter.${official ? `\n${SNAPSHOT_NOTE}` : ""}
 ${automatic}
-new_context requests a fresh Pi context after the current foreground tools succeed. Background work continues across the reset. Earlier conversation remains in the session transcript and is recoverable with notes and history.
-Automatic handoffs are emergency recovery records, not proof of current state. Restore notes/todos/history and verify live state before continuing stateful or external work.`;
+After a rollover, earlier conversation stays in history. Restore notes and todos, then verify live state before stateful or external work; automatic handoffs record inputs, not progress.
+Write handoffs and notes as normal readable prose; notes and history search match literal text.`;
 }
 
 function persistedPolicy(ctx: ExtensionContext): CompactionPolicy {
@@ -969,7 +1033,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		previousPageUsage = usage;
 		const remaining = pageCapacity(ctx, activeToolTokens()) - pendingPageTokens;
 		const chars = Math.min(
-			MAX_HANDOFF_CHARS,
+			MAX_PAGE_CHARS,
 			Math.max(0, remaining - PAGE_MARGIN_TOKENS) * 4 - imageCount * ESTIMATED_IMAGE_CHARS,
 		);
 		if (chars < MIN_PAGE_CHARS) {
@@ -1000,11 +1064,12 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		let end = Math.min(text.length, offset + chars);
 		let start = 0;
 		const starts: number[] = [];
+		const maxRows = kind === "notes-search" ? 20 : 100;
 		for (const row of rows) {
 			if (start >= end) break;
 			if (start + row.length > offset) starts.push(start);
 			start += row.length + 1;
-			if (kind === "notes-search" && starts.length === 20) { end = Math.min(end, start - 1); break; }
+			if (starts.length === maxRows) { end = Math.min(end, start - 1); break; }
 		}
 		// A result-count cap can require continuation even when the character cap did not.
 		if (end < text.length) end = Math.min(end, offset + chars - footer(text.length).length);
@@ -1073,7 +1138,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		pi.sendMessage(
 			{
 				customType: REMINDER_TYPE,
-				content: `[posthorse] Checkpoint now: ${(budget.rolloverAt - usage.tokens).toLocaleString("en-US")} tokens remain before Pi's automatic rollover line. Stop normal work, save goal/progress/decisions/next steps, then call new_context now. This reminder is best-effort; a large turn, overflow, restart, or smaller model can reach rollover without one.`,
+				content: `[posthorse] Checkpoint now: ${(budget.rolloverAt - usage.tokens).toLocaleString("en-US")} tokens remain before Pi's automatic rollover line. Stop normal work, ${CHECKPOINT_STEPS}.`,
 				display: true,
 				details: fingerprint,
 			},
@@ -1084,16 +1149,16 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 	// Filter active input only; raw reminders remain in history for deduplication and recovery.
 	pi.on("context", (event, ctx) => {
 		if (!event.messages.some((message) => message.role === "custom" && isReminderType(message.customType))) return;
-		let windowId: unknown;
-		if (native) {
-			const marker = event.messages.find((message) => message.role === "custom" && message.customType === "context-window");
-			windowId = marker?.role === "custom" ? (marker.details as { windowId?: unknown } | undefined)?.windowId : "initial";
-			if (typeof windowId !== "string") return;
-		}
+		// The fork's window marker saves a branch walk, but a compaction inside the window drops it.
+		const marker = event.messages.find((message) => message.role === "custom" && message.customType === "context-window");
+		const windowId = marker?.role === "custom"
+			? (marker.details as { windowId?: unknown } | undefined)?.windowId
+			: currentWindowId(ctx.sessionManager.getBranch() as EntryLike[]);
+		if (typeof windowId !== "string") return;
 		const host = policy(ctx);
 		const budget = budgetFor(host);
 		const fingerprint: ReminderFingerprint = {
-			windowId: native ? windowId as string : currentWindowId(ctx.sessionManager.getBranch() as EntryLike[]),
+			windowId,
 			contextWindow: budget?.contextWindow,
 			reserveTokens: budget?.reserveTokens,
 		};
@@ -1157,15 +1222,12 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		label: "New Context",
 		...toolCards("new_context"),
 		description:
-			"Request a fresh context window after the current foreground tools succeed. Background work continues across the reset. Earlier conversation leaves active context without a generated summary but remains recoverable through history. Pass concise continuation state in handoff, or save richer state with notes first.",
-		promptSnippet: "request a fresh context window with an optional atomic handoff",
-		promptGuidelines: [
-			"Before calling new_context, pass concise continuation state in handoff or save durable goal/progress/decisions/next-steps with notes",
-		],
+			"Start a fresh context window once the current foreground tools succeed; background work continues across the reset. Earlier conversation stays recoverable through history. Put continuation state in handoff, or save fuller state in notes first.",
+		promptSnippet: "request a fresh context window with an optional handoff",
 		parameters: Type.Object({
 			handoff: Type.Optional(
 				Type.String({
-					description: "Concise state the fresh window needs to continue correctly",
+					description: "What the fresh window needs to continue, as readable prose",
 					maxLength: MAX_HANDOFF_CHARS,
 				}),
 			),
@@ -1193,8 +1255,8 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		label: "Context Remaining",
 		...toolCards("get_context_remaining"),
 		description:
-			"Best available native estimate of the context budget: tokens until Pi's automatic rollover line and until the configured context limit.",
-		promptSnippet: "check the remaining context budget only when needed",
+			"Estimate tokens left before Pi's automatic rollover and the configured context limit. A checkpoint reminder already arrives before rollover; use this only before a large step late in a window.",
+		promptSnippet: "check the context budget before a large step late in a window",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			const host = policy(ctx);
@@ -1222,18 +1284,14 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		label: "Notes",
 		...toolCards("notes"),
 		description:
-			"Persistent notes in .pi/notes/ that survive context resets. Ops: list/read/search (paged; repeat with offset to continue), write (create/replace; empty content clears), append. Search matches case-insensitive substrings over note lines. Git worktrees share notes: at the main checkout for conventional .git layouts, or in the common Git directory when metadata is stored separately.",
+			"Durable notes in .pi/notes/, shared across Git worktrees and kept across context resets. Ops: list (newest first, with size and date; optional folder path), read, search (case-insensitive substring over text notes), write (replace; empty content clears), append (adds one line-terminated record). list/read/search are paged; continue with the returned offset. Keep one current-state note per task and rewrite it in place.",
 		promptSnippet: "save and recall durable state that survives context resets",
-		promptGuidelines: [
-			"Use notes for durable state too large for a new_context handoff",
-			"Reload relevant notes after a context rollover",
-		],
 		parameters: Type.Object({
 			op: Type.Union(
 				[Type.Literal("list"), Type.Literal("read"), Type.Literal("write"), Type.Literal("append"), Type.Literal("search")],
 				{ description: "Operation to perform" },
 			),
-			path: Type.Optional(Type.String({ description: "Note path relative to .pi/notes/ (read/write/append)" })),
+			path: Type.Optional(Type.String({ description: "Note or folder path relative to .pi/notes/" })),
 			content: Type.Optional(Type.String({ description: "Full file content (write) or text to add (append)" })),
 			query: Type.Optional(Type.String({ description: "Substring to find in notes (search)" })),
 			offset: Type.Optional(Type.Integer({ description: "Character offset for list/read/search (default 0)", minimum: 0 })),
@@ -1247,7 +1305,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				}
 				return join(dir, relative);
 			};
-			const walk = (directory: string, output: string[], ancestors = new Set<string>()) => {
+			const walk = (directory: string, output: NoteFile[], ancestors = new Set<string>()) => {
 				const root = realpathSync(directory);
 				if (ancestors.has(root)) return;
 				ancestors.add(root);
@@ -1256,21 +1314,37 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 					const info = statSync(path, { throwIfNoEntry: false });
 					if (!info) continue;
 					if (info.isDirectory()) walk(path, output, ancestors);
-					else output.push(path);
+					else output.push({ path, size: info.size, mtimeMs: info.mtimeMs });
 				}
 				ancestors.delete(root);
 			};
+			const notesUnder = (target: string): NoteFile[] => {
+				const info = statSync(target, { throwIfNoEntry: false });
+				if (!info) return [];
+				const files: NoteFile[] = [];
+				if (info.isDirectory()) walk(target, files);
+				else files.push({ path: target, size: info.size, mtimeMs: info.mtimeMs });
+				return files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+			};
+			const list = (folder?: string) => notesPage(
+				policy(ctx),
+				notesUnder(folder ? safeJoin(folder) : dir).map((file) =>
+					`${file.path.slice(dir.length + 1)}  ${formatSize(file.size)}  ${new Date(file.mtimeMs).toISOString().slice(0, 16)}Z`),
+				params.offset ?? 0,
+				"notes-list",
+				folder ? `(no notes in ${folder})` : "(no notes yet)",
+			);
 
 			switch (params.op) {
-				case "list": {
-					const files: string[] = [];
-					if (existsSync(dir)) walk(dir, files);
-					return notesPage(policy(ctx), files.map((file) => file.slice(dir.length + 1)), params.offset ?? 0, "notes-list", "(no notes yet)");
-				}
+				case "list":
+					return list(params.path);
 				case "read": {
 					const relative = requireValue(params.path, "path", params.op);
 					const path = safeJoin(relative);
-					if (!existsSync(path)) throw new Error(`No note at ${relative}. Use op "list" to see available notes.`);
+					const info = statSync(path, { throwIfNoEntry: false });
+					if (!info) throw new Error(`No note at ${relative}. Use op "list" to see available notes.`);
+					if (info.isDirectory()) return list(relative);
+					if (await isBinaryFile(path)) throw new Error(`${relative} is a binary file (${formatSize(info.size)}); notes read returns text only.`);
 					const text = readFileSync(path, "utf8");
 					const offset = params.offset ?? 0;
 					if (offset && offset >= text.length) {
@@ -1307,15 +1381,16 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				}
 				case "search": {
 					const query = requireValue(params.query, "query", params.op).toLowerCase();
-					const files: string[] = [];
-					if (existsSync(dir)) walk(dir, files);
 					const hits: string[] = [];
-					for (const file of files) {
-						for (const [index, line] of readFileSync(file, "utf8").split("\n").entries()) {
+					for (const { path: file } of notesUnder(dir)) {
+						if (await isBinaryFile(file)) continue;
+						let number = 0;
+						for await (const line of lfLines(file, signal)) {
+							number++;
 							const trimmed = line.trim();
 							const match = trimmed.toLowerCase().indexOf(query);
 							if (match !== -1) {
-								hits.push(`${file.slice(dir.length + 1)}:${index + 1}: ${excerptAround(trimmed, match, 50, 200)}`);
+								hits.push(`${file.slice(dir.length + 1)}:${number}: ${excerptAround(trimmed, match, 50, 200)}`);
 							}
 						}
 					}
@@ -1330,28 +1405,45 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		label: "History",
 		...toolCards("history"),
 		description:
-			"Search or read normalized session entries, including earlier native context windows. Search prioritizes original content before recovery notes, handoffs, and history lookups; all remain searchable. Current branch by default; all=true searches sessions from this working directory and their nested subagents, including fork copies, and returns file-qualified entry ids for unambiguous reads. Within each group: newest-modified sessions first, newest entries per session. Continue searches with the returned cursor and the same query/scope; new searches see newer entries. Reads page text and stored images; continue with the returned offset and imageOffset.",
+			"Search or read earlier session entries, including previous context windows. search skips entries still in your active context and lists original content before recovery echoes, newest first; all=true also searches this project's other sessions and subagent runs. read takes an entry id exactly as search printed it and pages text and images.",
 		promptSnippet: "recover earlier conversation that left the active context window",
-		promptGuidelines: ["Use history search first, then history read with the returned entry id"],
+		promptGuidelines: ["Use history search first, then history read with the entry id exactly as printed"],
 		parameters: Type.Object({
 			op: Type.Union([Type.Literal("search"), Type.Literal("read")], { description: "Operation to perform" }),
 			query: Type.Optional(Type.String({ description: "Case-insensitive text to find (search)" })),
-			id: Type.Optional(Type.String({ description: "Entry id returned by search (read)" })),
-			all: Type.Optional(Type.Boolean({ description: "Search all project sessions instead of the current branch" })),
+			id: Type.Optional(Type.String({ description: "Entry id exactly as search printed it (read)" })),
+			all: Type.Optional(Type.Boolean({ description: "Also search this project's other sessions and subagent runs" })),
 			limit: Type.Optional(Type.Integer({ description: "Maximum search results per page (default 10, max 50)", minimum: 1, maximum: 50 })),
-			cursor: Type.Optional(Type.String({ description: "Search continuation returned by the previous page; keep query and all unchanged", maxLength: 512 })),
+			cursor: Type.Optional(Type.String({ description: "Continuation from the previous search page; keep query and all unchanged", maxLength: 512 })),
 			offset: Type.Optional(Type.Integer({ description: "Character offset for read (default 0)", minimum: 0 })),
-			imageOffset: Type.Optional(Type.Integer({ description: "First image to return for read (default 0 on the first text page; otherwise skips images). Use both offsets from the continuation.", minimum: 0 })),
+			imageOffset: Type.Optional(Type.Integer({ description: "First image to return (read); use the value from the continuation", minimum: 0 })),
 		}),
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const manager = ctx.sessionManager;
 			const cwd = resolve(ctx.cwd);
 			const currentFile = manager.getSessionFile?.();
+			const dir = manager.getSessionDir();
 
 			if (params.op === "search") {
 				const query = requireValue(params.query, "query", params.op).toLowerCase();
 				const limit = params.limit ?? 10;
-				const searchKey = createHash("sha256").update(JSON.stringify([query, params.all === true])).digest("base64url");
+				const searchKey = shortKey(JSON.stringify([query, params.all === true]));
+				// Projections show replacements and stripped async calls under the original id, so an entry is in
+				// context only when all of its own text is visible there. Posthorse strips stale reminders from input.
+				const seen = (message: MessageLike) => [
+					textOf(message), assistantFailure(message), imageSummary(imagesOf(message.content)), message.summary, message.command, message.output,
+				].filter(Boolean).join("\n").toLowerCase();
+				const visible = new Map((manager.buildSessionProjection().entries as readonly ProjectedEntry[]).flatMap(({ sourceEntry, messages }) =>
+					sourceEntry.id && messages.length ? [[sourceEntry.id, messages.map(seen).join("\n")] as const] : []));
+				const inContext = (entry: EntryLike) => {
+					if (entry.type === "custom_message" && isReminderType(entry.customType)) return false;
+					const own = entry.type === "message" ? entry.message ?? {}
+						: entry.type === "context_edit" ? { content: entry.replacement?.content }
+						: entry.type === "context_window" ? { content: entry.handoff }
+						: { content: entry.content, summary: entry.summary };
+					return visible.get((entry.type === "context_edit" ? entry.targetId : entry.id) ?? "")?.includes(seen(own)) === true;
+				};
+				let skipped = 0;
 				let cursor: [string, 0 | 1, number, string] | undefined;
 				if (params.cursor) {
 					try {
@@ -1375,13 +1467,21 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				};
 
 				if (params.all) {
-					for await (const file of scopedSessionFiles(manager.getSessionDir(), cwd, currentFile, signal)) {
+					const needles = prefilterNeedles(query);
+					const candidates = needles && await filesContaining(dir, needles, signal);
+					const current = currentFile && resolve(currentFile);
+					for await (const file of scopedSessionFiles(dir, cwd, currentFile, signal, { candidates })) {
 						const recent: HistoryHit[][] = [[], []];
 						let anchorHere = false;
-						const source = relative(manager.getSessionDir(), file);
+						const source = relative(dir, file);
+						const inCurrent = resolve(file) === current;
 						for await (const item of sessionWindowEntries(file, signal)) {
 							const hit = historyHit(item, query, source);
 							if (!hit) continue;
+							if (inCurrent && inContext(item.entry)) {
+								skipped++;
+								continue;
+							}
 							const seeking = cursor && !found && hit.priority === cursor[1];
 							if (seeking && anchorHere) continue;
 							if (seeking && hit.id === cursor?.[0]) anchorHere = true;
@@ -1397,7 +1497,13 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				} else {
 					const current = [...windowEntries(manager.getBranch() as EntryLike[])];
 					for (const item of current.reverse()) {
-						addHit(historyHit(item, query));
+						const hit = historyHit(item, query);
+						if (!hit) continue;
+						if (inContext(item.entry)) {
+							skipped++;
+							continue;
+						}
+						addHit(hit);
 						if (hits[0].length > limit) break;
 					}
 				}
@@ -1408,9 +1514,12 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				const footer = (next: string) => `\n[More results; continue with cursor "${next}" and the same query/scope.]`;
 				const reserve = Math.max(0, ...results.map((hit) => footer(cursorFor(hit, hit.text.length)).length));
 				if (reserve >= chars) pageError(policy(ctx), "History entry id is too large for pagination.", params.cursor);
+				const skippedNote = skipped && !params.cursor
+					? `\n[Skipped ${skipped} match${skipped === 1 ? "" : "es"} already in your active context.]`
+					: "";
 				const parts: string[] = [];
 				const spans: Array<{ headerLength: number; length: number }> = [];
-				let available = chars - reserve;
+				let available = chars - reserve - skippedNote.length;
 				let next: string | undefined;
 				for (const hit of results) {
 					const offset = cursor?.[0] === hit.id ? cursor[2] : 0;
@@ -1427,8 +1536,8 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 					if (available <= 0 || parts.length >= limit) break;
 				}
 				const body = parts.length ? parts.join("\n") : `No history matches "${excerpt(params.query!, 200)}".`;
-				const more = next ? footer(next) : "";
-				return pageResult(body + more, [], { kind: "history-search", entries: spans, footerLength: more.length });
+				const tail = `${skippedNote}${next ? footer(next) : ""}`;
+				return pageResult(body + tail, [], { kind: "history-search", entries: spans, footerLength: tail.length, more: next !== undefined, skipped });
 			}
 
 			const id = requireValue(params.id, "id", params.op);
@@ -1436,6 +1545,8 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 			const entryId = separator < 0 ? id : id.slice(0, separator);
 			const fileKey = separator < 0 ? undefined : id.slice(separator + 1);
 			const formatEntry = (item: WindowedEntry, source = "") => {
+				// Session-file reads print the qualified id, so continuations reopen the same file.
+				const shownId = source ? `${item.entry.id}@${shortKey(source)}` : id;
 				const offset = params.offset ?? 0;
 				const imageOffset = params.imageOffset ?? (offset === 0 ? 0 : item.images.length);
 				if (imageOffset > item.images.length) {
@@ -1454,8 +1565,8 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 					offset + chars - (images.length - firstImage) * ESTIMATED_IMAGE_CHARS,
 				);
 				const more = end < item.text.length || imageEnd < item.images.length
-					? `\nMore remains; call history read with id "${id}" and offset ${end}${item.images.length ? ` and imageOffset ${imageEnd}` : ""}.` : "";
-				const header = `${source ? `${source} ` : ""}${item.entry.timestamp ?? ""} [window ${item.windowId}] [${id}] [chars ${offset}-${end} of ${item.text.length}] `;
+					? `\nMore remains; call history read with id "${shownId}" and offset ${end}${item.images.length ? ` and imageOffset ${imageEnd}` : ""}.` : "";
+				const header = `${item.entry.timestamp ?? ""}${sourceTag(source)} [window ${item.windowId}] [${shownId}] [chars ${offset}-${end} of ${item.text.length}] `;
 				return pageResult(
 					`${header}${item.text.slice(offset, end)}${more}`,
 					images,
@@ -1468,13 +1579,17 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 					if (item.entry.id === entryId) return formatEntry(item);
 				}
 			}
-			for await (const file of scopedSessionFiles(manager.getSessionDir(), cwd, currentFile, signal, fileKey)) {
-				const fileSource = relative(manager.getSessionDir(), file);
+			// Bare ids from other sessions reach here through older notes and handoffs.
+			const candidates = fileKey === undefined && /^[\w-]+$/.test(entryId)
+				? await filesContaining(dir, [`"id":"${entryId}"`], signal)
+				: undefined;
+			for await (const file of scopedSessionFiles(dir, cwd, currentFile, signal, { fileKey, candidates })) {
+				const fileSource = relative(dir, file);
 				for await (const item of sessionWindowEntries(file, signal)) {
 					if (item.entry.id === entryId) return formatEntry(item, fileSource);
 				}
 			}
-			throw new Error(`No history entry with id "${id}".`);
+			throw new Error(`No history entry "${id}" in this session or this project's other sessions. Pass an id exactly as history search prints it, such as 1a2f07de, or 1a2f07de@Ab3dE5fG7h from another session; search first when you only have text or a timestamp.`);
 		},
 	});
 };

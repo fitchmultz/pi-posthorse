@@ -7,7 +7,7 @@ export type PosthorseDisplay =
 	| { kind: "notes-list" | "notes-search"; count: number; page?: { offset: number; end: number; total: number } }
 	| { kind: "note-read"; offset: number; end: number; total: number }
 	| { kind: "note-write" | "note-append" | "new-context" }
-	| { kind: "history-search"; entries: Array<{ headerLength: number; length: number }>; footerLength?: number }
+	| { kind: "history-search"; entries: Array<{ headerLength: number; length: number }>; footerLength?: number; more?: boolean; skipped?: number }
 	| { kind: "history-read"; headerLength: number; offset: number; end: number; total: number; imageOffset?: number; imageEnd?: number; imageTotal?: number };
 
 type ToolName = "notes" | "history" | "get_context_remaining" | "new_context";
@@ -62,7 +62,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 			const args = argsOf(rawArgs);
 			const action = name === "notes" || name === "history" ? ` · ${argument(args.op, "op")}` : name === "new_context" ? " · request" : "";
 			const status = context.isError ? " · error" : context.isPartial ? context.executionStarted ? " · running" : " · preparing" : "";
-			const target = args.op === "search" ? ` · “${argument(args.query, "query")}”` : name === "notes" && args.op !== "list" ? ` · ${argument(args.path, "path")}` : name === "history" && args.op === "read" ? ` · ${argument(args.id, "id")}` : "";
+			const target = args.op === "search" ? ` · “${argument(args.query, "query")}”` : name === "notes" && (args.op !== "list" || args.path !== undefined) ? ` · ${argument(args.path, "path")}` : name === "history" && args.op === "read" ? ` · ${argument(args.id, "id")}` : "";
 			const label = `${context.isPartial ? "…" : context.expanded ? "▾" : "▸"} ${titles[name]}${action}${status}${target}`;
 			return {
 				invalidate() {},
@@ -103,7 +103,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 					case "note-read": summary = pageSummary(display); break;
 					case "note-write": summary = args.content === "" ? "Cleared note" : "Saved note"; break;
 					case "note-append": summary = "Appended to note"; break;
-					case "history-search": if (Array.isArray(display.entries) && (!display.entries.length || sections)) summary = `${display.entries.length ? `${n(display.entries.length)} matches` : "No matches"} · ${args.all === true ? "all sessions" : "current branch"}${display.footerLength ? "\nMore results; continue with cursor" : ""}`; break;
+					case "history-search": if (Array.isArray(display.entries) && (!display.entries.length || sections)) summary = `${display.entries.length ? `${n(display.entries.length)} matches` : "No matches"} · ${args.all === true ? "all sessions" : "current branch"}${display.skipped ? ` · ${n(display.skipped)} in context skipped` : ""}${(display.more ?? display.footerLength) ? "\nMore results; continue with cursor" : ""}`; break;
 					case "history-read":
 						summary = pageSummary(display);
 						if (display.imageTotal && display.imageEnd !== undefined) {
