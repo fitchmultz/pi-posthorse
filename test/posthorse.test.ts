@@ -590,13 +590,16 @@ test("history search skips entries already in the active context and says how ma
 		{ type: "message", id: "current", parentId: "window-2", timestamp: "3", message: { role: "user", content: "needle already visible" } },
 		{ type: "context_edit", id: "edit", parentId: "current", timestamp: "4", targetId: "current", replacement: { content: "needle replacement visible" } },
 	];
-	const projected = new Set(["window-2", "current"]);
+	// Pi projects the edited entry under its own id with the replacement text, as the model sees it.
 	const context = {
 		...base,
 		sessionManager: {
 			...base.sessionManager,
 			getBranch: () => branch,
-			buildSessionProjection: () => ({ entries: branch.filter((entry) => projected.has(entry.id)).map((sourceEntry) => ({ sourceEntry, messages: [{}] })) }),
+			buildSessionProjection: () => ({ entries: [
+				{ sourceEntry: branch[1], messages: [{ role: "custom", content: "Context window window-2 starts here.\n\nHandoff from the previous window:\nneedle handoff" }] },
+				{ sourceEntry: branch[2], messages: [{ role: "user", content: "needle replacement visible" }] },
+			] }),
 		},
 	};
 	const result = await run(tools, "history", { op: "search", query: "needle" }, context);
@@ -605,6 +608,10 @@ test("history search skips entries already in the active context and says how ma
 	assert.doesNotMatch(text, /already visible|replacement visible|needle handoff/);
 	assert.match(text, /\n\[Skipped 3 matches already in your active context\.\]$/);
 	assert.deepEqual([result.details?.kind === "history-search" && result.details.skipped, result.details?.kind === "history-search" && result.details.more], [3, false]);
+	// The edited-away original is not in context, so its own text stays searchable.
+	const original = toolText(await run(tools, "history", { op: "search", query: "already visible" }, context));
+	assert.match(original, /\[current\] \[user\] needle already visible/);
+	assert.doesNotMatch(original, /Skipped/);
 });
 
 test("history ranks matching original content before recovery and lookup echoes without hiding either", async () => {
@@ -1144,7 +1151,7 @@ test("notes list and search page every result through the shared budget, includi
 		}
 		for (const op of ["list", "search"]) {
 			const expectedRows = files.map((path, index) => op === "list"
-				? `${path}  194 B  ${modified(index).toISOString().slice(0, 16)}Z`
+				? `${path}  194B  ${modified(index).toISOString().slice(0, 16)}Z`
 				: `${path}:1: needle sample ${"s".repeat(180)}`);
 			const expected = expectedRows.join("\n");
 			let offset = 0;
@@ -1339,7 +1346,7 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 		assert.equal(existsSync(join(repo, "packages", "app", ".pi")), false);
 		await write(worktree);
 		assert.equal(readFileSync(join(main, ".pi", "notes", "state.md"), "utf8"), worktree);
-		assert.match(toolText(await notes(worktree, { op: "list" })), /^state\.md  \d+ B  \d{4}-\d\d-\d\dT\d\d:\d\dZ$/);
+		assert.match(toolText(await notes(worktree, { op: "list" })), /^state\.md  \d+B  \d{4}-\d\d-\d\dT\d\d:\d\dZ$/);
 		writeFileSync(join(worktree, ".git"), "gitdir: ../main/.git/worktrees/wt\n");
 		await write(join(worktree, "packages", "app"));
 		assert.equal(readFileSync(join(main, ".pi", "notes", "state.md"), "utf8"), join(worktree, "packages", "app"));
@@ -1372,7 +1379,7 @@ test("notes list and search follow aliases while skipping cycles and missing tar
 		const { tools, context } = setup();
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: dir });
 
-		assert.match(toolText(await notes({ op: "list" })), /^alias\/state\.md  10 B  \S+\nnested\/state\.md  10 B  \S+$/);
+		assert.match(toolText(await notes({ op: "list" })), /^alias\/state\.md  10B  \S+\nnested\/state\.md  10B  \S+$/);
 		assert.equal(toolText(await notes({ op: "search", query: "checkpoint" })), "alias/state.md:1: checkpoint\nnested/state.md:1: checkpoint");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -1396,15 +1403,15 @@ test("notes list newest first with sizes, read folders as listings, and search o
 		const { tools, context } = setup();
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: dir });
 		assert.equal(toolText(await notes({ op: "list" })), [
-			"task/current.md  14 B  1970-01-01T00:00Z",
-			"task/fixture.sqlite  36 B  1970-01-01T00:00Z",
-			"old.md  10 B  1970-01-01T00:00Z",
+			"task/current.md  14B  1970-01-01T00:00Z",
+			"task/fixture.sqlite  36B  1970-01-01T00:00Z",
+			"old.md  10B  1970-01-01T00:00Z",
 		].join("\n"));
 		const folder = toolText(await notes({ op: "list", path: "task" }));
 		assert.match(folder, /^task\/current\.md .+\ntask\/fixture\.sqlite .+$/);
 		assert.equal(toolText(await notes({ op: "read", path: "task" })), folder, "reading a folder lists it instead of failing");
 		assert.equal(toolText(await notes({ op: "search", query: "needle" })), "task/current.md:1: needle current\nold.md:1: needle old");
-		await assert.rejects(notes({ op: "read", path: "task/fixture.sqlite" }), /binary file \(36 B\); notes read returns text only/);
+		await assert.rejects(notes({ op: "read", path: "task/fixture.sqlite" }), /binary file \(36B\); notes read returns text only/);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

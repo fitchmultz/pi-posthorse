@@ -22,7 +22,7 @@ import {
 import { access, constants, lstat, open, readlink, realpath, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import { estimateTokens, getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { estimateTokens, formatSize, getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerPosthorseMessages, toolCards, type PosthorseDisplay } from "./ui.ts";
@@ -33,7 +33,6 @@ const MAX_HANDOFF_CHARS = 20_000;
 const MAX_PAGE_CHARS = 40_000;
 const MAX_RECOVERY_RECORD_CHARS = 4_000;
 const MAX_RECOVERY_RESULT_CHARS = 1_500;
-const FILE_KEY_CHARS = 10;
 const HANDOFF_OVERHEAD_RESERVE = 1_000;
 const PAGE_MARGIN_TOKENS = 1_000;
 const MIN_PAGE_CHARS = 1_000;
@@ -87,6 +86,7 @@ type MessageLike = {
 	stopReason?: string;
 	errorMessage?: string;
 	content?: unknown;
+	summary?: string;
 	toolName?: string;
 	namespace?: string;
 	toolCallId?: string;
@@ -300,12 +300,6 @@ function notesRoot(cwd: string): string {
 	}
 }
 
-function formatSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 ** 2) return `${Math.round(bytes / 1024)} KB`;
-	return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-}
-
 function requireValue(value: string | undefined, name: string, op: string): string {
 	if (value === undefined || value === "") throw new Error(`"${name}" is required for op "${op}".`);
 	return value;
@@ -361,9 +355,9 @@ function isRecoveryCall(part: unknown): boolean {
 	return block?.type === "toolCall" && isRecoveryTool(block.name);
 }
 
-/** Hits print FILE_KEY_CHARS of this digest; earlier releases printed all of it, and both still match. */
-function historyFileKey(source: string): string {
-	return createHash("sha256").update(source).digest("base64url");
+/** Ten base64url characters of SHA-256; 0.6 file keys were the whole digest, which starts with these. */
+function shortKey(text: string): string {
+	return createHash("sha256").update(text).digest("base64url").slice(0, 10);
 }
 
 /** Nested session files are subagent runs, whose user-role input came from a parent agent. */
@@ -417,7 +411,7 @@ function historyHit(item: WindowedEntry, query: string, source = ""): HistoryHit
 			matchIndex = text.toLowerCase().indexOf(query);
 		}
 	}
-	const id = source ? `${entry.id}@${historyFileKey(source).slice(0, FILE_KEY_CHARS)}` : entry.id!;
+	const id = source ? `${entry.id}@${shortKey(source)}` : entry.id!;
 	const header = `${entry.timestamp ?? ""}${sourceTag(source)} [window ${item.windowId}] [${id}] `;
 	return {
 		id,
@@ -486,11 +480,11 @@ function rawFilterable(query: string): boolean {
 		!/^\d+ ?i?m?a?g?e?s?$/.test(query) && !LABEL_ONLY_PHRASES.some((phrase) => phrase.includes(query));
 }
 
-/** Session files whose raw JSONL contains `needle`, via Pi's managed ripgrep or PATH; undefined means scan every file. */
-async function filesContaining(dir: string, needle: string, ignoreCase: boolean, signal?: AbortSignal): Promise<Set<string> | undefined> {
+/** Session files whose raw JSONL contains `needle` in any case, via Pi's managed ripgrep or PATH; undefined means scan every file. */
+async function filesContaining(dir: string, needle: string, signal?: AbortSignal): Promise<Set<string> | undefined> {
 	const args = [
-		"--files-with-matches", "--fixed-strings", "--no-ignore", "--hidden", "--no-messages", "--glob", "*.jsonl",
-		...(ignoreCase ? ["--ignore-case"] : []), "--regexp", needle, dir,
+		"--files-with-matches", "--fixed-strings", "--ignore-case", "--no-ignore", "--hidden", "--no-messages",
+		"--glob", "*.jsonl", "--regexp", needle, dir,
 	];
 	for (const rg of [join(getAgentDir(), "bin", "rg"), "rg"]) {
 		try {
@@ -571,7 +565,7 @@ async function* scopedSessionFiles(
 	};
 	const selected = files
 		.filter((file) => (!candidates || candidates.has(resolve(file))) &&
-			(fileKey === undefined || (fileKey.length >= FILE_KEY_CHARS && historyFileKey(relative(dir, file)).startsWith(fileKey))))
+			(fileKey === undefined || fileKey.startsWith(shortKey(relative(dir, file)))))
 		.map((file) => ({ file, mtime: statSync(file).mtimeMs }))
 		.sort((a, b) => b.mtime - a.mtime);
 	for (const { file } of selected) {
@@ -645,7 +639,7 @@ function formatRecoveryRecord(record: RecoveryRecord, limit: number): string {
 
 /** Owner inputs keep a one-line preview: they are direct intent, and most are short. */
 function indexLine(record: RecoveryRecord): string {
-	const header = `[${record.label} | ${record.timestamp} | entry ${record.id}]`;
+	const header = formatRecoveryRecord(record, 0);
 	if (record.kind !== "owner") return header;
 	const preview = record.text.replace(/\s+/g, " ").trim();
 	return `${header} ${preview.length > 120 ? `${preview.slice(0, 119)}…` : preview}`;
@@ -1432,10 +1426,13 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 			if (params.op === "search") {
 				const query = requireValue(params.query, "query", params.op).toLowerCase();
 				const limit = params.limit ?? 10;
-				const searchKey = createHash("sha256").update(JSON.stringify([query, params.all === true])).digest("base64url").slice(0, FILE_KEY_CHARS);
-				const projected = new Set(manager.buildSessionProjection().entries.flatMap(({ sourceEntry, messages }) =>
-					messages.length && sourceEntry.id ? [sourceEntry.id] : []));
-				const inContext = (entry: EntryLike) => projected.has((entry.type === "context_edit" ? entry.targetId : entry.id) ?? "");
+				const searchKey = shortKey(JSON.stringify([query, params.all === true]));
+				// Projections show replacements and stripped async calls under the original id, so compare what the model sees.
+				const visible = new Map((manager.buildSessionProjection().entries as readonly ProjectedEntry[]).flatMap(({ sourceEntry, messages }) =>
+					sourceEntry.id && messages.length
+						? [[sourceEntry.id, messages.map((message) => [textOf(message), message.summary, message.command, message.output].filter(Boolean).join("\n")).join("\n").toLowerCase()] as const]
+						: []));
+				const inContext = (entry: EntryLike) => visible.get((entry.type === "context_edit" ? entry.targetId : entry.id) ?? "")?.includes(query) === true;
 				let skipped = 0;
 				let cursor: [string, 0 | 1, number, string] | undefined;
 				if (params.cursor) {
@@ -1460,7 +1457,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				};
 
 				if (params.all) {
-					const candidates = rawFilterable(query) ? await filesContaining(dir, query, true, signal) : undefined;
+					const candidates = rawFilterable(query) ? await filesContaining(dir, query, signal) : undefined;
 					const current = currentFile && resolve(currentFile);
 					for await (const file of scopedSessionFiles(dir, cwd, currentFile, signal, { candidates })) {
 						const recent: HistoryHit[][] = [[], []];
@@ -1538,7 +1535,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 			const fileKey = separator < 0 ? undefined : id.slice(separator + 1);
 			const formatEntry = (item: WindowedEntry, source = "") => {
 				// Session-file reads print the qualified id, so continuations reopen the same file.
-				const shownId = source ? `${item.entry.id}@${historyFileKey(source).slice(0, FILE_KEY_CHARS)}` : id;
+				const shownId = source ? `${item.entry.id}@${shortKey(source)}` : id;
 				const offset = params.offset ?? 0;
 				const imageOffset = params.imageOffset ?? (offset === 0 ? 0 : item.images.length);
 				if (imageOffset > item.images.length) {
@@ -1573,7 +1570,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 			}
 			// Bare ids from other sessions reach here through older notes and handoffs.
 			const candidates = fileKey === undefined && /^[\w-]+$/.test(entryId)
-				? await filesContaining(dir, `"id":"${entryId}"`, false, signal)
+				? await filesContaining(dir, `"id":"${entryId}"`, signal)
 				: undefined;
 			for await (const file of scopedSessionFiles(dir, cwd, currentFile, signal, { fileKey, candidates })) {
 				const fileSource = relative(dir, file);
