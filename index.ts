@@ -1430,7 +1430,9 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				const searchKey = shortKey(JSON.stringify([query, params.all === true]));
 				// Projections show replacements and stripped async calls under the original id, so an entry is in
 				// context only when all of its own text is visible there. Posthorse strips stale reminders from input.
-				const seen = (message: MessageLike) => [textOf(message), message.summary, message.command, message.output].filter(Boolean).join("\n").toLowerCase();
+				const seen = (message: MessageLike) => [
+					textOf(message), assistantFailure(message), imageSummary(imagesOf(message.content)), message.summary, message.command, message.output,
+				].filter(Boolean).join("\n").toLowerCase();
 				const visible = new Map((manager.buildSessionProjection().entries as readonly ProjectedEntry[]).flatMap(({ sourceEntry, messages }) =>
 					sourceEntry.id && messages.length ? [[sourceEntry.id, messages.map(seen).join("\n")] as const] : []));
 				const inContext = (entry: EntryLike) => {

@@ -614,6 +614,17 @@ test("history search skips entries already in the active context and says how ma
 	assert.doesNotMatch(text, /replacement visible|needle handoff/);
 	assert.match(text, /\n\[Skipped 2 matches already in your active context\.\]$/);
 	assert.deepEqual([result.details?.kind === "history-search" && result.details.skipped, result.details?.kind === "history-search" && result.details.more], [2, false]);
+
+	// An edit that keeps the text but drops an image leaves the image recoverable.
+	const shot = { type: "message", id: "shot", parentId: null, timestamp: "6", message: { role: "user", content: [{ type: "text", text: "keep this text" }, { type: "image", data: "AA==", mimeType: "image/png" }] } };
+	const trimmed = { ...context, sessionManager: {
+		...context.sessionManager,
+		getBranch: () => [shot, { type: "context_edit", id: "shot-edit", parentId: "shot", timestamp: "7", targetId: "shot", replacement: { content: "keep this text" } }],
+		buildSessionProjection: () => ({ entries: [{ sourceEntry: shot, messages: [{ role: "user", content: "keep this text" }] }] }),
+	} };
+	const image = toolText(await run(tools, "history", { op: "search", query: "image/png" }, trimmed));
+	assert.match(image, /\[shot\] \[user\] keep this text\n\[1 image: image\/png\]/);
+	assert.doesNotMatch(image, /Skipped/);
 });
 
 test("history ranks matching original content before recovery and lookup echoes without hiding either", async () => {
