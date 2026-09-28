@@ -6,7 +6,7 @@
 
 - `history search` skips entries already in the model's active context and reports how many it skipped, instead of repeating what the model can already see.
 - All-session history hits carry a 10-character file key instead of the session file path and a 43-character hash, and hits from nested subagent runs are tagged `[subagent]`. Full-length keys from earlier releases still read. Reads that resolve a bare ID in another session file print its qualified ID.
-- All-session search and bare-ID history reads use ripgrep (Pi's managed copy, then `PATH`) to skip session files that cannot match. Without ripgrep, and for queries that could match escaped or normalized-only text (quotes, backslashes, brackets, parentheses, braces, colons, `$`, edge spaces, image counts, or label phrases such as "No handoff"), every file is scanned as before.
+- All-session search and bare-ID history reads use ripgrep (Pi's managed copy, then `PATH`) to skip session files that cannot match. Without ripgrep, and for queries that could match escaped or normalized-only text (quotes, backslashes, brackets, parentheses, braces, colons, commas, `$`, edge spaces, image counts, or label phrases such as "Call ID" and "No handoff"), every file is scanned as before.
 - `notes list` shows notes newest first with size and modification time, and takes an optional folder `path`. `notes read` of a folder returns its listing.
 - Notes and history pages hold up to 40,000 characters, up from 20,000, when the window has room. Handoffs stay capped at 20,000.
 - Automatic recovery records cap each tool-result excerpt at 1,500 characters and index the remaining current-window inputs by entry ID, with a one-line preview for owner inputs, instead of quoting them until the record fills.

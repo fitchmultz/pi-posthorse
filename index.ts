@@ -474,16 +474,16 @@ async function isBinaryFile(path: string): Promise<boolean> {
 }
 
 const execFileAsync = promisify(execFile);
-const LABEL_ONLY_PHRASES = ["no handoff", "excluded from model context by pi", "images", "unknown type"];
+const LABEL_ONLY_PHRASES = ["call id", "execution arguments", "no handoff", "excluded from model context by pi", "images", "unknown type"];
 
 /**
  * Whether every normalized match also appears in raw JSONL, so a ripgrep prefilter cannot drop it.
  * Raw JSONL escapes quotes, backslashes, and control characters; flattenEntry adds brackets, parentheses,
- * braces, colons, `$`, spaces beside those labels, and a few label-only phrases such as image counts.
+ * braces, colons, commas, `$`, spaces beside those labels, image counts, and a few label-only phrases.
  */
 function rawFilterable(query: string): boolean {
-	return !/["\\[\](){}:$\p{Cc}]/u.test(query) && query.trim() === query &&
-		!/^\d+ images?/.test(query) && !LABEL_ONLY_PHRASES.some((phrase) => phrase.includes(query));
+	return !/["\\[\](){}:,$\p{Cc}]/u.test(query) && query.trim() === query &&
+		!/^\d+ ?i?m?a?g?e?s?$/.test(query) && !LABEL_ONLY_PHRASES.some((phrase) => phrase.includes(query));
 }
 
 /** Session files whose raw JSONL contains `needle`, via Pi's managed ripgrep or PATH; undefined means scan every file. */

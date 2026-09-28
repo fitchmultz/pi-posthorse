@@ -1683,6 +1683,49 @@ test("all-session search finds the same entries without ripgrep, and queries raw
 	}
 });
 
+test("all-session search still finds text that exists only in normalized entries", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-normalized-only-"));
+	try {
+		const image = (mimeType?: string) => ({ type: "image", data: "AA==", ...(mimeType ? { mimeType } : {}) });
+		// One entry per flattenEntry branch, so every label it adds is exercised.
+		const entries = [
+			{ type: "message", id: "images", message: { role: "user", content: [{ type: "text", text: "two shots" }, image("image/png"), image("image/jpeg"), image()] } },
+			{ type: "message", id: "call", message: { role: "assistant", content: [{ type: "toolCall", id: "toolu_1", name: "record", namespace: "lab", arguments: { target: "a" }, executionArguments: { target: "b" } }], stopReason: "error", errorMessage: "quota hit" } },
+			{ type: "message", id: "result", message: { role: "toolResult", toolName: "record", namespace: "lab", toolCallId: "toolu_1", content: [{ type: "text", text: "done" }, image("image/png")] } },
+			{ type: "message", id: "shell", message: { role: "bashExecution", command: "ls", output: "notes.md" } },
+			{ type: "message", id: "hidden", message: { role: "bashExecution", command: "cat secret", output: "x", excludeFromContext: true } },
+			{ type: "compaction", id: "summary", summary: "summarized" },
+			{ type: "branch_summary", id: "branch", summary: "branched" },
+			{ type: "custom_message", id: "custom", customType: "intercom_message", content: [{ type: "text", text: "ping" }, image("image/png")] },
+			{ type: "context_window", id: "window" },
+			{ type: "context_window", id: "handed", handoff: "carry on" },
+			{ type: "context_edit", id: "edit", targetId: "result", replacement: { content: "trimmed" } },
+		];
+		for (const entry of entries) writeArchive(join(dir, `${entry.id}.jsonl`), JSON.stringify({ ...entry, parentId: null, timestamp: "t" }));
+		const { tools, context: base } = setup();
+		const context = { ...base, sessionManager: { ...base.sessionManager, getSessionDir: () => dir } };
+		const missed: string[] = [];
+		for (const entry of entries) {
+			const id = archivedId(entry.id, `${entry.id}.jsonl`);
+			const read = toolText(await run(tools, "history", { op: "read", id }, context));
+			const normalized = read.slice(read.indexOf("] ", read.indexOf("[chars ")) + 2).toLowerCase();
+			const raw = JSON.stringify(entry).toLowerCase();
+			const words = [...normalized.matchAll(/[\p{L}\p{N}_./-]+/gu)];
+			for (let first = 0; first < words.length; first++) {
+				for (let last = first; last < Math.min(words.length, first + 3); last++) {
+					const query = normalized.slice(words[first].index, words[last].index + words[last][0].length);
+					if (raw.includes(query)) continue;
+					const hits = toolText(await run(tools, "history", { op: "search", query, all: true, limit: 50 }, context));
+					if (!hits.includes(`[${id}]`)) missed.push(`${entry.id}: ${JSON.stringify(query)}`);
+				}
+			}
+		}
+		assert.deepEqual(missed, [], "a ripgrep prefilter must never drop a normalized match");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("session search and archived reads preserve modification-time ordering including ties", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-mtime-test-"));
 	try {
