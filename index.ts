@@ -474,8 +474,17 @@ async function isBinaryFile(path: string): Promise<boolean> {
 }
 
 const execFileAsync = promisify(execFile);
-/** Raw JSONL escapes quotes, backslashes, and control characters; display labels add brackets, braces, colons, and `$`. */
-const UNFILTERABLE_QUERY = /["\\[\]{}:$\p{Cc}]/u;
+const LABEL_ONLY_PHRASES = ["no handoff", "excluded from model context by pi", "images", "unknown type"];
+
+/**
+ * Whether every normalized match also appears in raw JSONL, so a ripgrep prefilter cannot drop it.
+ * Raw JSONL escapes quotes, backslashes, and control characters; flattenEntry adds brackets, parentheses,
+ * braces, colons, `$`, spaces beside those labels, and a few label-only phrases such as image counts.
+ */
+function rawFilterable(query: string): boolean {
+	return !/["\\[\](){}:$\p{Cc}]/u.test(query) && query.trim() === query &&
+		!/^\d+ images?/.test(query) && !LABEL_ONLY_PHRASES.some((phrase) => phrase.includes(query));
+}
 
 /** Session files whose raw JSONL contains `needle`, via Pi's managed ripgrep or PATH; undefined means scan every file. */
 async function filesContaining(dir: string, needle: string, ignoreCase: boolean, signal?: AbortSignal): Promise<Set<string> | undefined> {
@@ -1451,7 +1460,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				};
 
 				if (params.all) {
-					const candidates = UNFILTERABLE_QUERY.test(query) ? undefined : await filesContaining(dir, query, true, signal);
+					const candidates = rawFilterable(query) ? await filesContaining(dir, query, true, signal) : undefined;
 					const current = currentFile && resolve(currentFile);
 					for await (const file of scopedSessionFiles(dir, cwd, currentFile, signal, { candidates })) {
 						const recent: HistoryHit[][] = [[], []];

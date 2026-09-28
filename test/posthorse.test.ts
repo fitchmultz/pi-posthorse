@@ -1651,7 +1651,7 @@ test("all-session history cursors fit the declared limit for nested session file
 	}
 });
 
-test("all-session search finds the same entries without ripgrep, and quoted queries skip its prefilter", async () => {
+test("all-session search finds the same entries without ripgrep, and queries raw JSONL cannot show skip its prefilter", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-prefilter-"));
 	try {
 		const archive = (name: string, content: string) =>
@@ -1659,17 +1659,20 @@ test("all-session search finds the same entries without ripgrep, and quoted quer
 		archive("quoted", 'say "needle" twice');
 		archive("plain", "a plain needle");
 		archive("other", "nothing here");
+		writeArchive(join(dir, "bare.jsonl"), JSON.stringify({ type: "context_window", id: "bare", parentId: null }));
 		const { tools, context: base } = setup();
 		const context = { ...base, sessionManager: { ...base.sessionManager, getSessionDir: () => dir } };
 		const hits = async (query: string) =>
-			[...toolText(await run(tools, "history", { op: "search", query, all: true }, context)).matchAll(/\[window initial\] \[([^@\]]+)@/g)].map((match) => match[1]).sort();
-		// Session JSONL stores the quotes escaped, so a raw-text prefilter would miss this match.
-		const expected = [["plain", "quoted"], ["quoted"]];
-		assert.deepEqual([await hits("needle"), await hits('"needle"')], expected);
+			[...toolText(await run(tools, "history", { op: "search", query, all: true }, context)).matchAll(/\[window \S+\] \[([^@\]]+)@/g)].map((match) => match[1]).sort();
+		// Session JSONL stores quotes escaped, and "No handoff" exists only in the rendered entry,
+		// so a raw-text prefilter would drop both files.
+		const queries = ["needle", '"needle"', "No handoff"];
+		const expected = [["plain", "quoted"], ["quoted"], ["bare"]];
+		assert.deepEqual(await Promise.all(queries.map(hits)), expected);
 		const { PATH, PI_CODING_AGENT_DIR } = process.env;
 		Object.assign(process.env, { PATH: "", PI_CODING_AGENT_DIR: dir });
 		try {
-			assert.deepEqual([await hits("needle"), await hits('"needle"')], expected, "without ripgrep every session file is scanned");
+			assert.deepEqual(await Promise.all(queries.map(hits)), expected, "without ripgrep every session file is scanned");
 		} finally {
 			Object.assign(process.env, { PATH });
 			if (PI_CODING_AGENT_DIR === undefined) delete process.env.PI_CODING_AGENT_DIR;
