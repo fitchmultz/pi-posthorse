@@ -123,11 +123,15 @@ describe("Posthorse inside the Pi fork", () => {
 		const harness = await createHarness({ extensionFactories: [posthorse] });
 		harnesses.push(harness);
 		const results: string[] = [];
+		const search = (query: string, limit: number) => fauxAssistantMessage(fauxToolCall("history", { op: "search", query, limit }), { stopReason: "toolUse" });
 		harness.setResponses([
-			fauxAssistantMessage(fauxToolCall("history", { op: "search", query: "needle", limit: 1 }), { stopReason: "toolUse" }),
+			// Search skips the active context, so the fresh window recovers the request and this first call.
+			search("needle", 1),
+			fauxAssistantMessage(fauxToolCall("new_context", {}), { stopReason: "toolUse" }),
+			search("needle", 1),
 			(context) => {
 				results.push(getMessageText(context.messages.at(-1)));
-				return fauxAssistantMessage(fauxToolCall("history", { op: "search", query: '"limit":1', limit: 5 }), { stopReason: "toolUse" });
+				return search('"limit":1', 5);
 			},
 			(context) => {
 				results.push(getMessageText(context.messages.at(-1)));
@@ -362,7 +366,7 @@ describe("Posthorse inside the Pi fork", () => {
 		harnesses.push(harness);
 		mkdirSync(join(harness.tempDir, ".pi", "notes"), { recursive: true });
 		for (const path of ["current.md", "decisions.md", "requests.md"]) {
-			writeFileSync(join(harness.tempDir, ".pi", "notes", path), "n".repeat(25_000));
+			writeFileSync(join(harness.tempDir, ".pi", "notes", path), "n".repeat(45_000));
 		}
 		let startingTokens = 0;
 		let afterPages = 0;
@@ -391,7 +395,7 @@ describe("Posthorse inside the Pi fork", () => {
 		await harness.session.prompt("p".repeat(300_000));
 		expect(startingTokens).toBeGreaterThan(75_000);
 		expect(afterPages).toBeLessThan(100_000);
-		expect(resultTexts.some((result) => result.includes("continue with offset 20000"))).toBe(true);
+		expect(resultTexts.some((result) => result.includes("continue with offset 40000"))).toBe(true);
 		expect(resultTexts.some((result) => result.includes("retry with offset 40000"))).toBe(true);
 	});
 

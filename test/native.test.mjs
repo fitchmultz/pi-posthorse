@@ -262,8 +262,12 @@ for (const knownNativeInput of [false, true]) test(`recovery and history retain 
 		assert.ok(resultText.includes(`record (namespace: "${call.namespace}")`), resultText);
 		assert.ok(resultText.includes(`Call ID: ${call.id}`), resultText);
 	}
-	assert.ok(reads.at(-2).includes(`[${callEntries[0].id}]`), reads.at(-2));
-	assert.ok(reads.at(-1).includes(`[${callEntries[1].id}]`), reads.at(-1));
+	// Unproven receipts keep their calls in the fresh window; search lists only entries the model does not already have.
+	const active = new Set(h.sessionManager.buildSessionProjection().entries.map((entry) => entry.sourceEntry.id));
+	assert.equal(callEntries.some((entry) => active.has(entry.id)), !knownNativeInput);
+	for (const [search, entry] of [[reads.at(-2), callEntries[0]], [reads.at(-1), callEntries[1]]]) {
+		assert.equal(search.includes(`[${entry.id}]`), !active.has(entry.id), search);
+	}
 	assert.equal(executed.length, 2, "recovery does not execute the operations again");
 });
 
@@ -654,7 +658,7 @@ for (const enabled of [false, true]) test(`native mixed searches/list/reads stay
 	assert.ok(after < (enabled ? 83_617 : 100_000), JSON.stringify({ before, after, enabled }));
 	assert.equal(results.length, 4, "bounded results should not force avoidable rollover");
 	assert.ok(results.some((result) => result.isError));
-	for (const result of results) assert.ok(textOf(result).length <= 20_000);
+	for (const result of results) assert.ok(textOf(result).length <= 40_000);
 	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "context_window").length, 1);
 	t.diagnostic(JSON.stringify({ before, after, enabled }));
 });
@@ -678,10 +682,61 @@ test("native enabled-to-disabled policy removes the active reminder but keeps it
 	assert.deepEqual(reminders(), [original]);
 });
 
+test("native checkpoint reminder reaches the model after Pi compacts inside a rollover window", async (t) => {
+	const h = await fixture(t, { seed(manager) {
+		manager.appendMessage({ role: "user", content: "first window", timestamp: 1 });
+		manager.appendMessage(fauxAssistantMessage("ok"));
+		manager.appendContextWindow("prior handoff", 1000, []);
+		manager.appendMessage({ role: "user", content: "second window, summarized", timestamp: 2 });
+		manager.appendMessage(fauxAssistantMessage("ok"));
+		const kept = manager.appendMessage({ role: "user", content: "second window, kept", timestamp: 3 });
+		manager.appendMessage(fauxAssistantMessage("ok"));
+		manager.appendCompaction("Pi summary of the window's start", kept, 5000);
+	} });
+	let input;
+	h.faux.setResponses([
+		fauxAssistantMessage("First response in reminder band"),
+		(ctx) => {
+			input = JSON.stringify(ctx.messages);
+			return fauxAssistantMessage("Checkpoint reminder received");
+		},
+	]);
+	await h.session.prompt("p".repeat(305_000));
+	assert.doesNotMatch(input ?? "", /Context window \S+ starts here/, "the compaction removed the window marker");
+	assert.match(input ?? "", /Checkpoint now:/);
+});
+
+test("native history search skips entries still in the active context", async (t) => {
+	const h = await fixture(t, { seed(manager) {
+		manager.appendMessage({ role: "user", content: "IN_CONTEXT_NEEDLE before rollover", timestamp: 1 });
+		manager.appendMessage(fauxAssistantMessage("ok"));
+		manager.appendContextWindow("carry on", 1000, []);
+		manager.appendMessage({ role: "user", content: "IN_CONTEXT_NEEDLE after rollover", timestamp: 2 });
+		manager.appendMessage(fauxAssistantMessage("ok"));
+	} });
+	h.faux.setResponses([
+		fauxAssistantMessage([
+			fauxToolCall("history", { op: "search", query: "in_context_needle" }),
+			fauxToolCall("history", { op: "search", query: "in_context_needle", all: true }),
+		], { stopReason: "toolUse" }),
+		fauxAssistantMessage("done"),
+	]);
+	await h.session.prompt("Look back.");
+	const results = h.sessionManager.getBranch().filter((entry) => entry.type === "message" && entry.message.toolName === "history").map((entry) => textOf(entry.message));
+	assert.equal(results.length, 2);
+	for (const text of results) {
+		assert.match(text, /\[user\] IN_CONTEXT_NEEDLE before rollover/);
+		assert.doesNotMatch(text, /IN_CONTEXT_NEEDLE after rollover/);
+		assert.match(text, /\[Skipped \d+ match(es)? already in your active context\.\]/);
+	}
+});
+
 for (const all of [false, true]) test(`native search cursors finish despite appended lookup echoes (all=${all})`, async (t) => {
 	const h = await fixture(t, { seed(manager) {
 		for (let index = 0; index < 9; index++) manager.appendMessage({ role: "user", content: `CURSOR-NEEDLE original ${index}`, timestamp: index });
 		manager.appendMessage({ role: "toolResult", toolName: "notes", toolCallId: "prior", content: [{ type: "text", text: "CURSOR-NEEDLE prior recovery echo" }], isError: false, timestamp: 10 });
+		// Earlier-window entries are what search recovers; this window's lookup echoes stay in context.
+		manager.appendContextWindow("Paging fixture", null);
 	} });
 	const originals = h.sessionManager.getBranch().filter((entry) => entry.type === "message" && entry.message.role === "user").map((entry) => entry.id).reverse();
 	const priorEcho = h.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "toolResult").id;
@@ -719,7 +774,7 @@ for (const all of [false, true]) test(`native search cursors finish despite appe
 	assert.deepEqual(nativeIds.slice(0, originals.length), originals, "original entries keep order and appear exactly once");
 	assert.ok(returned.every((id) => id.includes("@") === all), "all-session references identify their source file");
 	assert.equal(new Set(returned).size, returned.length, "lookup echoes cannot repeat previously returned entries");
-	assert.ok(returned.length > originals.length, "prior and new lookup echoes remain searchable");
+	assert.ok(returned.length > originals.length, "the earlier window's recovery echo remains searchable");
 	assert.ok(nativeIds.includes(priorEcho), "the original recovery echo remains retrievable too");
 	t.diagnostic(JSON.stringify({ all, originals: originals.length, returned: returned.length }));
 });

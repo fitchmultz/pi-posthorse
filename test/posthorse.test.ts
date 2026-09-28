@@ -29,13 +29,16 @@ type TestContext = {
 	sessionManager: {
 		getBranch(): Record<string, unknown>[];
 		getSessionDir(): string;
-		buildSessionProjection?(): { entries: Array<{ sourceEntry: Record<string, unknown>; messages: unknown[] }> };
+		buildSessionProjection(): { entries: Array<{ sourceEntry: Record<string, unknown>; messages: unknown[] }> };
 	};
 	getContextUsage(): { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
 	getCompactionSettings(): { enabled: boolean; reserveTokens: number };
 	getSystemPrompt(): string;
 	newContext(options?: { handoff?: string }): void;
 };
+
+/** Fixture branches put nothing in the model's active context unless a test projects entries. */
+const emptyProjection = () => ({ entries: [] });
 
 function setup() {
 	const handlers = new Map<string, Handler>();
@@ -67,7 +70,7 @@ function setup() {
 	const context: TestContext = {
 		cwd: process.cwd(),
 		model: { contextWindow: 100_000 },
-		sessionManager: { getBranch: () => [], getSessionDir: () => tmpdir(), buildSessionProjection: () => ({ entries: [] }) },
+		sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => tmpdir() },
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
 		getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }),
 		getSystemPrompt: () => "You are a test assistant.",
@@ -80,8 +83,10 @@ function toolText(result: { content: Array<{ text?: string }> }): string {
 	return result.content.map((part) => part.text ?? "").join("\n");
 }
 
-function archivedId(id: string, source: string): string {
-	return `${id}@${createHash("sha256").update(source).digest("base64url")}`;
+/** The file-qualified id search prints; 0.6 printed the whole digest (`legacy`), which still reads. */
+function archivedId(id: string, source: string, legacy = false): string {
+	const digest = createHash("sha256").update(source).digest("base64url");
+	return `${id}@${legacy ? digest : digest.slice(0, 10)}`;
 }
 
 function writeArchive(file: string, content: string) {
@@ -172,6 +177,9 @@ test("automatic recovery keeps owner anchors and visible coordination without st
 			content: `coordination ${index} ${"x".repeat(3_500)}`,
 			display: true,
 		});
+		if (index === 3) {
+			branch.push({ type: "message", id: "owner-middle", timestamp: "2026-09-02T10:13:30Z", message: { role: "user", content: "Do not touch the billing tables\n\nuntil I confirm" } });
+		}
 	}
 	branch.push(
 		{
@@ -199,7 +207,11 @@ test("automatic recovery keeps owner anchors and visible coordination without st
 	assert.match(handoff, /OWNER APPROVED SHIP/);
 	assert.match(handoff, /LATEST COORDINATION CORRECTION/);
 	assert.match(handoff, /not direct owner input/);
-	assert.match(handoff, /Omitted \d+ current-window input/);
+	// Inputs outside the fixed anchors are indexed by entry; owner inputs keep a one-line preview.
+	assert.match(handoff, /Other current-window inputs, oldest first \(recover with history read\):/);
+	for (let index = 0; index < 8; index++) assert.match(handoff, new RegExp(`\\| entry coord-${index}\\]`));
+	assert.doesNotMatch(handoff, /coordination \d x/);
+	assert.match(handoff, /\[owner input \| 2026-09-02T10:13:30Z \| entry owner-middle\] Do not touch the billing tables until I confirm/);
 	assert.ok(handoff.indexOf("entry owner-start") < handoff.indexOf("entry owner-answer"));
 	assert.ok(handoff.indexOf("entry owner-answer") < handoff.indexOf("entry latest-correction"));
 	assert.ok(handoff.indexOf("entry latest-correction") < handoff.indexOf("older checkpoint"));
@@ -236,7 +248,7 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 		const context: TestContext = {
 			cwd: dir,
 			model: { contextWindow },
-			sessionManager: { getBranch: () => { branchReads++; return branch; }, getSessionDir: () => dir },
+			sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => { branchReads++; return branch; }, getSessionDir: () => dir },
 			getContextUsage: () => ({ tokens, contextWindow, percent: (tokens / contextWindow) * 100 }),
 			getCompactionSettings: () => ({ enabled: true, reserveTokens: reserve }),
 			getSystemPrompt: () => "You are a test assistant.",
@@ -259,7 +271,7 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1);
 		assert.match(messages[0].content, /Checkpoint now/);
-		assert.match(messages[0].content, /call new_context now/);
+		assert.match(messages[0].content, /current-state note in place .*then call new_context\.$/);
 		assert.deepEqual(messages[0].details, { windowId: "window-2", contextWindow, reserveTokens: reserve });
 		assert.equal(branchReads, 1, "the first token in the reminder band checks the current window");
 		branch.push({ type: "custom_message", customType: "posthorse-reminder", details: messages[0].details });
@@ -305,7 +317,7 @@ test("guidance uses native sections and preserves earlier full or custom prompts
 	assert.equal(handler({ systemPrompt: "Custom instructions", systemPromptOptions: options }, context), undefined);
 	assert.equal(sections.other, "Keep this policy");
 	assert.match(sections.posthorse, /Context self-management \(Posthorse\)/);
-	assert.match(sections.posthorse, /save goal\/progress\/decisions\/next steps/);
+	assert.match(sections.posthorse, /\(goal, progress, decisions, next steps\), then call new_context/);
 	assert.match(sections.posthorse, /verify live state/);
 
 	const result = handler({ systemPrompt: "Forced instructions", systemPromptOptions: { sections: {}, forceSystemPrompt: "Forced instructions" } }, context) as { systemPrompt: string };
@@ -336,7 +348,7 @@ test("disabling compaction filters persisted reminders without changing history 
 	let enabled = true;
 	const reminder = { role: "custom", customType: "posthorse-reminder", content: "Checkpoint now", details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 } };
 	const branch = [{ ...reminder, type: "custom_message", id: "reminder" }];
-	const context = { ...usageContext(base, 100_000, 76_000), getCompactionSettings: () => ({ enabled, reserveTokens: 16_384 }), sessionManager: { getBranch: () => branch, getSessionDir: () => tmpdir() } };
+	const context = { ...usageContext(base, 100_000, 76_000), getCompactionSettings: () => ({ enabled, reserveTokens: 16_384 }), sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => tmpdir() } };
 	const owner = { role: "user", content: "continue" };
 	assert.equal(handlers.get("context")!({ messages: [owner, reminder] }, context), undefined);
 	enabled = false;
@@ -418,6 +430,7 @@ test("history reads current entries without opening every archived session", asy
 		const context: TestContext = {
 			...base,
 			sessionManager: {
+				buildSessionProjection: emptyProjection,
 				getBranch: () => [
 					{ type: "message", id: "current", parentId: null, timestamp: "1", message: { role: "user", content: "keep me" } },
 				],
@@ -457,6 +470,7 @@ test("all-session history recurses and returns newest matching entries first", a
 		const context: TestContext = {
 			...base,
 			sessionManager: {
+				buildSessionProjection: emptyProjection,
 				getBranch: () => {
 					assert.ok(mayReadCurrentBranch, "all-session search must not normalize the current branch");
 					return [];
@@ -472,7 +486,8 @@ test("all-session history recurses and returns newest matching entries first", a
 			context,
 		);
 		const text = toolText(search);
-		assert.match(text, /^subagents\/new\.jsonl .+nested newest/s);
+		assert.match(text, /^4 \[subagent\] \[window nested-window\] \[nested-new@[\w-]{10}\] .+nested newest/s);
+		assert.doesNotMatch(text, /new\.jsonl/);
 		assert.ok(text.includes(`[${archivedId("nested-new", "subagents/new.jsonl")}]`));
 		assert.ok(text.indexOf("nested-new") < text.indexOf("nested-old"));
 		assert.ok(!text.includes(`[${archivedId("old", "old.jsonl")}]`));
@@ -484,7 +499,9 @@ test("all-session history recurses and returns newest matching entries first", a
 			() => {},
 			context,
 		);
-		assert.match(toolText(read), /^subagents\/new\.jsonl .+\[window nested-window\].+nested newest/s);
+		assert.match(toolText(read), /^4 \[subagent\] \[window nested-window\] .+nested newest/s);
+		const legacy = await run(tools, "history", { op: "read", id: archivedId("nested-new", "subagents/new.jsonl", true) }, context);
+		assert.match(toolText(legacy), /nested newest/);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -504,7 +521,7 @@ test("history keeps the selected session after a cwd override but excludes forei
 		const { tools, context: base } = setup();
 		const context = {
 			...base,
-			sessionManager: { getBranch: () => [], getSessionDir: () => dir, getSessionFile: () => current },
+			sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir, getSessionFile: () => current },
 		};
 		const hits = toolText(await run(tools, "history", { op: "search", query: "scope needle", all: true }, context));
 		assert.match(hits, /\[user\] scope needle current/);
@@ -515,6 +532,7 @@ test("history keeps the selected session after a cwd override but excludes forei
 			await assert.rejects(run(tools, "history", { op: "read", id: archivedId(source, `${source}.jsonl`) }, context), /No history entry/);
 		}
 		await assert.rejects(run(tools, "history", { op: "read", id: "same@" }, context), /No history entry/);
+		await assert.rejects(run(tools, "history", { op: "read", id: "21:45:25.912Z" }, context), /Pass an id exactly as history search prints it, such as 1a2f07de/);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -527,11 +545,11 @@ test("history searches normalized text and reports native window ids", async () 
 		{ type: "message", id: "before", parentId: "needle-only-in-id", timestamp: "2", message: { role: "user", content: "needle before" } },
 		{ type: "context_window", id: "window-2", parentId: "before", timestamp: "3", handoff: "continue" },
 		{ type: "message", id: "after", parentId: "window-2", timestamp: "4", message: { role: "assistant", content: "needle after" } },
-		{ type: "message", id: "long", parentId: "after", timestamp: "5", message: { role: "user", content: `${"x".repeat(20_100)}needle tail` } },
+		{ type: "message", id: "long", parentId: "after", timestamp: "5", message: { role: "user", content: `${"x".repeat(40_100)}needle tail` } },
 	];
 	const context: TestContext = {
 		...base,
-		sessionManager: { getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") },
+		sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") },
 	};
 	const result = await tools.get("history")!.execute(
 		"id",
@@ -553,15 +571,40 @@ test("history searches normalized text and reports native window ids", async () 
 		() => {},
 		context,
 	);
-	assert.match(toolText(firstPage), /offset 20000/);
+	assert.match(toolText(firstPage), /offset 40000/);
 	const secondPage = await tools.get("history")!.execute(
 		"id",
-		{ op: "read", id: "long", offset: 20_000 },
+		{ op: "read", id: "long", offset: 40_000 },
 		new AbortController().signal,
 		() => {},
 		context,
 	);
 	assert.match(toolText(secondPage), /needle tail/);
+});
+
+test("history search skips entries already in the active context and says how many", async () => {
+	const { tools, context: base } = setup();
+	const branch = [
+		{ type: "message", id: "earlier", parentId: null, timestamp: "1", message: { role: "user", content: "needle from an earlier window" } },
+		{ type: "context_window", id: "window-2", parentId: "earlier", timestamp: "2", handoff: "needle handoff" },
+		{ type: "message", id: "current", parentId: "window-2", timestamp: "3", message: { role: "user", content: "needle already visible" } },
+		{ type: "context_edit", id: "edit", parentId: "current", timestamp: "4", targetId: "current", replacement: { content: "needle replacement visible" } },
+	];
+	const projected = new Set(["window-2", "current"]);
+	const context = {
+		...base,
+		sessionManager: {
+			...base.sessionManager,
+			getBranch: () => branch,
+			buildSessionProjection: () => ({ entries: branch.filter((entry) => projected.has(entry.id)).map((sourceEntry) => ({ sourceEntry, messages: [{}] })) }),
+		},
+	};
+	const result = await run(tools, "history", { op: "search", query: "needle" }, context);
+	const text = toolText(result);
+	assert.match(text, /\[earlier\] \[user\] needle from an earlier window/);
+	assert.doesNotMatch(text, /already visible|replacement visible|needle handoff/);
+	assert.match(text, /\n\[Skipped 3 matches already in your active context\.\]$/);
+	assert.deepEqual([result.details?.kind === "history-search" && result.details.skipped, result.details?.kind === "history-search" && result.details.more], [3, false]);
 });
 
 test("history ranks matching original content before recovery and lookup echoes without hiding either", async () => {
@@ -593,7 +636,7 @@ test("history ranks matching original content before recovery and lookup echoes 
 		] } },
 		{ type: "message", id: "current-search", message: { role: "assistant", content: [{ type: "toolCall", name: "history", arguments: { op: "search", query: "[assistant] needle MATCHING PROSE" } }] } },
 	].map((entry, index, entries) => ({ ...entry, timestamp: `${index}`, parentId: entries[index - 1]?.id ?? null }));
-	const context = { ...base, sessionManager: { getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
+	const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
 	const search = async (query: string, limit = 50) => toolText(await run(tools, "history", { op: "search", query, limit }, context));
 	const ids = (text: string) => [...text.matchAll(/\[window [^\]]+\] \[([^\]]+)\]/g)].map((match) => match[1]);
 	const all = await search("NEEDLE");
@@ -630,7 +673,7 @@ test("archived history preserves Unicode separators across chunks and an untermi
 			{ type: "message", id: "last", parentId: "unicode", message: { role: "user", content: "final needle\u2029tail" } },
 		];
 		writeArchive(join(dir, "session.jsonl"), entries.map((entry) => JSON.stringify(entry)).join("\r\n"));
-		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir } };
 		const hits = toolText(await run(tools, "history", { op: "search", query: "needle", all: true }, context));
 		assert.ok(hits.includes(`[window unicode-window] [${archivedId("unicode", "session.jsonl")}]`));
 		assert.ok(hits.includes(`[window unicode-window] [${archivedId("last", "session.jsonl")}]`));
@@ -652,7 +695,7 @@ test("history preserves assistant failures and ranks them ahead of recovery echo
 		], stopReason: "aborted", errorMessage: "QUOTA_EXCEEDED while streaming" } },
 		{ type: "message", id: "echo", message: { role: "toolResult", toolName: "notes", content: "QUOTA_EXCEEDED copied into notes" } },
 	];
-	const context = { ...base, sessionManager: { getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
+	const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
 	assert.ok(toolText(await run(tools, "history", { op: "read", id: "failed" }, context)).endsWith("[assistant] [error] HTTP 429 QUOTA_EXCEEDED"));
 	const partial = toolText(await run(tools, "history", { op: "read", id: "partial" }, context));
 	assert.match(partial, /Partial response/);
@@ -676,7 +719,7 @@ test("all-session ranking keeps older originals ahead of newer echoes before app
 			utimesSync(file, new Date((index + 1) * 1000), new Date((index + 1) * 1000));
 		}
 		const { tools, context: base } = setup();
-		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir } };
 		const search = async (query: string, limit: number) => toolText(await run(tools, "history", { op: "search", query, all: true, limit }, context));
 		const ids = (text: string) => [...text.matchAll(/\[window initial\] \[([^\]]+)\]/g)].map((match) => match[1]);
 		assert.deepEqual(ids(await search("needle", 1)), [archivedId("newer", "1.jsonl")]);
@@ -684,7 +727,8 @@ test("all-session ranking keeps older originals ahead of newer echoes before app
 		assert.deepEqual(ids(await search("needle", 4)), [archivedId("newer", "1.jsonl"), archivedId("old", "0.jsonl"), archivedId("echo-5", "2.jsonl"), archivedId("echo-5", "1.jsonl")]);
 		const all = await search("needle", 50);
 		assert.deepEqual(ids(all), [archivedId("newer", "1.jsonl"), archivedId("old", "0.jsonl"), archivedId("echo-5", "2.jsonl"), ...echoes.map((entry) => archivedId(entry.id, "1.jsonl")).reverse()]);
-		assert.ok(all.split("\n").some((line) => line.startsWith("2.jsonl ") && line.includes(`[${archivedId("echo-5", "2.jsonl")}]`)));
+		assert.ok(all.split("\n").some((line) => line.includes(`[${archivedId("echo-5", "2.jsonl")}]`) && !line.includes("[subagent]")));
+		assert.doesNotMatch(all, /\d\.jsonl/);
 		assert.deepEqual(ids(await search("echo-only", 2)), [archivedId("echo-5", "2.jsonl"), archivedId("echo-5", "1.jsonl")]);
 		const controller = new AbortController();
 		controller.abort();
@@ -702,7 +746,7 @@ test("a reminder before a native compaction does not suppress the next reminder"
 		{ type: "message", id: "kept", message: { role: "user", content: "kept tail" } },
 		{ type: "compaction", id: "native", summary: "native summary", firstKeptEntryId: "kept" },
 	];
-	const context = { ...usageContext(base, 100_000, 76_000), sessionManager: { getBranch: () => branch, getSessionDir: () => tmpdir() } };
+	const context = { ...usageContext(base, 100_000, 76_000), sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => tmpdir() } };
 	turnEnd(handlers, context);
 	assert.equal(messages.length, 1);
 	branch.push({ type: "custom_message", id: "new-reminder", customType: "posthorse-reminder", details: messages[0].details });
@@ -857,7 +901,7 @@ test("history returns stored images for a requested entry and summarizes them el
 		{ type: "message", id: "img-tool", parentId: "img-user", timestamp: "2", message: { role: "toolResult", toolName: "screenshot", content: [jpeg] } },
 		{ type: "message", id: "mixed", parentId: "img-tool", timestamp: "3", message: { role: "user", content: [{ type: "text", text: "look at this" }, webp, { type: "text", text: "and fix it" }] } },
 	];
-	const context = { ...base, sessionManager: { getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
+	const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
 
 	const user = await run(tools, "history", { op: "read", id: "img-user" }, context);
 	assert.match(user.content[0].text!, /\[user\] \[1 image: image\/png\]/);
@@ -880,7 +924,7 @@ test("history returns stored images for a requested entry and summarizes them el
 	}];
 	const tightImage = {
 		...usageContext(base, 100_000, 82_117),
-		sessionManager: { getBranch: () => longImage, getSessionDir: () => join(tmpdir(), "missing") },
+		sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => longImage, getSessionDir: () => join(tmpdir(), "missing") },
 	};
 	await assert.rejects(run(tools, "history", { op: "read", id: "long-image" }, tightImage), /Too little context remains/);
 
@@ -902,6 +946,7 @@ test("history image continuations preserve order, text, and retry offsets", asyn
 		const context = {
 			...usageContext(base, 32_000, 1_000),
 			sessionManager: {
+				buildSessionProjection: emptyProjection,
 				getBranch: () => [{ type: "message", id: "images", message: { role: "user", content: [{ type: "text", text }, ...images] } }],
 				getSessionDir: () => join(tmpdir(), "missing"),
 			},
@@ -972,7 +1017,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		const large = usageContext(base, 400_000, 1_000, 64_000);
 		const guidance = handlers.get("before_agent_start")!({ systemPrompt: "base", systemPromptOptions: { forceSystemPrompt: "base", sections: {} } }, large) as { systemPrompt: string };
 		assert.match(guidance.systemPrompt, /rollover line \(84% used\)/);
-		assert.match(guidance.systemPrompt, /best available native estimate/);
+		assert.doesNotMatch(guidance.systemPrompt, /get_context_remaining/, "the reminder, not routine budget checks, marks the deadline");
 		// A 272K window with a 64K reserve has its line at 208,001 (76%).
 		const sol = usageContext(base, 272_000, 205_000, 64_000);
 		assert.match((handlers.get("before_agent_start")!({ systemPrompt: "base", systemPromptOptions: { forceSystemPrompt: "base", sections: {} } }, sol) as { systemPrompt: string }).systemPrompt, /rollover line \(76% used\)/);
@@ -1017,7 +1062,7 @@ test("read pages shrink to the remaining budget and refuse unsafe pages while pr
 	try {
 		const { tools, handlers, context: base } = setup();
 		const branch = [{ type: "message", id: "long", parentId: null, timestamp: "1", message: { role: "user", content: "h".repeat(25_000) } }];
-		const withBranch = (context: TestContext) => ({ ...context, cwd: dir, sessionManager: { getBranch: () => branch, getSessionDir: () => dir } });
+		const withBranch = (context: TestContext) => ({ ...context, cwd: dir, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => dir } });
 		await run(tools, "notes", { op: "write", path: "long.md", content: "n".repeat(25_000) }, withBranch(base));
 
 		// Line at 83,617; 1,500 tokens short of it leaves 500 tokens after the margin: a 2,000-character page.
@@ -1056,6 +1101,7 @@ test("note and history pages share a batch budget without double-counting consum
 			...usageContext(base, 100_000, tokens, 16_384, false), cwd: dir,
 			getContextUsage: () => ({ tokens, contextWindow: 100_000, percent: tokens / 1000 }),
 			sessionManager: {
+				buildSessionProjection: emptyProjection,
 				getBranch: () => [{ type: "message", id: "long", message: { role: "user", content: "h".repeat(25_000) } }],
 				getSessionDir: () => dir,
 			},
@@ -1091,9 +1137,15 @@ test("notes list and search page every result through the shared budget, includi
 		mkdirSync(join(root, nested), { recursive: true });
 		const files = Array.from({ length: 120 }, (_, index) => `${index.toString().padStart(3, "0")}-${"n".repeat(180)}.md`);
 		files.push(`${nested}/long-${"f".repeat(70)}.md`);
-		for (const path of files) writeFileSync(join(root, path), `needle sample ${"s".repeat(180)}`);
+		const modified = (index: number) => new Date(Date.UTC(2026, 0, 1) + (files.length - index) * 60_000);
+		for (const [index, path] of files.entries()) {
+			writeFileSync(join(root, path), `needle sample ${"s".repeat(180)}`);
+			utimesSync(join(root, path), modified(index), modified(index));
+		}
 		for (const op of ["list", "search"]) {
-			const expectedRows = files.map((path) => op === "list" ? path : `${path}:1: needle sample ${"s".repeat(180)}`);
+			const expectedRows = files.map((path, index) => op === "list"
+				? `${path}  194 B  ${modified(index).toISOString().slice(0, 16)}Z`
+				: `${path}:1: needle sample ${"s".repeat(180)}`);
 			const expected = expectedRows.join("\n");
 			let offset = 0;
 			let recovered = "";
@@ -1131,7 +1183,7 @@ test("mixed search/list/read outputs and no-match refusals share one reservation
 	try {
 		const { tools, handlers, context: base } = setup();
 		const branch = Array.from({ length: 60 }, (_, index) => ({ type: "message", id: `entry-${index}`, message: { role: "user", content: `needle ${"h".repeat(500)}` } }));
-		const context = { ...usageContext(base, 100_000, 98_000, 16_384, false), cwd: dir, sessionManager: { getBranch: () => branch, getSessionDir: () => dir } };
+		const context = { ...usageContext(base, 100_000, 98_000, 16_384, false), cwd: dir, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => dir } };
 		mkdirSync(join(dir, ".pi", "notes"), { recursive: true });
 		writeFileSync(join(dir, ".pi", "notes", "long.md"), Array.from({ length: 60 }, () => `needle ${"n".repeat(300)}`).join("\n"));
 		for (const first of ["history", "notes"]) {
@@ -1170,7 +1222,7 @@ test("history cursors finish partial headers and progress past growing lookup ec
 		{ type: "message", id: "long", parentId: "old", timestamp: "T".repeat(4000), message: { role: "user", content: "needle long metadata" } },
 		{ type: "message", id: "echo", parentId: "long", message: { role: "toolResult", toolName: "history", content: "needle prior lookup" } },
 	];
-	const context = { ...usageContext(base, 100_000, 98_700, 16_384, false), sessionManager: { getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
+	const context = { ...usageContext(base, 100_000, 98_700, 16_384, false), sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
 	let cursor: string | undefined;
 	let recovered = "";
 	const returned: string[] = [];
@@ -1216,7 +1268,7 @@ test("all-session cursors retain ranking and per-file entries across pages", asy
 		const current: Record<string, unknown>[] = [original, { type: "message", id: "newer", message: { role: "user", content: "needle newer source" } }, { type: "message", id: "prior-echo", message: { role: "toolResult", toolName: "notes", content: "needle prior echo" } }];
 		const oldFile = join(dir, "old.jsonl"), activeFile = join(dir, "current.jsonl");
 		writeArchive(oldFile, older.map((entry) => JSON.stringify(entry)).join("\n"));
-		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir } };
 		let cursor: string | undefined;
 		const ids: string[] = [];
 		for (let page = 0; page < 20; page++) {
@@ -1287,7 +1339,7 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 		assert.equal(existsSync(join(repo, "packages", "app", ".pi")), false);
 		await write(worktree);
 		assert.equal(readFileSync(join(main, ".pi", "notes", "state.md"), "utf8"), worktree);
-		assert.equal(toolText(await notes(worktree, { op: "list" })), "state.md");
+		assert.match(toolText(await notes(worktree, { op: "list" })), /^state\.md  \d+ B  \d{4}-\d\d-\d\dT\d\d:\d\dZ$/);
 		writeFileSync(join(worktree, ".git"), "gitdir: ../main/.git/worktrees/wt\n");
 		await write(join(worktree, "packages", "app"));
 		assert.equal(readFileSync(join(main, ".pi", "notes", "state.md"), "utf8"), join(worktree, "packages", "app"));
@@ -1320,8 +1372,39 @@ test("notes list and search follow aliases while skipping cycles and missing tar
 		const { tools, context } = setup();
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: dir });
 
-		assert.equal(toolText(await notes({ op: "list" })), "alias/state.md\nnested/state.md");
+		assert.match(toolText(await notes({ op: "list" })), /^alias\/state\.md  10 B  \S+\nnested\/state\.md  10 B  \S+$/);
 		assert.equal(toolText(await notes({ op: "search", query: "checkpoint" })), "alias/state.md:1: checkpoint\nnested/state.md:1: checkpoint");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("notes list newest first with sizes, read folders as listings, and search only text notes", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-notes-listing-"));
+	try {
+		const root = join(dir, ".pi", "notes");
+		mkdirSync(join(root, "task"), { recursive: true });
+		const files: Array<[string, string | Buffer, number]> = [
+			["old.md", "needle old", 1_000],
+			["task/fixture.sqlite", Buffer.concat([Buffer.from("SQLite format 3\0"), Buffer.from("needle inside binary")]), 2_000],
+			["task/current.md", "needle current", 3_000],
+		];
+		for (const [path, content, time] of files) {
+			writeFileSync(join(root, path), content);
+			utimesSync(join(root, path), new Date(time), new Date(time));
+		}
+		const { tools, context } = setup();
+		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: dir });
+		assert.equal(toolText(await notes({ op: "list" })), [
+			"task/current.md  14 B  1970-01-01T00:00Z",
+			"task/fixture.sqlite  36 B  1970-01-01T00:00Z",
+			"old.md  10 B  1970-01-01T00:00Z",
+		].join("\n"));
+		const folder = toolText(await notes({ op: "list", path: "task" }));
+		assert.match(folder, /^task\/current\.md .+\ntask\/fixture\.sqlite .+$/);
+		assert.equal(toolText(await notes({ op: "read", path: "task" })), folder, "reading a folder lists it instead of failing");
+		assert.equal(toolText(await notes({ op: "search", query: "needle" })), "task/current.md:1: needle current\nold.md:1: needle old");
+		await assert.rejects(notes({ op: "read", path: "task/fixture.sqlite" }), /binary file \(36 B\); notes read returns text only/);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -1361,15 +1444,15 @@ test("long notes page fully, empty writes clear, appends stay separated, and sea
 		const { tools, context: base } = setup();
 		const context = { ...base, cwd: dir };
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, context);
-		const body = `${"a".repeat(20_000)}${"b".repeat(20_000)}${"c".repeat(5_000)}`;
+		const body = `${"a".repeat(40_000)}${"b".repeat(40_000)}${"c".repeat(5_000)}`;
 		await notes({ op: "write", path: "big.md", content: body });
 		const first = toolText(await notes({ op: "read", path: "big.md" }));
-		assert.match(first, /^a{20000}\n\[chars 0-20000 of 45000; continue with offset 20000\]$/);
-		const second = toolText(await notes({ op: "read", path: "big.md", offset: 20_000 }));
-		assert.match(second, /^b{20000}\n\[chars 20000-40000 of 45000; continue with offset 40000\]$/);
-		const third = toolText(await notes({ op: "read", path: "big.md", offset: 40_000 }));
+		assert.match(first, /^a{40000}\n\[chars 0-40000 of 85000; continue with offset 40000\]$/);
+		const second = toolText(await notes({ op: "read", path: "big.md", offset: 40_000 }));
+		assert.match(second, /^b{40000}\n\[chars 40000-80000 of 85000; continue with offset 80000\]$/);
+		const third = toolText(await notes({ op: "read", path: "big.md", offset: 80_000 }));
 		assert.equal(third, "c".repeat(5_000));
-		await assert.rejects(notes({ op: "read", path: "big.md", offset: 45_000 }), /past the end/);
+		await assert.rejects(notes({ op: "read", path: "big.md", offset: 85_000 }), /past the end/);
 
 		await notes({ op: "write", path: "big.md", content: "" });
 		assert.equal(readFileSync(join(dir, ".pi", "notes", "big.md"), "utf8"), "");
@@ -1398,7 +1481,7 @@ test("history flattens bashExecution entries and honors excludeFromContext", asy
 		{ type: "message", id: "sh", parentId: null, timestamp: "1", message: { role: "bashExecution", command: "ls -la", output: "total 0\nnotes.md" } },
 		{ type: "message", id: "hidden", parentId: "sh", timestamp: "2", message: { role: "bashExecution", command: "cat token", output: "TOPSECRET", excludeFromContext: true } },
 	];
-	const context = { ...base, sessionManager: { getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
+	const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
 	assert.match(toolText(await run(tools, "history", { op: "search", query: "notes.md" }, context)), /\[sh\] \[bashExecution\] \$ ls -la\ntotal 0\nnotes\.md/);
 	assert.match(toolText(await run(tools, "history", { op: "read", id: "sh" }, context)), /\[bashExecution\] \$ ls -la\ntotal 0\nnotes\.md$/);
 	assert.match(toolText(await run(tools, "history", { op: "search", query: "TOPSECRET" }, context)), /No history matches/);
@@ -1427,7 +1510,7 @@ test("all-session search returns fork copies with their source-qualified referen
 		utimesSync(fork, new Date(2_000), new Date(2_000));
 		utimesSync(grandchild, new Date(3_000), new Date(3_000));
 		const { tools, context: base } = setup();
-		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir } };
 		const text = toolText(await run(tools, "history", { op: "search", query: "fork needle", all: true, limit: 10 }, context));
 		assert.deepEqual(
 			text.split("\n").map((line) => line.match(/\[window initial\] \[([^\]]+)\]/)?.[1]),
@@ -1458,20 +1541,21 @@ test("all-session history reads the searched entry when independent sessions reu
 			utimesSync(file, new Date(time), new Date(time));
 		}
 		const { tools, context: base } = setup();
-		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir } };
 		const search = (query: string, cursor?: string) => run(tools, "history", { op: "search", query, all: true, limit: 1, cursor }, context);
 		const older = toolText(await search("approved"));
 		const id = older.match(/\[window initial\] \[([^\]]+)\]/)?.[1];
 		assert.ok(id);
+		assert.equal(id, archivedId("deadbeef", "older.jsonl"));
 		const read = toolText(await run(tools, "history", { op: "read", id }, context));
-		assert.match(read, /^older\.jsonl .+\[user\] needle approved requirement$/);
+		assert.match(read, /\[user\] needle approved requirement$/);
 
 		const first = toolText(await search("needle"));
-		assert.match(first, /^newer\.jsonl .+\[user\] needle unrelated request/);
+		assert.match(first, new RegExp(`^\\S+ \\[window initial\\] \\[${archivedId("deadbeef", "newer.jsonl")}\\] \\[user\\] needle unrelated request`));
 		const cursor = first.match(/\[More results; continue with cursor "([^"]+)"/)?.[1];
 		assert.ok(cursor, "the older session must not be hidden by a colliding id");
 		const second = toolText(await search("needle", cursor));
-		assert.match(second, /^older\.jsonl .+\[user\] needle approved requirement/);
+		assert.match(second, /\[user\] needle approved requirement/);
 		assert.ok(second.includes(`[${id}]`), "the paged hit must use the same read reference");
 
 		const images = toolText(await run(tools, "history", { op: "search", query: "image/png", all: true }, context));
@@ -1496,7 +1580,7 @@ test("all-session history keeps identical entries from unrelated sessions separa
 			utimesSync(file, new Date(time), new Date(time));
 		}
 		const { tools, context: base } = setup();
-		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir } };
 		const hits = toolText(await run(tools, "history", { op: "search", query: "needle", all: true }, context));
 		assert.ok(hits.includes(`[${archivedId("deadbeef", "first.jsonl")}]`));
 		assert.ok(hits.includes(`[${archivedId("deadbeef", "second.jsonl")}]`));
@@ -1526,7 +1610,7 @@ test("all-session history keeps new entries in sibling forks separate", async ()
 		writeFileSync(root, [rootHeader, ancestor, repeated].map((entry) => JSON.stringify(entry)).join("\n"));
 		utimesSync(root, new Date(4_000), new Date(4_000));
 		const { tools, context: base } = setup();
-		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir } };
 		const hits = toolText(await run(tools, "history", { op: "search", query: "needle", all: true }, context));
 		assert.ok(hits.includes(`[${archivedId("deadbeef", "first.jsonl")}]`));
 		assert.ok(hits.includes(`[${archivedId("deadbeef", "second.jsonl")}]`));
@@ -1550,16 +1634,47 @@ test("all-session history cursors fit the declared limit for nested session file
 			utimesSync(file, new Date(time), new Date(time));
 		}
 		const { tools, context: base } = setup();
-		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir } };
 		const first = toolText(await run(tools, "history", { op: "search", query: "needle", all: true, limit: 1 }, context));
 		assert.ok(first.includes(`[${archivedId("newest", source)}]`));
 		const cursor = first.match(/\[More results; continue with cursor "([^"]+)"/)?.[1];
 		assert.ok(cursor && cursor.length <= 512);
 		const next = toolText(await run(tools, "history", { op: "search", query: "needle", all: true, limit: 1, cursor }, context));
 		assert.ok(next.includes(`[${archivedId("older", "older.jsonl")}]`));
+		assert.ok(first.includes("[subagent]"), "nested session hits are marked as subagent runs");
+		assert.ok(!next.includes("[subagent]"), "top-level session hits carry no subagent marker");
 		const read = toolText(await run(tools, "history", { op: "read", id: archivedId("newest", source) }, context));
-		assert.ok(read.startsWith(`${source} `));
+		assert.ok(read.includes(`[subagent] [window initial] [${archivedId("newest", source)}]`));
 		assert.ok(read.endsWith("[user] needle"));
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("all-session search finds the same entries without ripgrep, and quoted queries skip its prefilter", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-prefilter-"));
+	try {
+		const archive = (name: string, content: string) =>
+			writeArchive(join(dir, `${name}.jsonl`), JSON.stringify({ type: "message", id: name, parentId: null, message: { role: "user", content } }));
+		archive("quoted", 'say "needle" twice');
+		archive("plain", "a plain needle");
+		archive("other", "nothing here");
+		const { tools, context: base } = setup();
+		const context = { ...base, sessionManager: { ...base.sessionManager, getSessionDir: () => dir } };
+		const hits = async (query: string) =>
+			[...toolText(await run(tools, "history", { op: "search", query, all: true }, context)).matchAll(/\[window initial\] \[([^@\]]+)@/g)].map((match) => match[1]).sort();
+		// Session JSONL stores the quotes escaped, so a raw-text prefilter would miss this match.
+		const expected = [["plain", "quoted"], ["quoted"]];
+		assert.deepEqual([await hits("needle"), await hits('"needle"')], expected);
+		const { PATH, PI_CODING_AGENT_DIR } = process.env;
+		Object.assign(process.env, { PATH: "", PI_CODING_AGENT_DIR: dir });
+		try {
+			assert.deepEqual([await hits("needle"), await hits('"needle"')], expected, "without ripgrep every session file is scanned");
+		} finally {
+			Object.assign(process.env, { PATH });
+			if (PI_CODING_AGENT_DIR === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = PI_CODING_AGENT_DIR;
+		}
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -1578,11 +1693,14 @@ test("session search and archived reads preserve modification-time ordering incl
 		}
 		const expected = readdirSync(dir).sort((a, b) => statSync(join(dir, b)).mtimeMs - statSync(join(dir, a)).mtimeMs);
 		const { tools, context: base } = setup();
-		const context = { ...base, sessionManager: { getBranch: () => [], getSessionDir: () => dir } };
+		const context = { ...base, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => dir } };
 		const search = toolText(await run(tools, "history", { op: "search", query: "mtime needle", all: true }, context));
-		assert.deepEqual(search.split("\n").map((line) => line.split(" ")[0]), expected);
+		assert.deepEqual(
+			search.split("\n").map((line) => line.match(/\[window initial\] \[([^\]]+)\]/)?.[1]),
+			expected.map((file) => archivedId(file.replace(/\.jsonl$/, ""), file)),
+		);
 		const read = toolText(await run(tools, "history", { op: "read", id: "shared" }, context));
-		assert.equal(read.split(" ")[0], expected[0]);
+		assert.ok(read.includes(`[${archivedId("shared", expected[0])}]`), "a bare id resolves in the newest session and prints its qualified id");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
