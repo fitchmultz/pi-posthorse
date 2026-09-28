@@ -468,23 +468,24 @@ async function isBinaryFile(path: string): Promise<boolean> {
 }
 
 const execFileAsync = promisify(execFile);
-const LABEL_ONLY_PHRASES = ["call id", "execution arguments", "no handoff", "excluded from model context by pi", "images", "unknown type"];
-
 /**
- * Whether every normalized match also appears in raw JSONL, so a ripgrep prefilter cannot drop it.
- * Raw JSONL escapes quotes, backslashes, and control characters; flattenEntry adds brackets, parentheses,
- * braces, colons, commas, `$`, spaces beside those labels, image counts, and a few label-only phrases.
+ * ripgrep needles whose raw JSONL matches cover every normalized match, or undefined when only a full scan is exact.
+ * Raw JSONL escapes quotes, backslashes, and control characters; flattenEntry adds brackets, parentheses, braces,
+ * colons, `$`, spaces beside those labels, and label-only phrases. Image summaries ("3 images: image/png,
+ * image/jpeg") come only from entries with an image block, so their text needs that block instead.
  */
-function rawFilterable(query: string): boolean {
-	return !/["\\[\](){}:,$\p{Cc}]/u.test(query) && query.trim() === query &&
-		!/^\d+ ?i?m?a?g?e?s?$/.test(query) && !LABEL_ONLY_PHRASES.some((phrase) => phrase.includes(query));
+function prefilterNeedles(query: string): string[] | undefined {
+	if (/["\\[\](){}:$\p{Cc}]/u.test(query) || query.trim() !== query) return undefined;
+	if (["call id", "execution arguments", "no handoff", "excluded from model context by pi"].some((phrase) => phrase.includes(query))) return undefined;
+	const image = query.includes(",") || /^\d+ ?i?m?a?g?e?s?$/.test(query) || ["images", "unknown type"].some((phrase) => phrase.includes(query));
+	return image ? [query, '"type":"image"'] : [query];
 }
 
-/** Session files whose raw JSONL contains `needle` in any case, via Pi's managed ripgrep or PATH; undefined means scan every file. */
-async function filesContaining(dir: string, needle: string, signal?: AbortSignal): Promise<Set<string> | undefined> {
+/** Session files whose raw JSONL contains any needle in any case, via Pi's managed ripgrep or PATH; undefined means scan every file. */
+async function filesContaining(dir: string, needles: string[], signal?: AbortSignal): Promise<Set<string> | undefined> {
 	const args = [
 		"--files-with-matches", "--fixed-strings", "--ignore-case", "--no-ignore", "--hidden", "--no-messages",
-		"--glob", "*.jsonl", "--regexp", needle, dir,
+		"--glob", "*.jsonl", ...needles.flatMap((needle) => ["--regexp", needle]), dir,
 	];
 	for (const rg of [join(getAgentDir(), "bin", "rg"), "rg"]) {
 		try {
@@ -1427,12 +1428,19 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				const query = requireValue(params.query, "query", params.op).toLowerCase();
 				const limit = params.limit ?? 10;
 				const searchKey = shortKey(JSON.stringify([query, params.all === true]));
-				// Projections show replacements and stripped async calls under the original id, so compare what the model sees.
+				// Projections show replacements and stripped async calls under the original id, so an entry is in
+				// context only when all of its own text is visible there. Posthorse strips stale reminders from input.
+				const seen = (message: MessageLike) => [textOf(message), message.summary, message.command, message.output].filter(Boolean).join("\n").toLowerCase();
 				const visible = new Map((manager.buildSessionProjection().entries as readonly ProjectedEntry[]).flatMap(({ sourceEntry, messages }) =>
-					sourceEntry.id && messages.length
-						? [[sourceEntry.id, messages.map((message) => [textOf(message), message.summary, message.command, message.output].filter(Boolean).join("\n")).join("\n").toLowerCase()] as const]
-						: []));
-				const inContext = (entry: EntryLike) => visible.get((entry.type === "context_edit" ? entry.targetId : entry.id) ?? "")?.includes(query) === true;
+					sourceEntry.id && messages.length ? [[sourceEntry.id, messages.map(seen).join("\n")] as const] : []));
+				const inContext = (entry: EntryLike) => {
+					if (entry.type === "custom_message" && isReminderType(entry.customType)) return false;
+					const own = entry.type === "message" ? entry.message ?? {}
+						: entry.type === "context_edit" ? { content: entry.replacement?.content }
+						: entry.type === "context_window" ? { content: entry.handoff }
+						: { content: entry.content, summary: entry.summary };
+					return visible.get((entry.type === "context_edit" ? entry.targetId : entry.id) ?? "")?.includes(seen(own)) === true;
+				};
 				let skipped = 0;
 				let cursor: [string, 0 | 1, number, string] | undefined;
 				if (params.cursor) {
@@ -1457,7 +1465,8 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				};
 
 				if (params.all) {
-					const candidates = rawFilterable(query) ? await filesContaining(dir, query, signal) : undefined;
+					const needles = prefilterNeedles(query);
+					const candidates = needles && await filesContaining(dir, needles, signal);
 					const current = currentFile && resolve(currentFile);
 					for await (const file of scopedSessionFiles(dir, cwd, currentFile, signal, { candidates })) {
 						const recent: HistoryHit[][] = [[], []];
@@ -1570,7 +1579,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 			}
 			// Bare ids from other sessions reach here through older notes and handoffs.
 			const candidates = fileKey === undefined && /^[\w-]+$/.test(entryId)
-				? await filesContaining(dir, `"id":"${entryId}"`, signal)
+				? await filesContaining(dir, [`"id":"${entryId}"`], signal)
 				: undefined;
 			for await (const file of scopedSessionFiles(dir, cwd, currentFile, signal, { fileKey, candidates })) {
 				const fileSource = relative(dir, file);

@@ -589,8 +589,10 @@ test("history search skips entries already in the active context and says how ma
 		{ type: "context_window", id: "window-2", parentId: "earlier", timestamp: "2", handoff: "needle handoff" },
 		{ type: "message", id: "current", parentId: "window-2", timestamp: "3", message: { role: "user", content: "needle already visible" } },
 		{ type: "context_edit", id: "edit", parentId: "current", timestamp: "4", targetId: "current", replacement: { content: "needle replacement visible" } },
+		{ type: "custom_message", id: "reminder", parentId: "edit", timestamp: "5", customType: "posthorse-reminder", content: "needle checkpoint", display: true },
 	];
-	// Pi projects the edited entry under its own id with the replacement text, as the model sees it.
+	// Pi projects the edited entry under its own id with the replacement text, as the model sees it. Pi also
+	// projects checkpoint reminders that Posthorse may strip from model input.
 	const context = {
 		...base,
 		sessionManager: {
@@ -599,19 +601,19 @@ test("history search skips entries already in the active context and says how ma
 			buildSessionProjection: () => ({ entries: [
 				{ sourceEntry: branch[1], messages: [{ role: "custom", content: "Context window window-2 starts here.\n\nHandoff from the previous window:\nneedle handoff" }] },
 				{ sourceEntry: branch[2], messages: [{ role: "user", content: "needle replacement visible" }] },
+				{ sourceEntry: branch[4], messages: [{ role: "custom", content: "needle checkpoint" }] },
 			] }),
 		},
 	};
 	const result = await run(tools, "history", { op: "search", query: "needle" }, context);
 	const text = toolText(result);
 	assert.match(text, /\[earlier\] \[user\] needle from an earlier window/);
-	assert.doesNotMatch(text, /already visible|replacement visible|needle handoff/);
-	assert.match(text, /\n\[Skipped 3 matches already in your active context\.\]$/);
-	assert.deepEqual([result.details?.kind === "history-search" && result.details.skipped, result.details?.kind === "history-search" && result.details.more], [3, false]);
-	// The edited-away original is not in context, so its own text stays searchable.
-	const original = toolText(await run(tools, "history", { op: "search", query: "already visible" }, context));
-	assert.match(original, /\[current\] \[user\] needle already visible/);
-	assert.doesNotMatch(original, /Skipped/);
+	// The model sees only the replacement, so the original stays searchable even though "needle" survived the edit.
+	assert.match(text, /\[current\] \[user\] needle already visible/);
+	assert.match(text, /\[reminder\] \[custom:posthorse-reminder\] needle checkpoint/);
+	assert.doesNotMatch(text, /replacement visible|needle handoff/);
+	assert.match(text, /\n\[Skipped 2 matches already in your active context\.\]$/);
+	assert.deepEqual([result.details?.kind === "history-search" && result.details.skipped, result.details?.kind === "history-search" && result.details.more], [2, false]);
 });
 
 test("history ranks matching original content before recovery and lookup echoes without hiding either", async () => {
@@ -1694,23 +1696,26 @@ test("all-session search still finds text that exists only in normalized entries
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-normalized-only-"));
 	try {
 		const image = (mimeType?: string) => ({ type: "image", data: "AA==", ...(mimeType ? { mimeType } : {}) });
-		// One entry per flattenEntry branch, so every label it adds is exercised.
+		// One entry per flattenEntry branch, so every label it adds is exercised. Ids, headers, and paths carry
+		// no label words or digits, so a query can only reach an entry's file through the entry itself.
 		const entries = [
-			{ type: "message", id: "images", message: { role: "user", content: [{ type: "text", text: "two shots" }, image("image/png"), image("image/jpeg"), image()] } },
-			{ type: "message", id: "call", message: { role: "assistant", content: [{ type: "toolCall", id: "toolu_1", name: "record", namespace: "lab", arguments: { target: "a" }, executionArguments: { target: "b" } }], stopReason: "error", errorMessage: "quota hit" } },
-			{ type: "message", id: "result", message: { role: "toolResult", toolName: "record", namespace: "lab", toolCallId: "toolu_1", content: [{ type: "text", text: "done" }, image("image/png")] } },
-			{ type: "message", id: "shell", message: { role: "bashExecution", command: "ls", output: "notes.md" } },
-			{ type: "message", id: "hidden", message: { role: "bashExecution", command: "cat secret", output: "x", excludeFromContext: true } },
-			{ type: "compaction", id: "summary", summary: "summarized" },
-			{ type: "branch_summary", id: "branch", summary: "branched" },
-			{ type: "custom_message", id: "custom", customType: "intercom_message", content: [{ type: "text", text: "ping" }, image("image/png")] },
-			{ type: "context_window", id: "window" },
+			{ type: "message", id: "pix", message: { role: "user", content: [{ type: "text", text: "two shots" }, image("image/png"), image("image/jpeg"), image()] } },
+			{ type: "message", id: "invoke", message: { role: "assistant", content: [{ type: "toolCall", id: "toolu_a", name: "record", namespace: "lab", arguments: { target: "a" }, executionArguments: { target: "b" } }], stopReason: "error", errorMessage: "quota hit" } },
+			{ type: "message", id: "outcome", message: { role: "toolResult", toolName: "record", namespace: "lab", toolCallId: "toolu_a", content: [{ type: "text", text: "done" }, image("image/png")] } },
+			{ type: "message", id: "sh", message: { role: "bashExecution", command: "ls", output: "notes.md" } },
+			{ type: "message", id: "quiet", message: { role: "bashExecution", command: "cat secret", output: "x", excludeFromContext: true } },
+			{ type: "compaction", id: "digest", summary: "summarized" },
+			{ type: "branch_summary", id: "fork", summary: "branched" },
+			{ type: "custom_message", id: "note", customType: "intercom_message", content: [{ type: "text", text: "ping" }, image("image/png")] },
+			{ type: "context_window", id: "fresh" },
 			{ type: "context_window", id: "handed", handoff: "carry on" },
-			{ type: "context_edit", id: "edit", targetId: "result", replacement: { content: "trimmed" } },
+			{ type: "context_edit", id: "trim", targetId: "outcome", replacement: { content: "trimmed" } },
 		];
-		for (const entry of entries) writeArchive(join(dir, `${entry.id}.jsonl`), JSON.stringify({ ...entry, parentId: null, timestamp: "t" }));
+		for (const entry of entries) {
+			writeFileSync(join(dir, `${entry.id}.jsonl`), [{ type: "session", id: "s", cwd: "/" }, { ...entry, parentId: null, timestamp: "t" }].map((line) => JSON.stringify(line)).join("\n"));
+		}
 		const { tools, context: base } = setup();
-		const context = { ...base, sessionManager: { ...base.sessionManager, getSessionDir: () => dir } };
+		const context = { ...base, cwd: "/", sessionManager: { ...base.sessionManager, getSessionDir: () => dir } };
 		const missed: string[] = [];
 		for (const entry of entries) {
 			const id = archivedId(entry.id, `${entry.id}.jsonl`);
