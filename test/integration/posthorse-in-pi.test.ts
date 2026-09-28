@@ -370,7 +370,7 @@ describe("Posthorse inside the Pi fork", () => {
 		}
 		let startingTokens = 0;
 		let afterPages = 0;
-		let resultTexts: string[] = [];
+		let pages: Array<{ text: string; offset: number }> = [];
 		harness.setResponses([
 			() => {
 				const user = harness.sessionManager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "user")!;
@@ -385,7 +385,14 @@ describe("Posthorse inside the Pi fork", () => {
 				const call = context.messages.find((message) => message.role === "assistant")!;
 				if (call.role === "assistant") startingTokens = call.usage.totalTokens;
 				afterPages = harness.session.getContextUsage()!.tokens!;
-				resultTexts = results.map(getMessageText);
+				const offsets = new Map<string, number>();
+				if (call.role === "assistant") {
+					for (const part of call.content) if (part.type === "toolCall") offsets.set(part.id, Number(part.arguments.offset ?? 0));
+				}
+				pages = results.map((result) => ({
+					text: getMessageText(result),
+					offset: result.role === "toolResult" ? offsets.get(result.toolCallId.split("|")[0]) ?? -1 : -1,
+				}));
 				expect(results).toHaveLength(count);
 				expect(results.some((result) => result.isError)).toBe(true);
 				return fauxAssistantMessage("Saved pages recovered; remaining offsets can be retried after rollover.");
@@ -395,8 +402,12 @@ describe("Posthorse inside the Pi fork", () => {
 		await harness.session.prompt("p".repeat(300_000));
 		expect(startingTokens).toBeGreaterThan(75_000);
 		expect(afterPages).toBeLessThan(100_000);
-		expect(resultTexts.some((result) => result.includes("continue with offset 40000"))).toBe(true);
-		expect(resultTexts.some((result) => result.includes("retry with offset 40000"))).toBe(true);
+		// Siblings share one budget in whatever order they run: partial pages name their continuation,
+		// and every refusal keeps its own call's offset.
+		expect(pages.some(({ text }) => /continue with offset \d+|and offset \d+/.test(text))).toBe(true);
+		const refusals = pages.filter(({ text }) => text.includes("Too little context remains"));
+		expect(refusals.length).toBeGreaterThan(0);
+		for (const { text, offset } of refusals) expect(text).toContain(`retry with offset ${offset}`);
 	});
 
 	it("leaves Pi alone when compaction is disabled but keeps new_context available", async () => {
