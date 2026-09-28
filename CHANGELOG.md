@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- The experimental Codex prototype (`adapters/codex-posthorse`) and its CI workflow. It was never part of the Pi package.
+
 ## 0.6.0
 
 ### Breaking Changes
