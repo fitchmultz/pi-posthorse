@@ -886,6 +886,10 @@ function pageCapacity(ctx: PolicyContext, toolTokens: number): number {
 function buildGuidance(ctx: PolicyContext): string {
 	const budget = budgetFor(ctx);
 	const enabled = budget?.enabled ?? ctx.getCompactionSettings().enabled;
+	const n = (value: number) => value.toLocaleString("en-US");
+	const capacity = budget
+		? `Configured context capacity: ${n(budget.contextWindow)} tokens. This is the total window size, not remaining space. Fresh windows keep this configured capacity; system instructions, tools, the handoff, and new messages consume part of it.`
+		: "Configured context capacity is unknown.";
 	let automatic: string;
 	if (!enabled) {
 		automatic = "Pi compaction is disabled in the available settings, so Posthorse sends no checkpoint reminder. new_context remains available.";
@@ -895,9 +899,12 @@ function buildGuidance(ctx: PolicyContext): string {
 		const deadline = budget
 			? `${Math.max(1, Math.round((budget.rolloverAt / budget.contextWindow) * 100))}% used`
 			: "the configured Pi context limit";
-		automatic = `Automatic rollover follows Pi's compaction setting. At most one checkpoint reminder may arrive before the rollover line (${deadline}); when it does, stop normal work, ${CHECKPOINT_STEPS}.`;
+		const line = budget ? ` The rollover line is ${n(budget.rolloverAt)} tokens used under the available Pi settings.` : "";
+		automatic = `Automatic rollover follows Pi's compaction setting.${line} At most one checkpoint reminder may arrive before the rollover line (${deadline}); when it does, stop normal work, ${CHECKPOINT_STEPS}.`;
 	}
 	return `## Context self-management (Posthorse)
+${capacity}
+Do not guess context capacity or remaining space from response-token limits or reasoning budgets. Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining. If usage is unknown, report it as unknown. No routine budget checks are needed.
 ${automatic}
 After a rollover, earlier conversation stays in history. Restore notes and todos, then verify live state before stateful or external work; automatic handoffs record inputs, not progress.
 Keep one concise current-state note per task. Preserve decisions and safety constraints; link fuller evidence and history instead of copying them. Edit changed sections rather than resending unchanged content.
@@ -1153,8 +1160,8 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		label: "Context Remaining",
 		...toolCards("get_context_remaining"),
 		description:
-			"Estimate tokens left before Pi's automatic rollover and the configured context limit. A checkpoint reminder already arrives before rollover; use this only before a large step late in a window.",
-		promptSnippet: "check the context budget before a large step late in a window",
+			"Estimate tokens left before Pi's automatic rollover and the configured context limit. Check before reporting remaining space or changing your work plan because of context limits. A checkpoint reminder already arrives before rollover; no routine checks are needed.",
+		promptSnippet: "verify remaining context before reporting a token count or changing plans because of context limits",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			const host = policy(ctx);

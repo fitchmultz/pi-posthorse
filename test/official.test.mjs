@@ -65,9 +65,12 @@ function registerDump(pi, terminate = false, size = 600_000, image) {
 
 test("official explicit reset preserves system/tools and raw transcript; notes/history work after reset and resume", async (t) => {
 	const h = await fixture(t);
-	let fresh;
+	let initial, fresh;
 	h.faux.setResponses([
-		toolTurn(fauxToolCall("notes", { op: "write", path: "task.md", content: "DURABLE_NEXT_STEP" }), fauxToolCall("new_context", { handoff: "CONTINUE_HERE" })),
+		(ctx) => {
+			initial = getCurrentSystemPrompt(ctx.messages);
+			return toolTurn(fauxToolCall("notes", { op: "write", path: "task.md", content: "DURABLE_NEXT_STEP" }), fauxToolCall("new_context", { handoff: "CONTINUE_HERE" }));
+		},
 		(ctx) => { fresh = structuredClone(ctx.messages); return toolTurn(fauxToolCall("notes", { op: "read", path: "task.md" }), fauxToolCall("history", { op: "search", query: "RAW_ORIGINAL_OWNER" })); },
 		fauxAssistantMessage("Recovered."),
 	]);
@@ -79,6 +82,12 @@ test("official explicit reset preserves system/tools and raw transcript; notes/h
 	assert.equal(fresh[0].role, "system");
 	assert.match(getCurrentSystemPrompt(fresh), /OFFICIAL_SYSTEM_POLICY/);
 	assert.match(getCurrentSystemPrompt(fresh), /Context self-management/);
+	for (const prompt of [initial, getCurrentSystemPrompt(fresh)]) {
+		assert.match(prompt, /Configured context capacity: 100,000 tokens/);
+		assert.match(prompt, /rollover line is 83,617 tokens used/);
+		assert.match(prompt, /Fresh windows keep this configured capacity/);
+		assert.match(prompt, /Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining/);
+	}
 	assert.deepEqual(getCurrentTools(fresh).map((tool) => tool.name).sort(), h.session.getActiveToolNames().sort());
 	assert.equal(fresh.filter((message) => message.role !== "system").length, 1);
 	assert.match(JSON.stringify(fresh), /CONTINUE_HERE/);
