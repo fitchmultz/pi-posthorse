@@ -26,7 +26,8 @@ async function fixture(t, options = {}) {
 		t.after(() => { if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous; });
 		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ compaction: { enabled: options.enabled ?? true, reserveTokens: options.reserveTokens ?? 16_384 } }));
 	}
-	const faux = fauxProvider({ models: [{ id: "official-posthorse", contextWindow: options.contextWindow ?? 100_000, maxTokens: 1000 }] });
+	const faux = fauxProvider({ models: options.models ?? [{ id: "official-posthorse", contextWindow: options.contextWindow ?? 100_000, maxTokens: 1000 }] });
+	if (options.providerAuth) faux.provider.auth = options.providerAuth;
 	const setResponses = faux.setResponses;
 	faux.setResponses = (steps) => setResponses(steps.map((step) => async (ctx, opts) => {
 		opts.cacheRetention = "none";
@@ -85,7 +86,7 @@ test("official explicit reset preserves system/tools and raw transcript; notes/h
 	for (const prompt of [initial, getCurrentSystemPrompt(fresh)]) {
 		assert.match(prompt, /Configured context capacity: 100,000 tokens/);
 		assert.match(prompt, /rollover line is 83,617 tokens used/);
-		assert.match(prompt, /Fresh windows keep this configured capacity/);
+		assert.match(prompt, /Fresh windows use the active configuration/);
 		assert.match(prompt, /Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining/);
 	}
 	assert.deepEqual(getCurrentTools(fresh).map((tool) => tool.name).sort(), h.session.getActiveToolNames().sort());
@@ -98,6 +99,84 @@ test("official explicit reset preserves system/tools and raw transcript; notes/h
 	const reopened = SessionManager.open(h.sessionManager.getSessionFile());
 	assert.deepEqual(reopened.buildSessionContext().messages, JSON.parse(JSON.stringify(h.sessionManager.buildSessionContext().messages)));
 	assert.equal(h.faux.state.callCount, 3);
+});
+
+for (const forced of [false, true]) test(`context guidance follows model/settings changes during continuation and reset (forced=${forced})`, async (t) => {
+	let h;
+	h = await fixture(t, {
+		models: [
+			{ id: "small", contextWindow: 100_000, maxTokens: 1000 },
+			{ id: "large", contextWindow: 272_000, maxTokens: 1000 },
+		],
+		extension(pi) {
+			if (forced) pi.on("before_agent_start", (event) => ({ systemPrompt: `${event.systemPrompt}\n\nOTHER_POLICY` }));
+			pi.registerTool({
+				name: "switch_model", label: "Switch model", description: "Switch the active model and reserve",
+				parameters: { type: "object", properties: {} },
+				async execute() {
+					await h.session.setModel(h.faux.getModel("large"));
+					h.settingsManager.applyOverrides({ compaction: { reserveTokens: 64_000 } });
+					return { content: [{ type: "text", text: "Switched." }], details: {} };
+				},
+			});
+		},
+	});
+	const prompts = [];
+	const capture = (ctx, response) => {
+		prompts.push([getCurrentSystemPrompt(ctx.messages), ...ctx.messages.filter((message) => message.role !== "system").map(textOf)].join("\n"));
+		return response;
+	};
+	h.faux.setResponses([
+		(ctx) => capture(ctx, toolTurn(fauxToolCall("switch_model", {}))),
+		(ctx) => capture(ctx, toolTurn(fauxToolCall("new_context", { handoff: "Continue with the larger model." }))),
+		(ctx) => capture(ctx, fauxAssistantMessage("Fresh.")),
+	]);
+	await h.session.prompt("Switch model, then start a fresh context.");
+	assert.equal(boundaries(h).length, 1);
+	assert.equal(prompts.length, 3);
+	assert.match(prompts[0], /Configured context capacity: 100,000 tokens/);
+	assert.match(prompts[0], /rollover line is 83,617 tokens used/);
+	for (const prompt of prompts.slice(1)) {
+		assert.match(prompt, /Configured context capacity: 272,000 tokens/);
+		assert.match(prompt, /rollover line is 208,001 tokens used/);
+		assert.doesNotMatch(prompt, /100,000|83,617/);
+		assert.equal(prompt.split("## Context self-management (Posthorse)").length - 1, 1);
+		assert.match(prompt, /OFFICIAL_SYSTEM_POLICY/);
+		if (forced) assert.match(prompt, /OTHER_POLICY/);
+	}
+});
+
+test("fresh guidance agrees with native routed-model context capacity", async (t) => {
+	const nativeCapacities = [];
+	const h = await fixture(t, {
+		contextWindow: 272_000,
+		providerAuth: { apiKey: { name: "Fixture", resolve: async () => ({ auth: { apiKey: "fixture-key" } }) } },
+		afterExtension(pi) {
+			pi.on("context_with_system", (_event, ctx) => { nativeCapacities.push(ctx.getContextUsage()?.contextWindow); });
+		},
+	});
+	h.modelRuntime.registerVirtualModel({
+		provider: "posthorse-router", id: "auto", contextWindow: 100_000, maxTokens: 1000,
+		route: () => ({ model: h.faux.getModel(), thinkingLevel: "off" }),
+	});
+	await h.modelRuntime.setRuntimeApiKey(h.faux.provider.id, "fixture-key");
+	await h.modelRuntime.getAvailable();
+	await h.session.setModel(h.modelRuntime.getModel("posthorse-router", "auto"));
+	let continuing, fresh;
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("get_context_remaining", {})),
+		(ctx) => { continuing = getCurrentSystemPrompt(ctx.messages); return toolTurn(fauxToolCall("new_context", { handoff: "Continue with routed limits." })); },
+		(ctx) => { fresh = getCurrentSystemPrompt(ctx.messages); return fauxAssistantMessage("Fresh."); },
+	]);
+	await h.session.prompt("Check the routed budget, then start fresh.");
+	assert.equal(h.session.model.contextWindow, 100_000, "the selected virtual declaration remains different");
+	assert.match(textOf(result(h, "get_context_remaining")), /272,000 used/);
+	assert.match(continuing, /Configured context capacity: 272,000 tokens/);
+	assert.match(continuing, /rollover line is 255,617 tokens used/);
+	assert.doesNotMatch(continuing, /100,000|83,617/);
+	// Official Pi forgets the last physical response on reset; use its declared limit
+	// until routing/usage makes a physical limit available again, matching the native meter.
+	assert.match(fresh, new RegExp(`Configured context capacity: ${nativeCapacities.at(-1).toLocaleString("en-US")} tokens`));
 });
 
 test("explicit handoff admission counts the real prompt and active tool schemas", async (t) => {
@@ -127,7 +206,8 @@ test("explicit handoff admission counts the real prompt and active tool schemas"
 	await h.session.prompt("Admit only a safe handoff.");
 	assert.equal(boundaries(h).length, 1);
 	assert.equal(boundaries(h)[0].summary, "y".repeat(4000));
-	assert.equal(fresh.filter((message) => message.role !== "system").length, 1);
+	assert.equal(fresh.filter((message) => message.role !== "system").length, 2, "only the handoff and current forced-prompt guidance remain");
+	assert.equal(fresh.filter((message) => textOf(message).startsWith("## Context self-management (Posthorse)")).length, 1);
 	assert.doesNotMatch(JSON.stringify(fresh), /x{5000}/);
 });
 

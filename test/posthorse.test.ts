@@ -81,6 +81,12 @@ function toolText(result: { content: Array<{ text?: string }> }): string {
 	return result.content.map((part) => part.text ?? "").join("\n");
 }
 
+function guidanceFor(handlers: Map<string, Handler>, context: TestContext): string {
+	const event = { messages: [{ role: "system", content: "", sections: {} as Record<string, string>, timestamp: 0 }] };
+	handlers.get("context_with_system")!(event, context);
+	return event.messages[0].sections.posthorse;
+}
+
 /** The file-qualified id search prints; 0.6 printed the whole digest (`legacy`), which still reads. */
 function archivedId(id: string, source: string, legacy = false): string {
 	const digest = createHash("sha256").update(source).digest("base64url");
@@ -307,23 +313,29 @@ test("a large reserve does not send checkpoint reminders in a fresh window", () 
 	assert.match(messages[0].content, /1,000 tokens remain/);
 });
 
-test("guidance uses native sections and preserves earlier full or custom prompts", () => {
+test("guidance uses request-local sections and preserves custom or forced prompts", () => {
 	const { handlers, context } = setup();
 	const handler = handlers.get("before_agent_start")!;
 	const sections: Record<string, string> = { other: "Keep this policy" };
 	const options = { sections, customPrompt: "Custom instructions" };
 	assert.equal(handler({ systemPrompt: "Custom instructions", systemPromptOptions: options }, context), undefined);
 	assert.equal(sections.other, "Keep this policy");
-	assert.match(sections.posthorse, /Context self-management \(Posthorse\)/);
-	assert.match(sections.posthorse, /\(goal, progress, decisions, next steps\).*file-editing tools/);
-	assert.match(sections.posthorse, /verify live state/);
-	assert.match(sections.posthorse, /Configured context capacity: 100,000 tokens/);
-	assert.match(sections.posthorse, /rollover line is 83,617 tokens used/);
-	assert.match(sections.posthorse, /Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining/);
-	assert.match(sections.posthorse, /If usage is unknown, report it as unknown/);
+	const guidance = guidanceFor(handlers, context);
+	assert.match(guidance, /Context self-management \(Posthorse\)/);
+	assert.match(guidance, /\(goal, progress, decisions, next steps\).*file-editing tools/);
+	assert.match(guidance, /verify live state/);
+	assert.match(guidance, /Configured context capacity: 100,000 tokens/);
+	assert.match(guidance, /rollover line is 83,617 tokens used/);
+	assert.match(guidance, /Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining/);
+	assert.match(guidance, /If usage is unknown, report it as unknown/);
 
-	const result = handler({ systemPrompt: "Forced instructions", systemPromptOptions: { sections: {}, forceSystemPrompt: "Forced instructions" } }, context) as { systemPrompt: string };
-	assert.equal(result.systemPrompt, `Forced instructions\n\n${sections.posthorse}`);
+	const forcedOptions = { sections: {}, forceSystemPrompt: "Forced instructions" };
+	handler({ systemPromptOptions: forcedOptions }, context);
+	const event = { messages: [{ role: "system", content: "Forced instructions", timestamp: 0 }] };
+	handlers.get("context_with_system")!(event, context);
+	assert.equal(forcedOptions.forceSystemPrompt, "Forced instructions");
+	assert.equal(event.messages[0].content, "Forced instructions");
+	assert.match(event.messages[1].content, /Configured context capacity: 100,000 tokens/);
 });
 
 test("disabled Pi compaction disables automatic Posthorse behavior but not new_context", async () => {
@@ -333,7 +345,7 @@ test("disabled Pi compaction disables automatic Posthorse behavior but not new_c
 		getContextUsage: () => ({ tokens: 99_000, contextWindow: 100_000, percent: 99 }),
 		getCompactionSettings: () => ({ enabled: false, reserveTokens: 16_384 }),
 	};
-	const guidance = handlers.get("before_agent_start")!({ systemPrompt: "base", systemPromptOptions: { forceSystemPrompt: "base", sections: {} } }, context) as { systemPrompt: string };
+	const guidance = { systemPrompt: guidanceFor(handlers, context) };
 	assert.match(guidance.systemPrompt, /Pi compaction is disabled/);
 	assert.match(guidance.systemPrompt, /Context self-management \(Posthorse\)/);
 	assert.match(guidance.systemPrompt, /Configured context capacity: 100,000 tokens/);
@@ -1005,7 +1017,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 	for (const contextWindow of [4096, 8_192, 16_384]) {
 		const { handlers, tools, messages, context: base } = setup();
 		const context = usageContext(base, contextWindow, contextWindow - 500);
-		const guidance = handlers.get("before_agent_start")!({ systemPrompt: "base", systemPromptOptions: { forceSystemPrompt: "base", sections: {} } }, context) as { systemPrompt: string };
+		const guidance = { systemPrompt: guidanceFor(handlers, context) };
 		assert.match(guidance.systemPrompt, /unsupported configuration/);
 		assert.match(guidance.systemPrompt, new RegExp(`Configured context capacity: ${contextWindow.toLocaleString("en-US")} tokens`));
 		assert.match(guidance.systemPrompt, /Lower compaction.reserveTokens in Pi settings or use a larger-context model/);
@@ -1031,7 +1043,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		const { handlers, messages, context: base } = setup();
 		// 32,768 - 16,384 leaves 16,384 usable: line at 16,385 (50%), band 1,638 tokens wide.
 		const context = usageContext(base, 32_768, 15_000);
-		const guidance = handlers.get("before_agent_start")!({ systemPrompt: "base", systemPromptOptions: { forceSystemPrompt: "base", sections: {} } }, context) as { systemPrompt: string };
+		const guidance = { systemPrompt: guidanceFor(handlers, context) };
 		assert.match(guidance.systemPrompt, /rollover line \(50% used\)/);
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1);
@@ -1042,19 +1054,19 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 	{
 		const { handlers, tools, context: base } = setup();
 		const large = usageContext(base, 400_000, 1_000, 64_000);
-		const guidance = handlers.get("before_agent_start")!({ systemPrompt: "base", systemPromptOptions: { forceSystemPrompt: "base", sections: {} } }, large) as { systemPrompt: string };
+		const guidance = { systemPrompt: guidanceFor(handlers, large) };
 		assert.match(guidance.systemPrompt, /rollover line \(84% used\)/);
 		assert.match(guidance.systemPrompt, /Configured context capacity: 400,000 tokens/);
 		assert.match(guidance.systemPrompt, /rollover line is 336,001 tokens used/);
 		assert.match(guidance.systemPrompt, /No routine budget checks are needed/);
 		// A 272K window with a 64K reserve has its line at 208,001 (76%).
 		const sol = usageContext(base, 272_000, 205_000, 64_000);
-		const switched = (handlers.get("before_agent_start")!({ systemPrompt: "base", systemPromptOptions: { forceSystemPrompt: "base", sections: {} } }, sol) as { systemPrompt: string }).systemPrompt;
+		const switched = guidanceFor(handlers, sol);
 		assert.match(switched, /rollover line \(76% used\)/);
 		assert.match(switched, /Configured context capacity: 272,000 tokens/);
 		assert.match(switched, /rollover line is 208,001 tokens used/);
 		assert.doesNotMatch(switched, /400,000|336,001/);
-		const unknownCapacity = (handlers.get("before_agent_start")!({ systemPrompt: "base", systemPromptOptions: { forceSystemPrompt: "base", sections: {} } }, { ...base, model: { contextWindow: 0 } }) as { systemPrompt: string }).systemPrompt;
+		const unknownCapacity = guidanceFor(handlers, { ...base, model: { contextWindow: 0 }, getContextUsage: () => undefined });
 		assert.match(unknownCapacity, /Configured context capacity is unknown/);
 		assert.doesNotMatch(unknownCapacity, /rollover line is .* tokens used/);
 		assert.match(toolText(await run(tools, "get_context_remaining", {}, sol)), /^≈3,001 tokens until automatic rollover \(line at 208,001\); ≈67,000 tokens until the configured context limit/);

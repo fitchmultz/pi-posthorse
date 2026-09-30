@@ -884,11 +884,11 @@ function pageCapacity(ctx: PolicyContext, toolTokens: number): number {
 }
 
 function buildGuidance(ctx: PolicyContext): string {
-	const budget = budgetFor(ctx);
+	const budget = budgetFor(ctx, ctx.getContextUsage()?.contextWindow ?? ctx.model?.contextWindow);
 	const enabled = budget?.enabled ?? ctx.getCompactionSettings().enabled;
 	const n = (value: number) => value.toLocaleString("en-US");
 	const capacity = budget
-		? `Configured context capacity: ${n(budget.contextWindow)} tokens. This is the total window size, not remaining space. Fresh windows keep this configured capacity; system instructions, tools, the handoff, and new messages consume part of it.`
+		? `Configured context capacity: ${n(budget.contextWindow)} tokens. This is Pi's best available native limit, not remaining space or a measured provider boundary. Fresh windows use the active configuration; system instructions, tools, the handoff, and new messages consume part of it.`
 		: "Configured context capacity is unknown.";
 	let automatic: string;
 	if (!enabled) {
@@ -1010,13 +1010,24 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		previousPageUsage = undefined;
 	});
 
-	pi.on("before_agent_start", (event, ctx) => {
+	let runPromptOptions: { forceSystemPrompt?: string } | undefined;
+	pi.on("before_agent_start", (event) => {
+		runPromptOptions = event.systemPromptOptions;
+	});
+
+	// Continuations do not rerun before_agent_start, even after a model switch or reset.
+	pi.on("context_with_system", (event, ctx) => {
 		const guidance = buildGuidance(policy(ctx));
-		// An earlier full-prompt override makes section edits invisible to Pi.
-		if (event.systemPromptOptions.forceSystemPrompt !== undefined) {
-			return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };
+		const system = event.messages.findLast((message) => message.role === "system" && typeof message.sections?.posthorse === "string")
+			?? event.messages.find((message) => message.role === "system");
+		if (!system || system.role !== "system") return;
+		if (runPromptOptions?.forceSystemPrompt !== undefined) {
+			// ponytail: official Pi applies forced prompts after these hooks; keep guidance in
+			// request-local conversation until the host projects forced text before the hooks.
+			event.messages.splice(1, 0, { role: "custom", customType: "posthorse-guidance", content: guidance, display: false, timestamp: 0 });
+		} else {
+			system.sections = { ...system.sections, posthorse: `<posthorse>\n${guidance}\n</posthorse>` };
 		}
-		event.systemPromptOptions.sections.posthorse = guidance;
 	});
 
 	pi.on("turn_end", (event, ctx) => {
