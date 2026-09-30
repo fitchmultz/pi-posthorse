@@ -22,7 +22,7 @@ import {
 import { access, constants, lstat, open, readlink, realpath, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import { formatSize, getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { estimateTokens, formatSize, getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerPosthorseMessages, toolCards, type PosthorseDisplay } from "./ui.ts";
@@ -841,7 +841,7 @@ function hasReminder(entries: readonly EntryLike[], fingerprint: ReminderFingerp
 	);
 }
 
-function budgetFor(ctx: PolicyContext, contextWindow = ctx.model?.contextWindow): Budget | undefined {
+function budgetFor(ctx: PolicyContext, contextWindow = ctx.getContextUsage()?.contextWindow ?? ctx.model?.contextWindow): Budget | undefined {
 	if (!contextWindow || contextWindow <= 0) return undefined;
 	const { enabled, reserveTokens } = ctx.getCompactionSettings();
 	const usable = contextWindow - reserveTokens;
@@ -850,11 +850,10 @@ function budgetFor(ctx: PolicyContext, contextWindow = ctx.model?.contextWindow)
 
 /** Half the fresh capacity after prompt/tool/input overhead remains for continued work. */
 function freshPayloadChars(ctx: PolicyContext, toolTokens: number, pendingMessages: readonly MessageLike[] = [], cap = MAX_HANDOFF_CHARS): number {
-	const contextWindow = ctx.model?.contextWindow;
-	if (!contextWindow || contextWindow <= 0) return cap;
-	const budget = budgetFor(ctx, contextWindow);
-	const line = budget?.enabled && budget.supported ? budget.rolloverAt : contextWindow;
-	const promptTokens = Math.ceil(ctx.getSystemPrompt().length / 4);
+	const budget = budgetFor(ctx);
+	if (!budget) return cap;
+	const line = budget.enabled && budget.supported ? budget.rolloverAt : budget.contextWindow;
+	const promptTokens = Math.ceil(ctx.getSystemPrompt().length / 4) + guidanceTokens(ctx);
 	const pendingTokens = pendingMessages.reduce(
 		(total, message) => total + Math.ceil(textOf(message).length / 4) + imagesOf(message.content).length * (ESTIMATED_IMAGE_CHARS / 4),
 		0,
@@ -880,12 +879,16 @@ function pageCapacity(ctx: PolicyContext, toolTokens: number): number {
 	if (!usage || usage.tokens == null) return freshPayloadChars(ctx, toolTokens, [], MAX_PAGE_CHARS) / 4 + PAGE_MARGIN_TOKENS;
 	const budget = budgetFor(ctx, usage.contextWindow);
 	const line = budget?.enabled && budget.supported ? budget.rolloverAt : usage.contextWindow;
-	return line - usage.tokens;
+	return line - usage.tokens - guidanceTokens(ctx);
 }
 
 function buildGuidance(ctx: PolicyContext): string {
 	const budget = budgetFor(ctx);
 	const enabled = budget?.enabled ?? ctx.getCompactionSettings().enabled;
+	const n = (value: number) => value.toLocaleString("en-US");
+	const capacity = budget
+		? `Configured context capacity: ${n(budget.contextWindow)} tokens. This is Pi's best available native limit, not remaining space or a measured provider boundary. Fresh windows use the active configuration; system instructions, tools, the handoff, and new messages consume part of it.`
+		: "Configured context capacity is unknown.";
 	let automatic: string;
 	if (!enabled) {
 		automatic = "Pi compaction is disabled in the available settings, so Posthorse sends no checkpoint reminder. new_context remains available.";
@@ -895,9 +898,12 @@ function buildGuidance(ctx: PolicyContext): string {
 		const deadline = budget
 			? `${Math.max(1, Math.round((budget.rolloverAt / budget.contextWindow) * 100))}% used`
 			: "the configured Pi context limit";
-		automatic = `Automatic rollover follows Pi's compaction setting. At most one checkpoint reminder may arrive before the rollover line (${deadline}); when it does, stop normal work, ${CHECKPOINT_STEPS}.`;
+		const line = budget ? ` The rollover line is ${n(budget.rolloverAt)} tokens used under the available Pi settings.` : "";
+		automatic = `Automatic rollover follows Pi's compaction setting.${line} At most one checkpoint reminder may arrive before the rollover line (${deadline}); when it does, stop normal work, ${CHECKPOINT_STEPS}.`;
 	}
 	return `## Context self-management (Posthorse)
+${capacity}
+Do not guess context capacity or remaining space from response-token limits or reasoning budgets. Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining. If usage is unknown, report it as unknown. No routine budget checks are needed.
 ${automatic}
 After a rollover, earlier conversation stays in history. Restore notes and todos, then verify live state before stateful or external work; automatic handoffs record inputs, not progress.
 Keep one concise current-state note per task. Preserve decisions and safety constraints; link fuller evidence and history instead of copying them. Edit changed sections rather than resending unchanged content.
@@ -909,6 +915,11 @@ function persistedPolicy(ctx: ExtensionContext): CompactionPolicy {
 	const errors = settings.drainErrors();
 	if (errors.length) throw new Error(`Posthorse could not read persisted Pi settings: ${errors.map((error) => error.error.message).join("; ")}`);
 	return settings.getCompactionSettings(ctx.model);
+}
+
+/** ponytail: native estimates can omit request-local guidance; reserve its full section until post-transform usage is exposed. */
+function guidanceTokens(ctx: PolicyContext): number {
+	return estimateTokens({ role: "system", content: `<posthorse>\n${buildGuidance(ctx)}\n</posthorse>`, timestamp: 0 });
 }
 
 /** SDK hosts can inject live settings instead of the persisted CLI snapshot. */
@@ -1003,13 +1014,24 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		previousPageUsage = undefined;
 	});
 
-	pi.on("before_agent_start", (event, ctx) => {
+	let runPromptOptions: { forceSystemPrompt?: string } | undefined;
+	pi.on("before_agent_start", (event) => {
+		runPromptOptions = event.systemPromptOptions;
+	});
+
+	// Continuations do not rerun before_agent_start, even after a model switch or reset.
+	pi.on("context_with_system", (event, ctx) => {
 		const guidance = buildGuidance(policy(ctx));
-		// An earlier full-prompt override makes section edits invisible to Pi.
-		if (event.systemPromptOptions.forceSystemPrompt !== undefined) {
-			return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };
+		const system = event.messages.findLast((message) => message.role === "system" && typeof message.sections?.posthorse === "string")
+			?? event.messages.find((message) => message.role === "system");
+		if (!system || system.role !== "system") return;
+		if (runPromptOptions?.forceSystemPrompt !== undefined) {
+			// ponytail: official Pi applies forced prompts after these hooks; keep guidance in
+			// request-local conversation until the host projects forced text before the hooks.
+			event.messages.splice(1, 0, { role: "custom", customType: "posthorse-guidance", content: guidance, display: false, timestamp: 0 });
+		} else {
+			system.sections = { ...system.sections, posthorse: `<posthorse>\n${guidance}\n</posthorse>` };
 		}
-		event.systemPromptOptions.sections.posthorse = guidance;
 	});
 
 	pi.on("turn_end", (event, ctx) => {
@@ -1153,8 +1175,8 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		label: "Context Remaining",
 		...toolCards("get_context_remaining"),
 		description:
-			"Estimate tokens left before Pi's automatic rollover and the configured context limit. A checkpoint reminder already arrives before rollover; use this only before a large step late in a window.",
-		promptSnippet: "check the context budget before a large step late in a window",
+			"Estimate tokens left before Pi's automatic rollover and the configured context limit. Check before reporting remaining space or changing your work plan because of context limits. A checkpoint reminder already arrives before rollover; no routine checks are needed.",
+		promptSnippet: "verify remaining context before reporting a token count or changing plans because of context limits",
 		parameters: Type.Object({}),
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
 			const host = policy(ctx);

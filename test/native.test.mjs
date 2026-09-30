@@ -364,12 +364,17 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) te
 	assert.equal(h.sessionManager.getBranch().filter((entry) => entry.type === "compaction" && entry.details?.posthorse === 1).length, 1);
 	for (const messages of captures) {
 		const prompt = getCurrentSystemPrompt(messages);
-		assert.equal(prompt.split("## Context self-management (Posthorse)").length - 1, 1);
-		assert.match(prompt, /verify live state/);
-		assert.match(prompt, /available file-editing tools at its absolute path/);
-		assert.match(prompt, /already current, leave it unchanged/);
-		assert.match(prompt, /Preserve decisions and safety constraints/);
-		if (mode.startsWith("forced-")) assert.match(prompt, /OTHER_EXTENSION_POLICY/);
+		const guidance = mode.startsWith("forced-")
+			? messages.map(textOf).find((text) => text.includes("## Context self-management (Posthorse)")) ?? ""
+			: prompt;
+		assert.equal(guidance.split("## Context self-management (Posthorse)").length - 1, 1);
+		assert.match(guidance, /verify live state/);
+		assert.match(guidance, /available file-editing tools at its absolute path/);
+		assert.match(guidance, /already current, leave it unchanged/);
+		assert.match(guidance, /Preserve decisions and safety constraints/);
+		if (mode.startsWith("forced-")) {
+			assert.match(prompt, /OTHER_EXTENSION_POLICY/);
+		}
 		if (mode === "custom") assert.match(prompt, /CUSTOM_PROMPT_POLICY/);
 	}
 	if (!mode.startsWith("forced-")) {
