@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { AgentSession, createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createPosthorse } from "../index.ts";
 
@@ -13,6 +13,7 @@ const toolTurn = (...calls) => fauxAssistantMessage(calls, { stopReason: "toolUs
 const overflow = () => fauxAssistantMessage("", { stopReason: "error", errorMessage: "prompt is too long: 300000 tokens > 100000 maximum" });
 const boundaries = (h) => h.sessionManager.getBranch().filter((entry) => entry.type === "compaction" && entry.details?.posthorse === 1);
 const result = (h, name) => h.sessionManager.getBranch().findLast((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === name)?.message;
+const fork = typeof AgentSession.prototype.acquireCheckpoint === "function";
 
 async function fixture(t, options = {}) {
 	const temp = mkdtempSync(join(tmpdir(), "posthorse-official-"));
@@ -47,7 +48,7 @@ async function fixture(t, options = {}) {
 		],
 	});
 	await resourceLoader.reload();
-	assert.deepEqual(resourceLoader.getExtensions().errors, []);
+	assert.deepEqual(resourceLoader.getExtensions().errors, options.expectedErrors ?? []);
 	const sessionManager = SessionManager.create(cwd, join(temp, "sessions"));
 	options.seed?.(sessionManager, faux.getModel());
 	const { session } = await createAgentSession({ cwd, agentDir, modelRuntime, model: faux.getModel(), resourceLoader, settingsManager, sessionManager, noTools: "builtin" });
@@ -56,9 +57,9 @@ async function fixture(t, options = {}) {
 	return { cwd, agentDir, session, faux, sessionManager, settingsManager, modelRuntime, resourceLoader };
 }
 
-function registerDump(pi, terminate = false) {
+function registerDump(pi, terminate = false, size = 600_000, image) {
 	pi.registerTool({ name: "dump", label: "Dump", description: "Oversized local output", parameters: { type: "object", properties: {} },
-		async execute() { return { content: [{ type: "text", text: `DUMP_HEAD ${"x".repeat(600_000)} DUMP_TAIL` }], details: {}, terminate }; },
+		async execute() { return { content: [{ type: "text", text: `DUMP_HEAD ${"x".repeat(size)} DUMP_TAIL` }, ...(image ? [image] : [])], details: {}, terminate }; },
 	});
 }
 
@@ -90,6 +91,37 @@ test("official explicit reset preserves system/tools and raw transcript; notes/h
 	assert.equal(h.faux.state.callCount, 3);
 });
 
+test("explicit handoff admission counts the real prompt and active tool schemas", async (t) => {
+	const h = await fixture(t, {
+		contextWindow: 32_768, enabled: false,
+		afterExtension(pi) {
+			pi.on("before_agent_start", () => {
+				const active = new Set(pi.getActiveTools());
+				const toolTokens = pi.getAllTools().filter((tool) => active.has(tool.name))
+					.reduce((total, tool) => total + Math.ceil(JSON.stringify({ name: tool.name, description: tool.description ?? "", parameters: tool.parameters }).length / 4), 0);
+				const promptTokens = 32_768 - 1000 - toolTokens - 2250;
+				assert.ok(promptTokens > 0);
+				return { systemPrompt: "s".repeat(promptTokens * 4) };
+			});
+		},
+	});
+	let fresh;
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "x".repeat(5000) })),
+		() => {
+			assert.equal(result(h, "new_context").isError, true);
+			assert.match(textOf(result(h, "new_context")), /too large.*limit 4,500/i);
+			return toolTurn(fauxToolCall("new_context", { handoff: "y".repeat(4000) }));
+		},
+		(ctx) => { fresh = ctx.messages; return fauxAssistantMessage("Fresh."); },
+	]);
+	await h.session.prompt("Admit only a safe handoff.");
+	assert.equal(boundaries(h).length, 1);
+	assert.equal(boundaries(h)[0].summary, "y".repeat(4000));
+	assert.equal(fresh.filter((message) => message.role !== "system").length, 1);
+	assert.doesNotMatch(JSON.stringify(fresh), /x{5000}/);
+});
+
 test("a failed sibling cancels the explicit reset for the whole batch", async (t) => {
 	const h = await fixture(t);
 	let next;
@@ -101,20 +133,64 @@ test("a failed sibling cancels the explicit reset for the whole batch", async (t
 	assert.equal(result(h, "notes").isError, true);
 	assert.equal(boundaries(h).length, 0);
 	assert.match(next, /BATCH_OWNER_INPUT/);
+	h.faux.setResponses([toolTurn(fauxToolCall("new_context", { handoff: "SUCCESS_AFTER_FAILURE" })), fauxAssistantMessage("Fresh.")]);
+	await h.session.prompt("Retry the checkpoint.");
+	assert.equal(boundaries(h).length, 1);
+	assert.equal(boundaries(h)[0].summary, "SUCCESS_AFTER_FAILURE");
+	assert.doesNotMatch(JSON.stringify(SessionManager.open(h.sessionManager.getSessionFile()).buildSessionContext().messages), /BATCH_OWNER_INPUT|MUST_NOT_COMMIT/);
+});
+
+for (const order of ["before", "after"]) test(`a colliding foreign new_context cannot authorize Posthorse rollover (${order})`, async (t) => {
+	let foreignCalls = 0, next;
+	const foreign = (pi) => pi.registerTool({
+		name: "new_context", namespace: "survey", label: "Survey context", description: "An unrelated context query",
+		parameters: { type: "object", properties: { handoff: { type: "string" } } },
+		async execute() { foreignCalls++; return { content: [{ type: "text", text: "FOREIGN_RESULT" }], details: { foreign: true } }; },
+	});
+	const h = await fixture(t, {
+		...(order === "before" ? { extension: foreign } : { afterExtension: foreign }),
+		expectedErrors: [{ path: order === "before" ? "<inline:2>" : "<inline:3>", error: `Tool "new_context" conflicts with ${order === "before" ? "<inline:1>" : "<inline:2>"}` }],
+	});
+	h.faux.setResponses([
+		toolTurn({ ...fauxToolCall("new_context", { handoff: "COLLIDING_ARGUMENT" }), namespace: "survey" }),
+		(ctx) => { next = JSON.stringify(ctx.messages); return fauxAssistantMessage("Done."); },
+	]);
+	await h.session.prompt("OWNER_KEEP_CONTEXT");
+	assert.equal(foreignCalls, order === "before" ? 1 : 0);
+	assert.equal(boundaries(h).length, order === "before" ? 0 : 1);
+	if (order === "before") {
+		assert.equal(result(h, "new_context").details.foreign, true);
+		assert.match(next, /OWNER_KEEP_CONTEXT|FOREIGN_RESULT/);
+	} else {
+		assert.equal(result(h, "new_context").details.kind, "new-context");
+		assert.equal(boundaries(h)[0].summary, "COLLIDING_ARGUMENT");
+		assert.doesNotMatch(next, /OWNER_KEEP_CONTEXT|FOREIGN_RESULT/);
+	}
 });
 
 test("oversized tool output rolls over without credentials and repeated resets do not nest recovery", async (t) => {
-	const h = await fixture(t, { extension: registerDump });
+	const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0ioAAAAASUVORK5CYII=" };
+	const h = await fixture(t, { extension: (pi) => registerDump(pi, false, 600_000, image) });
 	const requests = [];
 	for (let cycle = 0; cycle < 2; cycle++) {
 		h.faux.setResponses([
 			toolTurn(fauxToolCall("dump", {})),
-			(ctx) => { requests.push(structuredClone(ctx.messages)); return fauxAssistantMessage("Done."); },
+			(ctx) => {
+				requests.push(structuredClone(ctx.messages));
+				const entry = h.sessionManager.getBranch().findLast((entry) => entry.message?.toolName === "dump");
+				assert.match(boundaries(h).at(-1).summary, new RegExp(`\\[1 image: image/png\\] — recover with history read id ${entry.id}`));
+				assert.doesNotMatch(boundaries(h).at(-1).summary, new RegExp(image.data.slice(0, 20)));
+				return toolTurn(fauxToolCall("history", { op: "read", id: entry.id }));
+			},
+			fauxAssistantMessage("Done."),
 		]);
 		await h.session.prompt(`OWNER_APPROVAL: inspect only. Cycle ${cycle}.`);
+		assert.deepEqual(result(h, "history").content.filter((part) => part.type === "image"), [image]);
+		assert.match(textOf(result(h, "history")), /\[toolResult\] DUMP_HEAD/);
+		assert.match(textOf(result(h, "history")), /More remains; call history read/);
 	}
 	assert.equal(boundaries(h).length, 2);
-	assert.equal(h.faux.state.callCount, 4, "two tool/response pairs, no summarization request");
+	assert.equal(h.faux.state.callCount, 6, "two dump/recovery/response batches, no summarization request");
 	for (const request of requests) {
 		assert.equal(request[0].role, "system");
 		assert.equal(request.filter((message) => message.role !== "system").length, 1);
@@ -162,16 +238,17 @@ test("eligible overflow recovery (keepRecentTokens=1) retries once without summa
 });
 
 test("eligible overflow (keepRecentTokens=1) retries fresh and later requests can recover again", async (t) => {
-	const h = await fixture(t, { keepRecentTokens: 1 });
+	const h = await fixture(t, { keepRecentTokens: 1, extension: (pi) => registerDump(pi, false, 20_000) });
 	let retry;
 	for (let cycle = 0; cycle < 2; cycle++) {
-		h.faux.setResponses([overflow(), (ctx) => { retry = ctx.messages; return fauxAssistantMessage("Recovered."); }]);
+		h.faux.setResponses([toolTurn(fauxToolCall("dump", {})), overflow(), (ctx) => { retry = ctx.messages; return fauxAssistantMessage("Recovered."); }]);
 		await h.session.prompt(`Owner request ${cycle}`);
 		assert.equal(retry.filter((message) => message.role !== "system").length, 1);
 		assert.doesNotMatch(JSON.stringify(retry), /prompt is too long/);
+		assert.match(JSON.stringify(retry), /Tool result evidence[\s\S]*DUMP_HEAD[\s\S]*DUMP_TAIL/);
 	}
 	assert.equal(boundaries(h).length, 2);
-	assert.equal(h.faux.state.callCount, 4);
+	assert.equal(h.faux.state.callCount, 6);
 });
 
 for (const stopReason of ["error", "aborted"]) test(`ordinary ${stopReason} does not trigger a Posthorse reset`, async (t) => {
@@ -183,12 +260,12 @@ for (const stopReason of ["error", "aborted"]) test(`ordinary ${stopReason} does
 });
 
 test("disabled live settings suppress automatic rollover and reminders but retain explicit reset", async (t) => {
-	const h = await fixture(t, { enabled: false, extension: registerDump });
+	const h = await fixture(t, { enabled: false, extension: (pi) => registerDump(pi, false, 340_000) });
 	let oversized;
 	h.faux.setResponses([toolTurn(fauxToolCall("dump", {})), (ctx) => { oversized = JSON.stringify(ctx.messages); return fauxAssistantMessage("Done."); }]);
 	await h.session.prompt("Inspect the output.");
 	assert.equal(boundaries(h).length, 0);
-	assert.ok(oversized.length > 600_000);
+	assert.ok(oversized.length > 340_000, "above the rollover line but within physical capacity");
 	assert.match(oversized, /Pi compaction is disabled/);
 	h.faux.setResponses([toolTurn(fauxToolCall("new_context", {})), fauxAssistantMessage("Fresh.")]);
 	await h.session.prompt("Start fresh.");
@@ -272,7 +349,7 @@ test("the default file extension loads on official Pi and reads persisted settin
 	assert.equal(boundaries(h).length, 1);
 	const context = h.session.extensionRunner.createContext();
 	assert.equal(context.newContext, undefined);
-	assert.equal(context.getCompactionSettings, undefined);
+	assert.equal(typeof context.getCompactionSettings, fork ? "function" : "undefined");
 });
 
 test("queued input arrives unchanged after native automatic rollover", async (t) => {
@@ -295,15 +372,24 @@ test("queued input arrives unchanged after native automatic rollover", async (t)
 	assert.equal(h.faux.state.callCount, 2);
 });
 
-test("an oversized incoming prompt reaches the provider before the first turn_end boundary", async (t) => {
+test("oversized incoming input obeys the selected host's preflight boundary", async (t) => {
 	const h = await fixture(t);
 	let first, retry;
-	const input = `OVERSIZED_FRESH_INPUT ${"p".repeat(600_000)}`;
+	const input = `OVERSIZED_FRESH_INPUT ${"p".repeat(600_000)} OVERSIZED_OWNER_TAIL`;
 	h.faux.setResponses([
 		(ctx) => { first = JSON.stringify(ctx.messages); return overflow(); },
 		(ctx) => { retry = JSON.stringify(ctx.messages); return fauxAssistantMessage("Recovered after provider rejection."); },
 	]);
 	await h.session.prompt(input);
+	assert.match(boundaries(h)[0].summary, /OVERSIZED_FRESH_INPUT[\s\S]*OVERSIZED_OWNER_TAIL/);
+	if (fork) {
+		assert.equal(h.faux.state.callCount, 1, "preflight rolls over before the provider's single bounded attempt");
+		assert.equal(boundaries(h).length, 1);
+		assert.ok(first.length < 30_000);
+		assert.match(first, /OVERSIZED_FRESH_INPUT/);
+		assert.match(readFileSync(h.sessionManager.getSessionFile(), "utf8"), /OVERSIZED_FRESH_INPUT/);
+		return;
+	}
 	assert.ok(first.includes(input), "this beta deliberately does not transform incoming input");
 	assert.ok(first.length > 600_000);
 	assert.ok(retry.length < 30_000);
@@ -407,7 +493,7 @@ test("late queued input defers an explicit handoff that no longer fits", async (
 });
 
 test("resumed over-budget context rolls over before before_agent_start without a summary request", async (t) => {
-	let beforeAgent = false, nativeBeforePrompt = false, summaryRequests = 0;
+	let beforeAgent = false, nativeBeforePrompt = false, summaryRequests = 0, nextRequest;
 	const h = await fixture(t, {
 		seed(manager, model) {
 			manager.appendMessage({ role: "user", content: "persisted ".repeat(70_000), timestamp: Date.now() });
@@ -421,17 +507,21 @@ test("resumed over-budget context rolls over before before_agent_start without a
 		},
 	});
 	h.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
-	h.faux.setResponses(Array.from({ length: 5 }, () => () => {
+	h.faux.setResponses(Array.from({ length: 5 }, () => (ctx) => {
 		if (!beforeAgent) { summaryRequests++; return fauxAssistantMessage("NATIVE_PREPROMPT_SUMMARY"); }
+		nextRequest = ctx.messages;
 		return fauxAssistantMessage("New prompt completed.");
 	}));
-	await h.session.prompt("Resume this session.");
+	const input = `NEW_OWNER_AFTER_PREFLIGHT ${"q".repeat(100_000)}`;
+	await h.session.prompt(input);
 	assert.equal(nativeBeforePrompt, true);
 	assert.equal(summaryRequests, 0);
 	assert.equal(h.faux.state.callCount, 1);
 	assert.equal(boundaries(h).length, 1);
 	assert.match(boundaries(h)[0].summary, /persisted/);
 	assert.doesNotMatch(boundaries(h)[0].summary, /NATIVE_PREPROMPT_SUMMARY/);
+	assert.doesNotMatch(boundaries(h)[0].summary, /NEW_OWNER_AFTER_PREFLIGHT/);
+	assert.equal(nextRequest.filter((message) => textOf(message) === input).length, 1, "newly submitted input survives unchanged, separate from the recovery record");
 });
 
 test("same-boundary replacement and custom-message references recover committed text and images", async (t) => {
@@ -667,17 +757,24 @@ test("unsupported automatic budget deliberately keeps native model summarization
 	assert.equal(native.fromHook, false);
 });
 
-for (const reason of ["overflow", "length"]) test(`default keepRecentTokens can prevent a tiny ${reason} from reaching the native hook`, async (t) => {
+for (const reason of ["overflow", "length"]) test(`tiny ${reason} obeys native recovery eligibility with default keepRecentTokens`, async (t) => {
 	let intercepted = 0;
 	const h = await fixture(t, { extension(pi) { pi.on("session_before_compact", () => { intercepted++; }); } });
-	h.faux.setResponses([reason === "overflow" ? overflow() : fauxAssistantMessage("Partial.", { stopReason: "length" })]);
+	let retry;
+	h.faux.setResponses([reason === "overflow" ? overflow() : fauxAssistantMessage("Partial.", { stopReason: "length" }),
+		(ctx) => { retry = JSON.stringify(ctx.messages); return fauxAssistantMessage("Recovered tiny input."); }]);
 	await h.session.prompt("Tiny input.");
-	assert.equal(intercepted, 0, "Pi prepareCompaction requires a compactable span");
-	assert.equal(boundaries(h).length, 0);
-	assert.equal(h.faux.state.callCount, 1);
+	assert.equal(intercepted, fork ? 1 : 0);
+	assert.equal(boundaries(h).length, fork ? 1 : 0);
+	assert.equal(h.faux.state.callCount, fork ? 2 : 1);
+	if (fork) {
+		assert.equal(boundaries(h)[0].usage, undefined);
+		assert.match(retry, /Tiny input/);
+		assert.doesNotMatch(retry, /Partial\.|prompt is too long/);
+	}
 });
 
-for (const keepRecentTokens of [20_000, 1]) test(`native eligibility can miss a second large tool result after reset (keepRecentTokens=${keepRecentTokens})`, async (t) => {
+for (const keepRecentTokens of [20_000, 1]) test(`second large tool result obeys native after-reset eligibility (keepRecentTokens=${keepRecentTokens})`, async (t) => {
 	const h = await fixture(t, { keepRecentTokens, extension: registerDump });
 	let second, third;
 	h.faux.setResponses([
@@ -687,8 +784,13 @@ for (const keepRecentTokens of [20_000, 1]) test(`native eligibility can miss a 
 	]);
 	await h.session.prompt("Inspect two outputs.");
 	assert.equal(second.filter((message) => message.role !== "system").length, 1);
-	assert.ok(third.some((message) => message.role === "toolResult" && textOf(message).length > 600_000),
-		"no new user span: prepareCompaction can decline the second operation, even with keepRecentTokens=1");
+	if (fork) {
+		assert.equal(third.filter((message) => message.role !== "system").length, 1);
+		assert.ok(JSON.stringify(third).length < 30_000);
+		assert.match(JSON.stringify(third), /DUMP_HEAD/);
+		assert.match(JSON.stringify(third), /DUMP_TAIL/);
+	} else assert.ok(third.some((message) => message.role === "toolResult" && textOf(message).length > 600_000),
+		"official preparation can decline the second operation without a new user span");
 	assert.equal(boundaries(h).length, 2, "the final response can trigger a later native operation");
 	assert.equal(h.faux.state.callCount, 3);
 });

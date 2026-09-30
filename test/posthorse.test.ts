@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import posthorse from "../index.ts";
+import posthorse, { createPosthorse } from "../index.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 
 type Handler = (event: Record<string, unknown>, context: TestContext) => unknown;
@@ -19,7 +19,6 @@ type Tool = {
 		context: TestContext,
 	): Promise<{
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
-		newContext?: { handoff?: string };
 		details?: PosthorseDisplay;
 	}>;
 };
@@ -28,13 +27,13 @@ type TestContext = {
 	model: { contextWindow: number };
 	sessionManager: {
 		getBranch(): Record<string, unknown>[];
+		getLeafId?(): string | null;
 		getSessionDir(): string;
 		buildSessionProjection(): { entries: Array<{ sourceEntry: Record<string, unknown>; messages: unknown[] }> };
 	};
 	getContextUsage(): { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
 	getCompactionSettings(): { enabled: boolean; reserveTokens: number };
 	getSystemPrompt(): string;
-	newContext(options?: { handoff?: string }): void;
 };
 
 /** Fixture branches put nothing in the model's active context unless a test projects entries. */
@@ -58,15 +57,15 @@ function setup() {
 			tools.set(tool.name, tool);
 			toolDefinitions.push(tool);
 		},
-		registerContextWindowHook() {},
 		registerMessageRenderer() {},
 		sendMessage(message: (typeof messages)[number]) {
 			messages.push(message);
 		},
+		appendEntry() {},
 		getActiveTools: () => [...tools.keys()],
 		getAllTools: () => toolDefinitions.map((tool) => ({ ...tool, id: tool.name })),
 	} as unknown as ExtensionAPI;
-	posthorse(api);
+	createPosthorse((ctx) => (ctx as unknown as TestContext).getCompactionSettings())(api);
 	const context: TestContext = {
 		cwd: process.cwd(),
 		model: { contextWindow: 100_000 },
@@ -74,9 +73,8 @@ function setup() {
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
 		getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }),
 		getSystemPrompt: () => "You are a test assistant.",
-		newContext: () => {},
 	};
-	return { handlers, tools, messages, context };
+	return { handlers, tools, toolDefinitions, messages, context };
 }
 
 function toolText(result: { content: Array<{ text?: string }> }): string {
@@ -98,7 +96,7 @@ function run(tools: Map<string, Tool>, name: string, params: Record<string, unkn
 }
 
 function turnEnd(handlers: Map<string, Handler>, context: TestContext, toolResults: Record<string, unknown>[] = []) {
-	handlers.get("turn_end")!({ message: { role: "assistant", stopReason: toolResults.length ? "toolUse" : "stop" }, toolResults }, context);
+	handlers.get("turn_end")!({ message: { role: "assistant", stopReason: toolResults.length ? "toolUse" : "stop" }, toolResults, entries: [], context: { pendingMessages: [] } }, context);
 }
 
 /** A context whose usage sits at `tokens` inside a window of `contextWindow`. */
@@ -111,23 +109,21 @@ function usageContext(base: TestContext, contextWindow: number, tokens: number, 
 	};
 }
 
+function automaticResult(handlers: Map<string, Handler>, context: TestContext, branchEntries: Record<string, unknown>[], projected?: Array<{ sourceEntry: Record<string, unknown>; messages: unknown[] }>) {
+	const entries = projected ?? branchEntries.filter((entry) => entry.type === "message").map((entry) => ({ sourceEntry: entry, messages: [entry.message] }));
+	return handlers.get("session_before_compact")!({ reason: "threshold", signal: new AbortController().signal, preparation: { settings: context.getCompactionSettings(), tokensBefore: 100 } }, {
+		...context, sessionManager: { ...context.sessionManager, getLeafId: () => "boundary", getBranch: () => branchEntries, buildSessionProjection: () => ({ entries }) },
+	}) as { compaction?: { summary: string }; cancel?: boolean } | undefined;
+}
 function automaticHandoff(handlers: Map<string, Handler>, context: TestContext, branchEntries: Record<string, unknown>[]) {
-	const entries = branchEntries
-		.filter((entry) => entry.type === "message")
-		.map((entry) => ({ sourceEntry: entry, messages: [entry.message] }));
-	return (
-		handlers.get("session_before_auto_compact")!(
-			{ reason: "threshold", retainedToolResultIds: [], branchEntries },
-			{ ...context, sessionManager: { ...context.sessionManager, buildSessionProjection: () => ({ entries }) } },
-		) as { newContext: { handoff: string } }
-	).newContext.handoff;
+	return automaticResult(handlers, context, branchEntries)!.compaction!.summary;
 }
 
-test("new_context returns an atomic handoff and automatic rollover builds a recovery record", async () => {
+test("new_context requests a turn-boundary reset and automatic rollover builds a recovery record", async () => {
 	const { handlers, tools, context } = setup();
 	const result = await run(tools, "new_context", { handoff: "continue here" }, context);
-	assert.deepEqual(result.newContext, { handoff: "continue here" });
-	assert.equal(handlers.has("session_before_compact"), false, "manual /compact is left to Pi");
+	assert.match(toolText(result), /Requested a fresh Pi context/);
+	assert.equal(handlers.get("session_before_compact")!({ reason: "manual" }, context), undefined, "manual /compact is left to Pi");
 
 	const handoff = automaticHandoff(handlers, context, [
 		{ type: "message", id: "user", timestamp: "2026-09-02T10:00:00Z", message: { role: "user", content: "keep working on the fix" } },
@@ -159,7 +155,8 @@ test("new_context returns an atomic handoff and automatic rollover builds a reco
 });
 
 test("automatic recovery keeps owner anchors and visible coordination without stale transcript guesses", () => {
-	const { handlers, context } = setup();
+	const { handlers, context, toolDefinitions } = setup();
+	toolDefinitions.push({ name: "ask_question" });
 	const branch: Record<string, unknown>[] = [
 		{ type: "message", id: "old", message: { role: "user", content: "old completed task" } },
 		{ type: "context_window", id: "window-2", timestamp: "2026-09-02T10:00:00Z", handoff: "Original approved goal" },
@@ -182,11 +179,12 @@ test("automatic recovery keeps owner anchors and visible coordination without st
 		}
 	}
 	branch.push(
+		{ type: "message", id: "question-call", message: { role: "assistant", content: [{ type: "toolCall", id: "question", name: "ask_question", arguments: {} }] } },
 		{
 			type: "message",
 			id: "owner-answer",
 			timestamp: "2026-09-02T10:20:00Z",
-			message: { role: "toolResult", toolName: "ask_question", isError: false, content: "OWNER APPROVED SHIP" },
+			message: { role: "toolResult", toolName: "ask_question", toolCallId: "question", isError: false, content: "OWNER APPROVED SHIP" },
 		},
 		{
 			type: "custom_message",
@@ -219,9 +217,11 @@ test("automatic recovery keeps owner anchors and visible coordination without st
 });
 
 test("automatic recovery includes successful ask_question cancellations and excludes errors", () => {
-	const { handlers, context } = setup();
+	const { handlers, context, toolDefinitions } = setup();
+	toolDefinitions.push({ name: "ask_question" });
 	const handoff = automaticHandoff(handlers, context, [
-		{ type: "message", id: "cancelled", timestamp: "1", message: { role: "toolResult", toolName: "ask_question", isError: false, content: "Question cancelled by owner" } },
+		{ type: "message", id: "question-call", message: { role: "assistant", content: [{ type: "toolCall", id: "question", name: "ask_question", arguments: {} }] } },
+		{ type: "message", id: "cancelled", timestamp: "1", message: { role: "toolResult", toolName: "ask_question", toolCallId: "question", isError: false, content: "Question cancelled by owner" } },
 		{ type: "message", id: "failed", timestamp: "2", message: { role: "toolResult", toolName: "ask_question", isError: true, content: "tool crashed" } },
 	]);
 	assert.match(handoff, /owner answer via ask_question/);
@@ -229,13 +229,13 @@ test("automatic recovery includes successful ask_question cancellations and excl
 	assert.doesNotMatch(handoff, /tool crashed/);
 });
 
-test("budget policy sends one best-effort reminder below the line and lets Pi own rollover", () => {
+test("budget policy sends one best-effort reminder below the line and lets Pi own rollover", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-test-"));
 	try {
 		// A project file that disagrees with Pi's effective policy must be ignored: Pi decides trust, not Posthorse.
 		mkdirSync(join(dir, ".pi"));
 		writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ compaction: { enabled: false, reserveTokens: 1 } }));
-		const { handlers, messages } = setup();
+		const { handlers, messages, tools } = setup();
 		const contextWindow = 100_000;
 		const reserve = 64_000;
 		const threshold = contextWindow - reserve;
@@ -243,7 +243,6 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 		const remindAt = 32_401; // Last 3,600 tokens of the 36,000 usable tokens.
 		let tokens = remindAt - 1;
 		const branch: Record<string, unknown>[] = [{ type: "context_window", id: "window-2" }];
-		const rollovers: Array<{ handoff?: string }> = [];
 		let branchReads = 0;
 		const context: TestContext = {
 			cwd: dir,
@@ -252,7 +251,6 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 			getContextUsage: () => ({ tokens, contextWindow, percent: (tokens / contextWindow) * 100 }),
 			getCompactionSettings: () => ({ enabled: true, reserveTokens: reserve }),
 			getSystemPrompt: () => "You are a test assistant.",
-			newContext: (options) => rollovers.push(options ?? {}),
 		};
 
 		handlers.get("session_start")!({}, context);
@@ -260,7 +258,8 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 		assert.equal(messages.length, 0, "no reminder below the band");
 		assert.equal(branchReads, 0, "below-band turns must not fetch history");
 		tokens = remindAt;
-		turnEnd(handlers, context, [{ toolName: "new_context" }]);
+		await run(tools, "new_context", {}, context);
+		turnEnd(handlers, context, [{ toolName: "new_context", toolCallId: "id" }]);
 		assert.equal(messages.length, 0);
 		handlers.get("turn_end")!({ message: { role: "assistant", stopReason: "error" }, toolResults: [] }, context);
 		assert.equal(messages.length, 0);
@@ -294,7 +293,6 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 0, "Posthorse also stays out of Pi's over-threshold path");
 		assert.equal(branchReads, 3, "over-threshold turns must not fetch history");
-		assert.equal(rollovers.length, 0);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -340,7 +338,7 @@ test("disabled Pi compaction disables automatic Posthorse behavior but not new_c
 	assert.match(remaining, /Automatic rollover is disabled/);
 	assert.match(remaining, /1,000 tokens until the configured context limit/);
 	const result = await run(tools, "new_context", {}, context);
-	assert.deepEqual(result.newContext, { handoff: undefined });
+	assert.match(toolText(result), /Requested a fresh Pi context/);
 });
 
 test("disabling compaction filters persisted reminders without changing history or deduplication", () => {
@@ -774,13 +772,15 @@ test("a reminder before a native compaction does not suppress the next reminder"
 	assert.equal(messages.length, 1, "still one reminder per window and budget");
 });
 
-test("new_context beside a failed sibling tool does not suppress the reminder", () => {
-	const { handlers, messages, context: base } = setup();
+test("new_context beside a failed sibling tool does not suppress the reminder", async () => {
+	const { handlers, messages, tools, context: base } = setup();
 	const context = usageContext(base, 100_000, 76_000);
-	turnEnd(handlers, context, [{ toolName: "new_context" }, { toolName: "bash", isError: true }]);
+	await run(tools, "new_context", {}, context);
+	turnEnd(handlers, context, [{ toolName: "new_context", toolCallId: "id" }, { toolName: "bash", isError: true }]);
 	assert.equal(messages.length, 1, "Pi will not commit the boundary, so the checkpoint reminder still applies");
 	messages.length = 0;
-	turnEnd(handlers, context, [{ toolName: "new_context" }, { toolName: "bash", isError: false }]);
+	await run(tools, "new_context", {}, context);
+	turnEnd(handlers, context, [{ toolName: "new_context", toolCallId: "id" }, { toolName: "bash", isError: false }]);
 	assert.equal(messages.length, 0, "a fully successful batch rolls over; no reminder needed");
 });
 
@@ -1005,12 +1005,12 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		assert.doesNotMatch(guidance.systemPrompt, /% used/);
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 0, `${contextWindow}: no reminder`);
-		assert.equal(handlers.get("session_before_auto_compact")!({ reason: "threshold", retainedToolResultIds: [], branchEntries: [] }, context), undefined, `${contextWindow}: Pi keeps its own compaction`);
+		assert.equal(automaticResult(handlers, context, []), undefined, `${contextWindow}: Pi keeps its own compaction`);
 		const remaining = toolText(await run(tools, "get_context_remaining", {}, context));
 		assert.match(remaining, /unsupported configuration/);
 		assert.match(remaining, /500 tokens until the configured context limit/);
 		const rollover = await run(tools, "new_context", { handoff: "still works" }, context);
-		assert.deepEqual(rollover.newContext, { handoff: "still works" });
+		assert.match(toolText(rollover), /Requested a fresh Pi context/);
 		const oldLimit = Math.min(20_000, Math.floor(contextWindow / 2) * 4);
 		if (oldLimit < 20_000) {
 			await assert.rejects(
@@ -1029,7 +1029,7 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1);
 		assert.match(messages[0].content, /1,385 tokens remain/);
-		assert.ok(handlers.get("session_before_auto_compact")!({ reason: "threshold", retainedToolResultIds: [], branchEntries: [] }, context));
+		assert.ok(automaticResult(handlers, context, []));
 	}
 
 	{
@@ -1043,38 +1043,17 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		assert.match((handlers.get("before_agent_start")!({ systemPrompt: "base", systemPromptOptions: { forceSystemPrompt: "base", sections: {} } }, sol) as { systemPrompt: string }).systemPrompt, /rollover line \(76% used\)/);
 		assert.match(toolText(await run(tools, "get_context_remaining", {}, sol)), /^≈3,001 tokens until automatic rollover \(line at 208,001\); ≈67,000 tokens until the configured context limit/);
 		const remaining = toolText(await run(tools, "get_context_remaining", {}, usageContext(base, 100_000, 36_000, 64_000)));
-		assert.match(remaining, /^≈1 tokens until automatic rollover \(line at 36,001\); ≈64,000 tokens until the configured context limit \(36,000\/100,000 used, 36%\)\. Best available native estimate\.$/);
+		assert.match(remaining, /^≈1 tokens until automatic rollover \(line at 36,001\); ≈64,000 tokens until the configured context limit \(36,000\/100,000 used, 36%\)\. Best available native estimate\./);
 		const unknown = toolText(await run(tools, "get_context_remaining", {}, { ...base, getContextUsage: () => undefined }));
 		assert.match(unknown, /not known until the next model response/);
 	}
 });
 
-test("fresh payload budgets count the system prompt, pending input, and automatic handoff", async () => {
+test("fresh payload budgets count the system prompt and cancel unsafe automatic recovery", async () => {
 	const { handlers, tools, context: base } = setup();
-	const context = {
-		...usageContext(base, 32_768, 1000),
-		getSystemPrompt: () => "s".repeat(60_000),
-	};
+	const context = { ...usageContext(base, 32_768, 1000), getSystemPrompt: () => "s".repeat(60_000) };
 	await assert.rejects(run(tools, "new_context", { handoff: "h".repeat(10_000) }, context), /limit 0/);
-	assert.equal(
-		handlers.get("session_before_auto_compact")!(
-			{ reason: "threshold", retainedToolResultIds: [], branchEntries: [{ type: "message", id: "owner", message: { role: "user", content: "continue" } }] },
-			context,
-		),
-		undefined,
-	);
-	const pendingContext = { ...usageContext(base, 32_768, 1000), getSystemPrompt: () => "" };
-	const pendingEvent = {
-		reason: "threshold",
-		retainedToolResultIds: [],
-		branchEntries: [],
-		pendingMessages: [{ role: "user", content: "p".repeat(60_000) }],
-	};
-	assert.equal(handlers.get("session_before_auto_compact")!(pendingEvent, pendingContext), undefined);
-	assert.ok(
-		handlers.get("session_before_auto_compact")!(pendingEvent, base),
-		"the handoff cap must not limit separate pending input that fits a larger fresh window",
-	);
+	assert.deepEqual(automaticResult(handlers, context, []), { cancel: true });
 });
 
 test("read pages shrink to the remaining budget and refuse unsafe pages while preserving the offset", async () => {
@@ -1323,7 +1302,7 @@ test("note replacement keeps the existing checkpoint on a real file-size failure
 		const code = `import assert from "node:assert/strict";
 import posthorse from ${JSON.stringify(new URL("../index.ts", import.meta.url).href)};
 let notes;
-posthorse({ on() {}, registerContextWindowHook() {}, registerMessageRenderer() {}, registerTool(tool) { if (tool.name === "notes") notes = tool; } });
+posthorse({ on() {}, registerMessageRenderer() {}, registerTool(tool) { if (tool.name === "notes") notes = tool; } });
 process.on("SIGXFSZ", () => {});
 await assert.rejects(notes.execute("fault", { op: "write", path: "durable.md", content: "N".repeat(8192) }, new AbortController().signal, undefined, { cwd: process.cwd() }), { code: "EFBIG" });`;
 		execFileSync("/bin/bash", ["-c", 'ulimit -f 2; exec "$@"', "note-publication", process.execPath, "--input-type=module", "-e", code], {
@@ -1783,9 +1762,9 @@ test("appends from concurrent Pi processes never merge records", async () => {
 			await import(${JSON.stringify(new URL("./pi-loader.ts", import.meta.url).href)});
 			const { default: posthorse } = await import(${JSON.stringify(new URL("../index.ts", import.meta.url).href)});
 			const tools = new Map();
-			posthorse({ on() {}, registerContextWindowHook() {}, registerTool: (tool) => tools.set(tool.name, tool), registerMessageRenderer() {}, sendMessage() {} });
+			posthorse({ on() {}, registerTool: (tool) => tools.set(tool.name, tool), registerMessageRenderer() {}, sendMessage() {} });
 			const [cwd, letter] = process.argv.slice(1);
-			const context = { cwd, newContext() {}, getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }), getContextUsage: () => undefined };
+			const context = { cwd, getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }), getContextUsage: () => undefined };
 			for (let i = 0; i < 200; i++) {
 				await tools.get("notes").execute("id", { op: "append", path: "shared.md", content: letter.repeat(300) }, undefined, () => {}, context);
 			}

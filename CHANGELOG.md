@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Upgrade the development Pi cohort to 0.99.1 and host TypeBox 1.3.27 without changing runtime peers or the Node floor.
+- Use public retain-none compaction on both hosts; remove retired native-window, early-auto-compaction and receipt-bounding hooks. Preserve legacy journal history and current notes/recovery tools.
+- Require positively identified projected `ask_question` calls and an effective registered unnamespaced definition for owner answers, including providers that omit call namespaces. Namespaced, unregistered or orphaned results stay tool evidence.
+- Bind explicit rollover to Posthorse's own successful callback and admitted handoff, not a foreign same-name tool result. Consume requests once at settlement and preserve failed/aborted batches.
+- Verify fork early/after-reset recovery and public working-session checkpoint restoration alongside official-host eligibility limits.
+- Remove the obsolete source-copying fork integration suite and script after migrating distinct protections to the current public real-SDK owners.
+- Correct official automatic-hook credential ordering and identify the native compaction card as the current reset-success indicator; context-window cards are historical.
+
 ## 0.7.0
 
 ### Changed
