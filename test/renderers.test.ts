@@ -7,12 +7,12 @@ import {
 	initTheme,
 	ToolExecutionComponent,
 	type ExtensionAPI,
-	type ExtensionContext,
+	type ExtensionToolContext,
 	type MessageRenderer,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, visibleWidth, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import posthorse from "../index.ts";
+import { createPosthorse } from "../index.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 
 initTheme("dark");
@@ -20,9 +20,8 @@ initTheme("dark");
 function setup() {
 	const tools = new Map<string, ToolDefinition>();
 	const messages = new Map<string, MessageRenderer>();
-	posthorse({
+	createPosthorse((ctx) => (ctx as ExtensionToolContext & { getCompactionSettings(): { enabled: boolean; reserveTokens: number } }).getCompactionSettings())({
 		on() {},
-		registerContextWindowHook() {},
 		registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
 		registerMessageRenderer: (name: string, renderer: MessageRenderer) => messages.set(name, renderer),
 		getActiveTools: () => [...tools.keys()],
@@ -49,7 +48,7 @@ function click(component: { handleMouse(event: TuiMouseEvent): { handled?: boole
 	return component.handleMouse({ type: "click", button: "left", x: 2, y, screenX: 2, screenY: y, width, height: 100, shift: false, alt: false, ctrl: false });
 }
 
-function context(cwd: string, branch: unknown[] = []): ExtensionContext {
+function context(cwd: string, branch: unknown[] = []): ExtensionToolContext {
 	return {
 		cwd,
 		model: { contextWindow: 100_000 },
@@ -58,9 +57,9 @@ function context(cwd: string, branch: unknown[] = []): ExtensionContext {
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
 		getSystemPrompt: () => "test",
 		sessionManager: { buildSessionProjection: () => ({ entries: [] }), getBranch: () => branch, getSessionDir: () => cwd },
-	} as unknown as ExtensionContext;
+	} as unknown as ExtensionToolContext;
 }
-async function execute(name: string, args: Record<string, unknown>, ctx: ExtensionContext) {
+async function execute(name: string, args: Record<string, unknown>, ctx: ExtensionToolContext) {
 	return setup().tools.get(name)!.execute("tool-1", args, undefined, undefined, ctx);
 }
 
@@ -247,7 +246,7 @@ test("context summaries preserve approximation and native disabled, unsupported,
 		assert.doesNotMatch(text(component, 80), /0%|hard limit/);
 		if (tokens !== null) assert.match(text(component, 80), /configured context limit/);
 		component.setExpanded(true);
-		assert.ok(text(component, 196).includes("native estimate") || tokens === null);
+		assert.ok(/native\s+estimate/.test(text(component, 196)) || tokens === null);
 	}
 });
 

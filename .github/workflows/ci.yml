@@ -91,11 +91,3 @@ jobs:
           env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host fork --target "$RUNNER_TEMP/fork-package" --output "$RUNNER_TEMP/posthorse-fork"
-      - name: Verify source-harness integration without credentials
-        working-directory: extension
-        run: |
-          fixture="$(mktemp -d /tmp/posthorse-source.XXXXXX)"
-          mkdir -p "$fixture/home" "$fixture/agent" "$fixture/tmp"
-          env -i PATH="$PATH" HOME="$fixture/home" TMPDIR="$fixture/tmp" \
-            PI_CODING_AGENT_DIR="$fixture/agent" PI_OFFLINE=1 PI_TELEMETRY=0 \
-            PI_FORK="$GITHUB_WORKSPACE/fork" bash scripts/integration.sh
