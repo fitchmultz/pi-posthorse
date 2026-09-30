@@ -867,7 +867,7 @@ function freshPayloadChars(ctx: PolicyContext, toolTokens: number, pendingMessag
 
 /** Official Pi cannot expose its live settings to extensions; budget reports say when they used the persisted snapshot. */
 const SNAPSHOT_NOTE = "Reminder and budget policy uses available settings (a persisted CLI snapshot by default); Pi's live settings control automatic compaction.";
-const CHECKPOINT_STEPS = "rewrite the task's current-state note in place with notes write (goal, progress, decisions, next steps), then call new_context";
+const CHECKPOINT_STEPS = "update the task's current-state note (goal, progress, decisions, next steps) with available file-editing tools at its absolute path; use notes write only for creation, substantial restructuring, or when editing tools are unavailable. If the note is already current, leave it unchanged. Then call new_context";
 
 function unsupportedMessage(budget: Budget): string {
 	const n = (value: number) => value.toLocaleString("en-US");
@@ -900,6 +900,7 @@ function buildGuidance(ctx: PolicyContext): string {
 	return `## Context self-management (Posthorse)
 ${automatic}
 After a rollover, earlier conversation stays in history. Restore notes and todos, then verify live state before stateful or external work; automatic handoffs record inputs, not progress.
+Keep one concise current-state note per task. Preserve decisions and safety constraints; link fuller evidence and history instead of copying them. Edit changed sections rather than resending unchanged content.
 Write handoffs and notes as normal readable prose; notes and history search match literal text.`;
 }
 
@@ -969,12 +970,13 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		pendingPageTokens += Math.ceil(message.length / 4);
 		throw new Error(message);
 	};
-	const notesPage = (ctx: PolicyContext, rows: string[], offset: number, kind: "notes-list" | "notes-search", empty: string) => {
+	const notesPage = (ctx: PolicyContext, rows: string[], offset: number, kind: "notes-list" | "notes-search", empty: string, header = "") => {
 		const text = rows.length ? rows.join("\n") : empty;
-		const chars = pageSize(ctx, offset, 0);
-		if (offset && offset >= text.length) pageError(ctx, "Offset is past the end; restart with offset 0.");
+		const chars = pageSize(ctx, offset, 0) - header.length;
 		// Reserve the complete continuation, even when one path or excerpt needs several pages.
 		const footer = (end: number) => `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]`;
+		if (chars <= footer(text.length).length) pageError(ctx, `Too little context remains to include the notes path. Call new_context first, then retry with offset ${offset}.`);
+		if (offset && offset >= text.length) pageError(ctx, "Offset is past the end; restart with offset 0.");
 		let end = Math.min(text.length, offset + chars);
 		let start = 0;
 		const starts: number[] = [];
@@ -987,7 +989,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		}
 		// A result-count cap can require continuation even when the character cap did not.
 		if (end < text.length) end = Math.min(end, offset + chars - footer(text.length).length);
-		return pageResult(text.slice(offset, end) + (end < text.length ? footer(end) : ""), [], { kind, count: starts.filter((start) => start < end).length, page: { offset, end, total: text.length } });
+		return pageResult(header + text.slice(offset, end) + (end < text.length ? footer(end) : ""), [], { kind, headerLength: header.length, count: starts.filter((start) => start < end).length, page: { offset, end, total: text.length } });
 	};
 	pi.on("turn_start", () => {
 		resetRequests.clear();
@@ -1180,7 +1182,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		label: "Notes",
 		...toolCards("notes"),
 		description:
-			"Durable notes in .pi/notes/, shared across Git worktrees and kept across context resets. Ops: list (newest first, with size and date; optional folder path), read, search (case-insensitive substring over text notes), write (replace; empty content clears), append (adds one line-terminated record). list/read/search are paged; continue with the returned offset. Keep one current-state note per task and rewrite it in place.",
+			"Durable notes shared across Git worktrees and context resets. Ops: list (newest first, size/date; optional folder), read, search (case-insensitive text), write (replace; empty clears), append (one newline-terminated record). list/read/search are paged; continue with the returned offset. list shows the absolute notes directory; read shows the absolute file path. Prefer available file-editing tools for changed sections of one concise current-state note; write for creation or substantial restructuring. Link fuller evidence instead of copying it.",
 		promptSnippet: "save and recall durable state that survives context resets",
 		parameters: Type.Object({
 			op: Type.Union(
@@ -1229,6 +1231,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 				params.offset ?? 0,
 				"notes-list",
 				folder ? `(no notes in ${folder})` : "(no notes yet)",
+				`Notes directory: ${dir}\n`,
 			);
 
 			switch (params.op) {
@@ -1246,10 +1249,13 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 					if (offset && offset >= text.length) {
 						throw new Error(`Offset ${offset} is past the end of ${relative} (${text.length} chars).`);
 					}
-					const end = Math.min(text.length, offset + pageSize(policy(ctx), offset, 0));
+					const header = `File: ${path}\n`;
+					const chars = pageSize(policy(ctx), offset, 0) - header.length;
+					if (chars <= 0) pageError(policy(ctx), `Too little context remains to include the note path. Call new_context first, then retry with offset ${offset}.`);
+					const end = Math.min(text.length, offset + chars);
 					const more =
 						end < text.length ? `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]` : "";
-					return pageResult(`${text.slice(offset, end)}${more}`, [], { kind: "note-read", offset, end, total: text.length });
+					return pageResult(`${header}${text.slice(offset, end)}${more}`, [], { kind: "note-read", headerLength: header.length, offset, end, total: text.length });
 				}
 				case "write": {
 					const relative = requireValue(params.path, "path", params.op);

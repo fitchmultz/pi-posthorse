@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
 	CustomMessageComponent,
@@ -115,11 +116,15 @@ test("notes show page range and next offset even when the preview fills the comp
 		const component = card("notes", args);
 		component.updateResult({ ...output, isError: false });
 		const compact = text(component, 40);
-		assert.match(compact, /0[–-]40,000.*56,186/s);
-		assert.match(compact, /offset 40,000/);
+		const end = 40_000 - `File: ${join(cwd, ".pi", "notes", "ledger.md")}\n`.length;
+		assert.match(compact, new RegExp(`0[–-]${end.toLocaleString("en-US")}.*56,186`, "s"));
+		assert.match(compact, new RegExp(`offset ${end.toLocaleString("en-US")}`));
+		assert.match(compact, /START/);
+		assert.doesNotMatch(compact, /File:/, "the path header must not displace the compact content preview");
 		assert.ok(lines(component, 40).length <= 10);
 		assert.equal(click(component, 40, 4)?.handled, true, "the visible body also expands");
-		assert.match(text(component), /continue with offset 40000/);
+		assert.match(text(component), new RegExp(`continue with offset ${end}`));
+		assert.ok(text(component, 196).includes(join(cwd, ".pi", "notes", "ledger.md")));
 		assert.deepEqual(output, snapshot, "rendering must not mutate model-visible output");
 		assert.ok(JSON.stringify(output.details).length < 200, "page metadata must not duplicate the note");
 	} finally {

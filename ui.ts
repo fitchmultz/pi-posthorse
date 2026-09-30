@@ -4,8 +4,8 @@ import { Box, MouseRegion, Text, stripTerminalSequences, truncateToWidth, type C
 /** Display-only facts and offsets into content, never a second copy of a note or history page. */
 export type PosthorseDisplay =
 	| { kind: "context"; usage?: { tokens: number | null; contextWindow: number; percent: number | null }; rollover?: "enabled" | "disabled" | "unsupported"; rolloverAt?: number }
-	| { kind: "notes-list" | "notes-search"; count: number; page?: { offset: number; end: number; total: number } }
-	| { kind: "note-read"; offset: number; end: number; total: number }
+	| { kind: "notes-list" | "notes-search"; count: number; headerLength?: number; page?: { offset: number; end: number; total: number } }
+	| { kind: "note-read"; headerLength?: number; offset: number; end: number; total: number }
 	| { kind: "note-write" | "note-append" | "new-context" }
 	| { kind: "history-search"; entries: Array<{ headerLength: number; length: number }>; footerLength?: number; more?: boolean; skipped?: number }
 	| { kind: "history-read"; headerLength: number; offset: number; end: number; total: number; imageOffset?: number; imageEnd?: number; imageTotal?: number };
@@ -127,7 +127,8 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 			const submittedText = textBlock(submitted, theme);
 			const attachmentText = textBlock(attachment, theme, "muted");
 			// Old results have no spans. Only the preview sheds the known history prefix.
-			const preview = sections ? sections.map(({ body }) => body).join("\n") : name === "history" && !context.isError ? body.replace(/^[^\n]*?\[window [^\]\n]+\] \[[^\]\n]+\](?: \[chars \d+-\d+ of \d+\])? /gm, "") : body;
+			const noteHeaderLength = !context.isError && (display?.kind === "note-read" || display?.kind === "notes-list") ? display.headerLength ?? 0 : 0;
+			const preview = sections ? sections.map(({ body }) => body).join("\n") : noteHeaderLength ? body.slice(noteHeaderLength) : name === "history" && !context.isError ? body.replace(/^[^\n]*?\[window [^\]\n]+\] \[[^\]\n]+\](?: \[chars \d+-\d+ of \d+\])? /gm, "") : body;
 			const previewText = textBlock(preview, theme, color);
 			const searchPreviews = sections && display?.kind === "history-search" ? sections.slice(0, 3).map(({ body }) => theme.fg("toolOutput", clean(body).replace(/\s+/g, " "))) : undefined;
 			const summaryOnly = display?.kind === "context" || display?.kind === "new-context" || display?.kind === "note-write" || display?.kind === "note-append" || ((display?.kind === "notes-list" || display?.kind === "notes-search") && display.count === 0) || (display?.kind === "note-read" && display.total === 0) || (display?.kind === "history-search" && Array.isArray(display.entries) && display.entries.length === 0);
@@ -142,7 +143,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 						? searchPreviews.map((line) => truncateToWidth(line, width))
 						: previewText.render(width);
 					const shown = previewRows.slice(0, Math.max(0, Math.min(3, 5 - summaryRows.length - (attachment ? 1 : 0))));
-					const hidden = summaryOnly || previewRows.length > shown.length || Boolean(sections || submitted);
+					const hidden = summaryOnly || previewRows.length > shown.length || Boolean(sections || submitted || noteHeaderLength);
 					return [...summaryRows, ...shown, ...(attachment ? [truncateToWidth(theme.fg("muted", attachment), width)] : []), ...(hidden ? [hint(theme, width)] : [])];
 				},
 			};
