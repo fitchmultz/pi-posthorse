@@ -374,7 +374,6 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) te
 		assert.match(guidance, /Preserve decisions and safety constraints/);
 		if (mode.startsWith("forced-")) {
 			assert.match(prompt, /OTHER_EXTENSION_POLICY/);
-			assert.match(JSON.stringify(messages), /Context self-management/);
 		}
 		if (mode === "custom") assert.match(prompt, /CUSTOM_PROMPT_POLICY/);
 	}

@@ -22,7 +22,7 @@ import {
 import { access, constants, lstat, open, readlink, realpath, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import { formatSize, getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { estimateTokens, formatSize, getAgentDir, SettingsManager, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerPosthorseMessages, toolCards, type PosthorseDisplay } from "./ui.ts";
@@ -841,7 +841,7 @@ function hasReminder(entries: readonly EntryLike[], fingerprint: ReminderFingerp
 	);
 }
 
-function budgetFor(ctx: PolicyContext, contextWindow = ctx.model?.contextWindow): Budget | undefined {
+function budgetFor(ctx: PolicyContext, contextWindow = ctx.getContextUsage()?.contextWindow ?? ctx.model?.contextWindow): Budget | undefined {
 	if (!contextWindow || contextWindow <= 0) return undefined;
 	const { enabled, reserveTokens } = ctx.getCompactionSettings();
 	const usable = contextWindow - reserveTokens;
@@ -850,11 +850,10 @@ function budgetFor(ctx: PolicyContext, contextWindow = ctx.model?.contextWindow)
 
 /** Half the fresh capacity after prompt/tool/input overhead remains for continued work. */
 function freshPayloadChars(ctx: PolicyContext, toolTokens: number, pendingMessages: readonly MessageLike[] = [], cap = MAX_HANDOFF_CHARS): number {
-	const contextWindow = ctx.model?.contextWindow;
-	if (!contextWindow || contextWindow <= 0) return cap;
-	const budget = budgetFor(ctx, contextWindow);
-	const line = budget?.enabled && budget.supported ? budget.rolloverAt : contextWindow;
-	const promptTokens = Math.ceil(ctx.getSystemPrompt().length / 4);
+	const budget = budgetFor(ctx);
+	if (!budget) return cap;
+	const line = budget.enabled && budget.supported ? budget.rolloverAt : budget.contextWindow;
+	const promptTokens = Math.ceil(ctx.getSystemPrompt().length / 4) + guidanceTokens(ctx);
 	const pendingTokens = pendingMessages.reduce(
 		(total, message) => total + Math.ceil(textOf(message).length / 4) + imagesOf(message.content).length * (ESTIMATED_IMAGE_CHARS / 4),
 		0,
@@ -880,11 +879,11 @@ function pageCapacity(ctx: PolicyContext, toolTokens: number): number {
 	if (!usage || usage.tokens == null) return freshPayloadChars(ctx, toolTokens, [], MAX_PAGE_CHARS) / 4 + PAGE_MARGIN_TOKENS;
 	const budget = budgetFor(ctx, usage.contextWindow);
 	const line = budget?.enabled && budget.supported ? budget.rolloverAt : usage.contextWindow;
-	return line - usage.tokens;
+	return line - usage.tokens - guidanceTokens(ctx);
 }
 
 function buildGuidance(ctx: PolicyContext): string {
-	const budget = budgetFor(ctx, ctx.getContextUsage()?.contextWindow ?? ctx.model?.contextWindow);
+	const budget = budgetFor(ctx);
 	const enabled = budget?.enabled ?? ctx.getCompactionSettings().enabled;
 	const n = (value: number) => value.toLocaleString("en-US");
 	const capacity = budget
@@ -916,6 +915,11 @@ function persistedPolicy(ctx: ExtensionContext): CompactionPolicy {
 	const errors = settings.drainErrors();
 	if (errors.length) throw new Error(`Posthorse could not read persisted Pi settings: ${errors.map((error) => error.error.message).join("; ")}`);
 	return settings.getCompactionSettings(ctx.model);
+}
+
+/** ponytail: native estimates can omit request-local guidance; reserve its full section until post-transform usage is exposed. */
+function guidanceTokens(ctx: PolicyContext): number {
+	return estimateTokens({ role: "system", content: `<posthorse>\n${buildGuidance(ctx)}\n</posthorse>`, timestamp: 0 });
 }
 
 /** SDK hosts can inject live settings instead of the persisted CLI snapshot. */

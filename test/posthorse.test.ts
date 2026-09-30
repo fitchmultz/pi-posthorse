@@ -87,6 +87,20 @@ function guidanceFor(handlers: Map<string, Handler>, context: TestContext): stri
 	return event.messages[0].sections.posthorse;
 }
 
+/** Calibrate fake native usage so an exact page boundary includes the delivered guidance. */
+function pageContext(handlers: Map<string, Handler>, context: TestContext): TestContext {
+	const guidanceTokens = Math.ceil(guidanceFor(handlers, context).length / 4);
+	return {
+		...context,
+		getContextUsage() {
+			const usage = context.getContextUsage();
+			if (!usage || usage.tokens == null) return usage;
+			const tokens = usage.tokens - guidanceTokens;
+			return { ...usage, tokens, percent: tokens / usage.contextWindow * 100 };
+		},
+	};
+}
+
 /** The file-qualified id search prints; 0.6 printed the whole digest (`legacy`), which still reads. */
 function archivedId(id: string, source: string, legacy = false): string {
 	const digest = createHash("sha256").update(source).digest("base64url");
@@ -345,11 +359,11 @@ test("disabled Pi compaction disables automatic Posthorse behavior but not new_c
 		getContextUsage: () => ({ tokens: 99_000, contextWindow: 100_000, percent: 99 }),
 		getCompactionSettings: () => ({ enabled: false, reserveTokens: 16_384 }),
 	};
-	const guidance = { systemPrompt: guidanceFor(handlers, context) };
-	assert.match(guidance.systemPrompt, /Pi compaction is disabled/);
-	assert.match(guidance.systemPrompt, /Context self-management \(Posthorse\)/);
-	assert.match(guidance.systemPrompt, /Configured context capacity: 100,000 tokens/);
-	assert.doesNotMatch(guidance.systemPrompt, /rollover line is .* tokens used/);
+	const guidance = guidanceFor(handlers, context);
+	assert.match(guidance, /Pi compaction is disabled/);
+	assert.match(guidance, /Context self-management \(Posthorse\)/);
+	assert.match(guidance, /Configured context capacity: 100,000 tokens/);
+	assert.doesNotMatch(guidance, /rollover line is .* tokens used/);
 	turnEnd(handlers, context);
 	assert.equal(messages.length, 0);
 	const remaining = toolText(await run(tools, "get_context_remaining", {}, context));
@@ -1017,11 +1031,11 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 	for (const contextWindow of [4096, 8_192, 16_384]) {
 		const { handlers, tools, messages, context: base } = setup();
 		const context = usageContext(base, contextWindow, contextWindow - 500);
-		const guidance = { systemPrompt: guidanceFor(handlers, context) };
-		assert.match(guidance.systemPrompt, /unsupported configuration/);
-		assert.match(guidance.systemPrompt, new RegExp(`Configured context capacity: ${contextWindow.toLocaleString("en-US")} tokens`));
-		assert.match(guidance.systemPrompt, /Lower compaction.reserveTokens in Pi settings or use a larger-context model/);
-		assert.doesNotMatch(guidance.systemPrompt, /% used/);
+		const guidance = guidanceFor(handlers, context);
+		assert.match(guidance, /unsupported configuration/);
+		assert.match(guidance, new RegExp(`Configured context capacity: ${contextWindow.toLocaleString("en-US")} tokens`));
+		assert.match(guidance, /Lower compaction.reserveTokens in Pi settings or use a larger-context model/);
+		assert.doesNotMatch(guidance, /% used/);
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 0, `${contextWindow}: no reminder`);
 		assert.equal(automaticResult(handlers, context, []), undefined, `${contextWindow}: Pi keeps its own compaction`);
@@ -1043,8 +1057,8 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 		const { handlers, messages, context: base } = setup();
 		// 32,768 - 16,384 leaves 16,384 usable: line at 16,385 (50%), band 1,638 tokens wide.
 		const context = usageContext(base, 32_768, 15_000);
-		const guidance = { systemPrompt: guidanceFor(handlers, context) };
-		assert.match(guidance.systemPrompt, /rollover line \(50% used\)/);
+		const guidance = guidanceFor(handlers, context);
+		assert.match(guidance, /rollover line \(50% used\)/);
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1);
 		assert.match(messages[0].content, /1,385 tokens remain/);
@@ -1054,11 +1068,11 @@ test("small-context configurations are unsupported; larger ones derive honest bu
 	{
 		const { handlers, tools, context: base } = setup();
 		const large = usageContext(base, 400_000, 1_000, 64_000);
-		const guidance = { systemPrompt: guidanceFor(handlers, large) };
-		assert.match(guidance.systemPrompt, /rollover line \(84% used\)/);
-		assert.match(guidance.systemPrompt, /Configured context capacity: 400,000 tokens/);
-		assert.match(guidance.systemPrompt, /rollover line is 336,001 tokens used/);
-		assert.match(guidance.systemPrompt, /No routine budget checks are needed/);
+		const guidance = guidanceFor(handlers, large);
+		assert.match(guidance, /rollover line \(84% used\)/);
+		assert.match(guidance, /Configured context capacity: 400,000 tokens/);
+		assert.match(guidance, /rollover line is 336,001 tokens used/);
+		assert.match(guidance, /No routine budget checks are needed/);
 		// A 272K window with a 64K reserve has its line at 208,001 (76%).
 		const sol = usageContext(base, 272_000, 205_000, 64_000);
 		const switched = guidanceFor(handlers, sol);
@@ -1089,7 +1103,7 @@ test("read pages shrink to the remaining budget and refuse unsafe pages while pr
 	try {
 		const { tools, handlers, context: base } = setup();
 		const branch = [{ type: "message", id: "long", parentId: null, timestamp: "1", message: { role: "user", content: "h".repeat(25_000) } }];
-		const withBranch = (context: TestContext) => ({ ...context, cwd: dir, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => dir } });
+		const withBranch = (context: TestContext) => pageContext(handlers, { ...context, cwd: dir, sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => dir } });
 		await run(tools, "notes", { op: "write", path: "long.md", content: "n".repeat(25_000) }, withBranch(base));
 
 		// Line at 83,617; 1,500 tokens short of it leaves 500 tokens after the margin: a 2,000-character page.
@@ -1126,7 +1140,7 @@ test("note and history pages share a batch budget without double-counting consum
 	try {
 		const { tools, handlers, context: base } = setup();
 		let tokens = 98_000;
-		const context = {
+		const context = pageContext(handlers, {
 			...usageContext(base, 100_000, tokens, 16_384, false), cwd: dir,
 			getContextUsage: () => ({ tokens, contextWindow: 100_000, percent: tokens / 1000 }),
 			sessionManager: {
@@ -1134,7 +1148,7 @@ test("note and history pages share a batch budget without double-counting consum
 				getBranch: () => [{ type: "message", id: "long", message: { role: "user", content: "h".repeat(25_000) } }],
 				getSessionDir: () => dir,
 			},
-		};
+		});
 		await run(tools, "notes", { op: "write", path: "long.md", content: "n".repeat(25_000) }, context);
 		await run(tools, "notes", { op: "write", path: "short.md", content: "s".repeat(800) }, context);
 		const header = `File: ${join(dir, ".pi", "notes", "long.md")}\n`;
@@ -1162,7 +1176,7 @@ test("notes list and search page every result through the shared budget, includi
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-search-pages-"));
 	try {
 		const { tools, handlers, context: base } = setup();
-		const context = { ...usageContext(base, 100_000, 98_750, 16_384, false), cwd: dir };
+		const context = pageContext(handlers, { ...usageContext(base, 100_000, 98_750, 16_384, false), cwd: dir });
 		const root = join(dir, ".pi", "notes");
 		const nested = Array.from({ length: 4 }, () => "d".repeat(180)).join("/");
 		mkdirSync(join(root, nested), { recursive: true });
@@ -1255,7 +1269,7 @@ test("history cursors finish partial headers and progress past growing lookup ec
 		{ type: "message", id: "long", parentId: "old", timestamp: "T".repeat(4000), message: { role: "user", content: "needle long metadata" } },
 		{ type: "message", id: "echo", parentId: "long", message: { role: "toolResult", toolName: "history", content: "needle prior lookup" } },
 	];
-	const context = { ...usageContext(base, 100_000, 98_700, 16_384, false), sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } };
+	const context = pageContext(handlers, { ...usageContext(base, 100_000, 98_700, 16_384, false), sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => join(tmpdir(), "missing") } });
 	let cursor: string | undefined;
 	let recovered = "";
 	const returned: string[] = [];

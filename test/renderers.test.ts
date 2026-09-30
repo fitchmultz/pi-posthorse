@@ -217,7 +217,7 @@ test("paginated searches retain accurate counts, spans, identifiers and continua
 	try {
 		const ctx = context(cwd);
 		await execute("notes", { op: "write", path: "ledger.md", content: Array.from({ length: 30 }, (_, index) => `needle ${index} ${"n".repeat(150)}`).join("\n") }, ctx);
-		Object.assign(ctx, { getContextUsage: () => ({ tokens: 98_700, contextWindow: 100_000, percent: 98.7 }), getCompactionSettings: () => ({ enabled: false, reserveTokens: 16_384 }) });
+		Object.assign(ctx, { getContextUsage: () => ({ tokens: 98_000, contextWindow: 100_000, percent: 98 }), getCompactionSettings: () => ({ enabled: false, reserveTokens: 16_384 }) });
 		const result = await execute("notes", { op: "search", query: "needle" }, ctx);
 		const details = result.details as PosthorseDisplay;
 		assert.equal(details.kind, "notes-search");

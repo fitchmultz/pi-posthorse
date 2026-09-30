@@ -146,18 +146,22 @@ for (const forced of [false, true]) test(`context guidance follows model/setting
 	}
 });
 
-test("fresh guidance agrees with native routed-model context capacity", async (t) => {
+test("routed guidance and handoff admission use native context capacity", async (t) => {
 	const nativeCapacities = [];
 	const h = await fixture(t, {
-		contextWindow: 272_000,
+		models: [
+			{ id: "large", contextWindow: 272_000, maxTokens: 1000 },
+			{ id: "small", contextWindow: 8192, maxTokens: 4000 },
+		],
 		providerAuth: { apiKey: { name: "Fixture", resolve: async () => ({ auth: { apiKey: "fixture-key" } }) } },
 		afterExtension(pi) {
 			pi.on("context_with_system", (_event, ctx) => { nativeCapacities.push(ctx.getContextUsage()?.contextWindow); });
 		},
 	});
+	let physical = h.faux.getModel("large");
 	h.modelRuntime.registerVirtualModel({
 		provider: "posthorse-router", id: "auto", contextWindow: 100_000, maxTokens: 1000,
-		route: () => ({ model: h.faux.getModel(), thinkingLevel: "off" }),
+		route: () => ({ model: physical, thinkingLevel: "off" }),
 	});
 	await h.modelRuntime.setRuntimeApiKey(h.faux.provider.id, "fixture-key");
 	await h.modelRuntime.getAvailable();
@@ -177,19 +181,39 @@ test("fresh guidance agrees with native routed-model context capacity", async (t
 	// Official Pi forgets the last physical response on reset; use its declared limit
 	// until routing/usage makes a physical limit available again, matching the native meter.
 	assert.match(fresh, new RegExp(`Configured context capacity: ${nativeCapacities.at(-1).toLocaleString("en-US")} tokens`));
+
+	physical = h.faux.getModel("small");
+	h.settingsManager.applyOverrides({ compaction: { enabled: false } });
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "x".repeat(20_000) })),
+		fauxAssistantMessage("Oversized handoff rejected."),
+	]);
+	await h.session.prompt("The next route is smaller; admit only a safe handoff.");
+	assert.equal(result(h, "new_context").isError, true);
+	assert.match(textOf(result(h, "new_context")), /Handoff is too large for the active model/);
+	assert.equal(boundaries(h).length, 1, "the rejected handoff must not commit another reset");
 });
 
 test("explicit handoff admission counts the real prompt and active tool schemas", async (t) => {
 	const h = await fixture(t, {
 		contextWindow: 32_768, enabled: false,
 		afterExtension(pi) {
-			pi.on("before_agent_start", () => {
+			let promptOptions, toolTokens;
+			pi.on("before_agent_start", (event) => {
+				promptOptions = event.systemPromptOptions;
 				const active = new Set(pi.getActiveTools());
-				const toolTokens = pi.getAllTools().filter((tool) => active.has(tool.name))
+				toolTokens = pi.getAllTools().filter((tool) => active.has(tool.name))
 					.reduce((total, tool) => total + Math.ceil(JSON.stringify({ name: tool.name, description: tool.description ?? "", parameters: tool.parameters }).length / 4), 0);
-				const promptTokens = 32_768 - 1000 - toolTokens - 2250;
+				return { systemPrompt: "FORCED_POLICY" };
+			});
+			pi.on("context_with_system", (event) => {
+				const guidance = textOf(event.messages.find((message) => message.role === "custom" && message.customType === "posthorse-guidance"));
+				assert.ok(guidance.length > 0);
+				const guidanceTokens = Math.ceil(`<posthorse>\n${guidance}\n</posthorse>`.length / 4);
+				const promptTokens = 32_768 - 1000 - toolTokens - guidanceTokens - 2250;
 				assert.ok(promptTokens > 0);
-				return { systemPrompt: "s".repeat(promptTokens * 4) };
+				promptOptions.forceSystemPrompt = "s".repeat(promptTokens * 4);
+				event.messages[0].content = promptOptions.forceSystemPrompt;
 			});
 		},
 	});
