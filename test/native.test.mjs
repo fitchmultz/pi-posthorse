@@ -366,6 +366,9 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) te
 		const prompt = getCurrentSystemPrompt(messages);
 		assert.equal(prompt.split("## Context self-management (Posthorse)").length - 1, 1);
 		assert.match(prompt, /verify live state/);
+		assert.match(prompt, /available file-editing tools at its absolute path/);
+		assert.match(prompt, /already current, leave it unchanged/);
+		assert.match(prompt, /Preserve decisions and safety constraints/);
 		if (mode.startsWith("forced-")) assert.match(prompt, /OTHER_EXTENSION_POLICY/);
 		if (mode === "custom") assert.match(prompt, /CUSTOM_PROMPT_POLICY/);
 	}

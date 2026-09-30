@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Prefer incremental edits of concise current-state notes at checkpoints, leaving already-current notes unchanged and retaining full writes as a fallback.
+- Show absolute shared storage locations in notes reads and listings, with path headers included in page budgets but excluded from content offsets and compact previews.
 - Upgrade the development Pi cohort to 0.99.1 and host TypeBox 1.3.27 without changing runtime peers or the Node floor.
 - Use public retain-none compaction on both hosts; remove retired native-window, early-auto-compaction and receipt-bounding hooks. Preserve legacy journal history and current notes/recovery tools.
 - Require positively identified projected `ask_question` calls and an effective registered unnamespaced definition for owner answers, including providers that omit call namespaces. Namespaced, unregistered or orphaned results stay tool evidence.

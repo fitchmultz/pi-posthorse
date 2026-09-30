@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createEditTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import posthorse, { createPosthorse } from "../index.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 
@@ -270,7 +270,7 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1);
 		assert.match(messages[0].content, /Checkpoint now/);
-		assert.match(messages[0].content, /current-state note in place .*then call new_context\.$/);
+		assert.match(messages[0].content, /current-state note .*available file-editing tools.*Then call new_context\.$/);
 		assert.deepEqual(messages[0].details, { windowId: "window-2", contextWindow, reserveTokens: reserve });
 		assert.equal(branchReads, 1, "the first token in the reminder band checks the current window");
 		branch.push({ type: "custom_message", customType: "posthorse-reminder", details: messages[0].details });
@@ -315,7 +315,7 @@ test("guidance uses native sections and preserves earlier full or custom prompts
 	assert.equal(handler({ systemPrompt: "Custom instructions", systemPromptOptions: options }, context), undefined);
 	assert.equal(sections.other, "Keep this policy");
 	assert.match(sections.posthorse, /Context self-management \(Posthorse\)/);
-	assert.match(sections.posthorse, /\(goal, progress, decisions, next steps\), then call new_context/);
+	assert.match(sections.posthorse, /\(goal, progress, decisions, next steps\).*file-editing tools/);
 	assert.match(sections.posthorse, /verify live state/);
 
 	const result = handler({ systemPrompt: "Forced instructions", systemPromptOptions: { sections: {}, forceSystemPrompt: "Forced instructions" } }, context) as { systemPrompt: string };
@@ -1067,7 +1067,9 @@ test("read pages shrink to the remaining budget and refuse unsafe pages while pr
 		// Line at 83,617; 1,500 tokens short of it leaves 500 tokens after the margin: a 2,000-character page.
 		const tight = withBranch(usageContext(base, 100_000, 82_117));
 		const note = toolText(await run(tools, "notes", { op: "read", path: "long.md" }, tight));
-		assert.match(note, /^n{2000}\n\[chars 0-2000 of 25000; continue with offset 2000\]$/);
+		const header = `File: ${join(dir, ".pi", "notes", "long.md")}\n`;
+		const end = 2000 - header.length;
+		assert.equal(note, `${header}${"n".repeat(end)}\n[chars 0-${end} of 25000; continue with offset ${end}]`);
 		// These compare independent reads at the same starting usage, not sibling calls.
 		handlers.get("turn_start")?.({}, tight);
 		const entry = toolText(await run(tools, "history", { op: "read", id: "long" }, tight));
@@ -1079,7 +1081,7 @@ test("read pages shrink to the remaining budget and refuse unsafe pages while pr
 
 		// Disabled compaction measures against the configured context limit instead of the rollover line.
 		const disabled = withBranch(usageContext(base, 100_000, 98_000, 16_384, false));
-		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, disabled)), /continue with offset 4000/);
+		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, disabled)), new RegExp(`continue with offset ${4000 - header.length}`));
 		const unknown = withBranch({ ...base, model: { contextWindow: 4096 }, getContextUsage: () => undefined });
 		handlers.get("turn_start")?.({}, unknown);
 		const unknownPage = toolText(await run(tools, "notes", { op: "read", path: "long.md" }, unknown));
@@ -1107,9 +1109,10 @@ test("note and history pages share a batch budget without double-counting consum
 		};
 		await run(tools, "notes", { op: "write", path: "long.md", content: "n".repeat(25_000) }, context);
 		await run(tools, "notes", { op: "write", path: "short.md", content: "s".repeat(800) }, context);
+		const header = `File: ${join(dir, ".pi", "notes", "long.md")}\n`;
 		const startTurn = () => handlers.get("turn_start")?.({}, context);
 		startTurn();
-		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, context)), /continue with offset 4000/);
+		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, context)), new RegExp(`continue with offset ${4000 - header.length}`));
 		await assert.rejects(run(tools, "history", { op: "read", id: "long", offset: 4000 }, context), /retry with offset 4000/);
 		startTurn();
 		assert.match(toolText(await run(tools, "history", { op: "read", id: "long" }, context)), /offset 4000/);
@@ -1117,10 +1120,11 @@ test("note and history pages share a batch budget without double-counting consum
 
 		startTurn();
 		tokens = 97_000;
-		assert.equal(toolText(await run(tools, "notes", { op: "read", path: "short.md" }, context)), "s".repeat(800));
-		// Serial execution has already added the 800-character result to native usage.
-		tokens += 200;
-		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, context)), /continue with offset 7200/);
+		const shortHeader = `File: ${join(dir, ".pi", "notes", "short.md")}\n`;
+		assert.equal(toolText(await run(tools, "notes", { op: "read", path: "short.md" }, context)), shortHeader + "s".repeat(800));
+		// Serial execution has already added the complete result to native usage.
+		tokens += Math.ceil((shortHeader.length + 800) / 4);
+		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, context)), new RegExp(`continue with offset ${(99_000 - tokens) * 4 - header.length}`));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -1146,6 +1150,7 @@ test("notes list and search page every result through the shared budget, includi
 				? `${path}  194B  ${modified(index).toISOString().slice(0, 16)}Z`
 				: `${path}:1: needle sample ${"s".repeat(180)}`);
 			const expected = expectedRows.join("\n");
+			const header = op === "list" ? `Notes directory: ${root}\n` : "";
 			let offset = 0;
 			let recovered = "";
 			for (let page = 0; page < 100; page++) {
@@ -1156,6 +1161,7 @@ test("notes list and search page every result through the shared budget, includi
 				assert.ok(display.page, "list/search must expose continuation metadata");
 				const { end, total } = display.page;
 				const text = toolText(result);
+				assert.ok(text.startsWith(header), "every listing page identifies the shared directory");
 				assert.ok(text.length <= 1000, "headers and continuation fit the admitted page");
 				assert.equal(total, expected.length);
 				let position = 0;
@@ -1166,7 +1172,7 @@ test("notes list and search page every result through the shared budget, includi
 				}).length;
 				assert.equal(display.count, count, "count describes only row portions actually returned");
 				assert.ok(op !== "search" || count <= 20);
-				recovered += text.slice(0, end - offset);
+				recovered += text.slice(header.length, header.length + end - offset);
 				assert.ok(end > offset);
 				if (end === total) break;
 				assert.match(text, new RegExp(`continue with offset ${end}`));
@@ -1338,7 +1344,15 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 		assert.equal(existsSync(join(repo, "packages", "app", ".pi")), false);
 		await write(worktree);
 		assert.equal(readFileSync(join(main, ".pi", "notes", "state.md"), "utf8"), worktree);
-		assert.match(toolText(await notes(worktree, { op: "list" })), /^state\.md  \d+B  \d{4}-\d\d-\d\dT\d\d:\d\dZ$/);
+		const notePath = join(main, ".pi", "notes", "state.md");
+		const listing = toolText(await notes(worktree, { op: "list" }));
+		assert.ok(listing.startsWith(`Notes directory: ${join(main, ".pi", "notes")}\n`));
+		assert.match(listing.split("\n")[1], /^state\.md  \d+B  \d{4}-\d\d-\d\dT\d\d:\d\dZ$/);
+		const read = toolText(await notes(worktree, { op: "read", path: "state.md" }));
+		const editPath = read.split("\n")[0].replace(/^File: /, "");
+		assert.equal(editPath, notePath);
+		await createEditTool(worktree).execute("edit-note", { path: editPath, edits: [{ oldText: worktree, newText: "Updated continuation." }] });
+		assert.equal(readFileSync(notePath, "utf8"), "Updated continuation.", "the returned absolute path edits the shared note, not a worktree-local copy");
 		writeFileSync(join(worktree, ".git"), "gitdir: ../main/.git/worktrees/wt\n");
 		await write(join(worktree, "packages", "app"));
 		assert.equal(readFileSync(join(main, ".pi", "notes", "state.md"), "utf8"), join(worktree, "packages", "app"));
@@ -1352,7 +1366,7 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 		writeFileSync(join(orphan, ".git"), "gitdir: ../missing/.git/worktrees/orphan\n");
 		await write(join(orphan, "nested"));
 		assert.equal(readFileSync(join(orphan, ".pi", "notes", "state.md"), "utf8"), join(orphan, "nested"));
-		assert.equal(toolText(await notes(orphan, { op: "read", path: "state.md" })), join(orphan, "nested"));
+		assert.equal(toolText(await notes(orphan, { op: "read", path: "state.md" })), `File: ${join(orphan, ".pi", "notes", "state.md")}\n${join(orphan, "nested")}`);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -1371,7 +1385,8 @@ test("notes list and search follow aliases while skipping cycles and missing tar
 		const { tools, context } = setup();
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: dir });
 
-		assert.match(toolText(await notes({ op: "list" })), /^alias\/state\.md  10B  \S+\nnested\/state\.md  10B  \S+$/);
+		assert.equal(toolText(await notes({ op: "list" })).split("\n")[0], `Notes directory: ${notesDir}`);
+		assert.match(toolText(await notes({ op: "list" })).split("\n").slice(1).join("\n"), /^alias\/state\.md  10B  \S+\nnested\/state\.md  10B  \S+$/);
 		assert.equal(toolText(await notes({ op: "search", query: "checkpoint" })), "alias/state.md:1: checkpoint\nnested/state.md:1: checkpoint");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -1395,12 +1410,13 @@ test("notes list newest first with sizes, read folders as listings, and search o
 		const { tools, context } = setup();
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd: dir });
 		assert.equal(toolText(await notes({ op: "list" })), [
+			`Notes directory: ${root}`,
 			"task/current.md  14B  1970-01-01T00:00Z",
 			"task/fixture.sqlite  36B  1970-01-01T00:00Z",
 			"old.md  10B  1970-01-01T00:00Z",
 		].join("\n"));
 		const folder = toolText(await notes({ op: "list", path: "task" }));
-		assert.match(folder, /^task\/current\.md .+\ntask\/fixture\.sqlite .+$/);
+		assert.match(folder.split("\n").slice(1).join("\n"), /^task\/current\.md .+\ntask\/fixture\.sqlite .+$/);
 		assert.equal(toolText(await notes({ op: "read", path: "task" })), folder, "reading a folder lists it instead of failing");
 		assert.equal(toolText(await notes({ op: "search", query: "needle" })), "task/current.md:1: needle current\nold.md:1: needle old");
 		await assert.rejects(notes({ op: "read", path: "task/fixture.sqlite" }), /binary file \(36B\); notes read returns text only/);
@@ -1425,11 +1441,12 @@ for (const marker of ["file", "directory symlink"]) test(`separate Git directori
 		git("-C", main, "worktree", "add", "--detach", worktree);
 		const { tools, context } = setup();
 		const notes = (cwd: string, params: Record<string, unknown>) => run(tools, "notes", params, { ...context, cwd });
+		const header = `File: ${join(gitdir, ".pi", "notes", "shared.md")}\n`;
 		await notes(main, { op: "write", path: "shared.md", content: "original state" });
-		assert.equal(toolText(await notes(worktree, { op: "read", path: "shared.md" })), "original state");
+		assert.equal(toolText(await notes(worktree, { op: "read", path: "shared.md" })), header + "original state");
 		const append = toolText(await notes(worktree, { op: "append", path: "shared.md", content: "worktree update" }));
 		assert.ok(append.includes(join(gitdir, ".pi", "notes", "shared.md")));
-		assert.equal(toolText(await notes(main, { op: "read", path: "shared.md" })), "original state\nworktree update\n");
+		assert.equal(toolText(await notes(main, { op: "read", path: "shared.md" })), header + "original state\nworktree update\n");
 		assert.equal(existsSync(join(main, ".pi")), false, "notes live in the common Git directory");
 		assert.equal(existsSync(join(worktree, ".pi")), false, "writes do not create a worktree-local copy");
 	} finally {
@@ -1443,19 +1460,21 @@ test("long notes page fully, empty writes clear, appends stay separated, and sea
 		const { tools, context: base } = setup();
 		const context = { ...base, cwd: dir };
 		const notes = (params: Record<string, unknown>) => run(tools, "notes", params, context);
+		const header = `File: ${join(dir, ".pi", "notes", "big.md")}\n`;
+		const pageChars = 40_000 - header.length;
 		const body = `${"a".repeat(40_000)}${"b".repeat(40_000)}${"c".repeat(5_000)}`;
 		await notes({ op: "write", path: "big.md", content: body });
 		const first = toolText(await notes({ op: "read", path: "big.md" }));
-		assert.match(first, /^a{40000}\n\[chars 0-40000 of 85000; continue with offset 40000\]$/);
-		const second = toolText(await notes({ op: "read", path: "big.md", offset: 40_000 }));
-		assert.match(second, /^b{40000}\n\[chars 40000-80000 of 85000; continue with offset 80000\]$/);
-		const third = toolText(await notes({ op: "read", path: "big.md", offset: 80_000 }));
-		assert.equal(third, "c".repeat(5_000));
+		assert.equal(first, `${header}${body.slice(0, pageChars)}\n[chars 0-${pageChars} of 85000; continue with offset ${pageChars}]`);
+		const second = toolText(await notes({ op: "read", path: "big.md", offset: pageChars }));
+		assert.equal(second, `${header}${body.slice(pageChars, pageChars * 2)}\n[chars ${pageChars}-${pageChars * 2} of 85000; continue with offset ${pageChars * 2}]`);
+		const third = toolText(await notes({ op: "read", path: "big.md", offset: pageChars * 2 }));
+		assert.equal(third, header + body.slice(pageChars * 2));
 		await assert.rejects(notes({ op: "read", path: "big.md", offset: 85_000 }), /past the end/);
 
 		await notes({ op: "write", path: "big.md", content: "" });
 		assert.equal(readFileSync(join(dir, ".pi", "notes", "big.md"), "utf8"), "");
-		assert.equal(toolText(await notes({ op: "read", path: "big.md" })), "");
+		assert.equal(toolText(await notes({ op: "read", path: "big.md" })), header);
 		await assert.rejects(notes({ op: "write", path: "big.md" }), /"content" is required for op "write"/);
 
 		await notes({ op: "append", path: "log.md", content: "A" });
