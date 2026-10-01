@@ -2,15 +2,17 @@
 
 ## Unreleased
 
-- Keep development TypeBox aligned with the host and exclude official Pi 0.99.2 from dependency updates after reproduced startup regressions; later Pi releases remain eligible for qualification.
+- Support Pi 1.0.0 and later using the official public retain-none compaction path; checkpoint and legacy fork-window APIs are not required. Keep development TypeBox aligned with the exact host cohort.
+- Reuse one lazy native usage/settings snapshot per synchronous safety evaluation, including page budgets and final handoff admission. Never guess routed context capacity from a virtual model declaration.
+- Bound reminder lookups by the latest Posthorse boundary and complete kept range, reusing leaf-certified append-only and negative state without losing history. Reuse compaction event branch entries for recovery.
 - State the active model's configured context capacity and available rollover threshold in every fresh window, and require a budget lookup before reporting remaining tokens or changing plans because of context limits.
 - Prefer incremental edits of concise current-state notes at checkpoints, leaving already-current notes unchanged and retaining full writes as a fallback.
 - Show absolute shared storage locations in notes reads and listings, with path headers included in page budgets but excluded from content offsets and compact previews.
-- Upgrade the development Pi cohort to 0.99.1 and host TypeBox 1.3.27 without changing runtime peers or the Node floor.
+- Upgrade the development Pi cohort to 1.0.0 and host TypeBox 1.3.27 without changing optional runtime peers or the Node floor.
 - Use public retain-none compaction on both hosts; remove retired native-window, early-auto-compaction and receipt-bounding hooks. Preserve legacy journal history and current notes/recovery tools.
 - Require positively identified projected `ask_question` calls and an effective registered unnamespaced definition for owner answers, including providers that omit call namespaces. Namespaced, unregistered or orphaned results stay tool evidence.
 - Bind explicit rollover to Posthorse's own successful callback and admitted handoff, not a foreign same-name tool result. Consume requests once at settlement and preserve failed/aborted batches.
-- Verify fork early/after-reset recovery and public working-session checkpoint restoration alongside official-host eligibility limits.
+- Qualify native early/after-reset eligibility on the official 1.0 baseline for both targets; remove retired fork-checkpoint tests and distribution heuristics. Preserve legacy journal recovery, not unsupported runtime APIs.
 - Remove the obsolete source-copying fork integration suite and script after migrating distinct protections to the current public real-SDK owners.
 - Correct official automatic-hook credential ordering and identify the native compaction card as the current reset-success indicator; context-window cards are historical.
 

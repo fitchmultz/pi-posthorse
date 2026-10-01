@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { AgentSession, createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createPosthorse } from "../index.ts";
 
@@ -13,7 +13,6 @@ const toolTurn = (...calls) => fauxAssistantMessage(calls, { stopReason: "toolUs
 const overflow = () => fauxAssistantMessage("", { stopReason: "error", errorMessage: "prompt is too long: 300000 tokens > 100000 maximum" });
 const boundaries = (h) => h.sessionManager.getBranch().filter((entry) => entry.type === "compaction" && entry.details?.posthorse === 1);
 const result = (h, name) => h.sessionManager.getBranch().findLast((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === name)?.message;
-const fork = typeof AgentSession.prototype.acquireCheckpoint === "function";
 
 async function fixture(t, options = {}) {
 	const temp = mkdtempSync(join(tmpdir(), "posthorse-official-"));
@@ -65,7 +64,11 @@ function registerDump(pi, terminate = false, size = 600_000, image) {
 }
 
 test("official explicit reset preserves system/tools and raw transcript; notes/history work after reset and resume", async (t) => {
-	const h = await fixture(t);
+	const h = await fixture(t, { extension(pi) {
+		pi.on("turn_end", (event) => event.toolResults.some((result) => result.toolName === "new_context")
+			? { entries: [...event.entries, { type: "custom", customType: "prior-reset-state", data: { preserved: true } }] }
+			: undefined);
+	} });
 	let initial, fresh;
 	h.faux.setResponses([
 		(ctx) => {
@@ -96,6 +99,8 @@ test("official explicit reset preserves system/tools and raw transcript; notes/h
 	assert.match(textOf(result(h, "notes")), /DURABLE_NEXT_STEP/);
 	assert.match(textOf(result(h, "history")), /RAW_ORIGINAL_OWNER/);
 	assert.match(readFileSync(h.sessionManager.getSessionFile(), "utf8"), /RAW_ORIGINAL_OWNER/);
+	assert.deepEqual(h.sessionManager.getBranch().find((entry) => entry.customType === "prior-reset-state").data, { preserved: true },
+		"Posthorse preserves drafts from handlers that ran before its explicit reset");
 	const reopened = SessionManager.open(h.sessionManager.getSessionFile());
 	assert.deepEqual(reopened.buildSessionContext().messages, JSON.parse(JSON.stringify(h.sessionManager.buildSessionContext().messages)));
 	assert.equal(h.faux.state.callCount, 3);
@@ -460,9 +465,6 @@ test("the default file extension loads on official Pi and reads persisted settin
 	await h.session.prompt("Start fresh.");
 	assert.match(getCurrentSystemPrompt(request), /Pi compaction is disabled/);
 	assert.equal(boundaries(h).length, 1);
-	const context = h.session.extensionRunner.createContext();
-	assert.equal(context.newContext, undefined);
-	assert.equal(typeof context.getCompactionSettings, fork ? "function" : "undefined");
 });
 
 test("queued input arrives unchanged after native automatic rollover", async (t) => {
@@ -495,15 +497,7 @@ test("oversized incoming input obeys the selected host's preflight boundary", as
 	]);
 	await h.session.prompt(input);
 	assert.match(boundaries(h)[0].summary, /OVERSIZED_FRESH_INPUT[\s\S]*OVERSIZED_OWNER_TAIL/);
-	if (fork) {
-		assert.equal(h.faux.state.callCount, 1, "preflight rolls over before the provider's single bounded attempt");
-		assert.equal(boundaries(h).length, 1);
-		assert.ok(first.length < 30_000);
-		assert.match(first, /OVERSIZED_FRESH_INPUT/);
-		assert.match(readFileSync(h.sessionManager.getSessionFile(), "utf8"), /OVERSIZED_FRESH_INPUT/);
-		return;
-	}
-	assert.ok(first.includes(input), "this beta deliberately does not transform incoming input");
+	assert.ok(first.includes(input), "native input remains unchanged before provider recovery");
 	assert.ok(first.length > 600_000);
 	assert.ok(retry.length < 30_000);
 	assert.equal(boundaries(h).length, 1);
@@ -873,18 +867,11 @@ test("unsupported automatic budget deliberately keeps native model summarization
 for (const reason of ["overflow", "length"]) test(`tiny ${reason} obeys native recovery eligibility with default keepRecentTokens`, async (t) => {
 	let intercepted = 0;
 	const h = await fixture(t, { extension(pi) { pi.on("session_before_compact", () => { intercepted++; }); } });
-	let retry;
-	h.faux.setResponses([reason === "overflow" ? overflow() : fauxAssistantMessage("Partial.", { stopReason: "length" }),
-		(ctx) => { retry = JSON.stringify(ctx.messages); return fauxAssistantMessage("Recovered tiny input."); }]);
+	h.faux.setResponses([reason === "overflow" ? overflow() : fauxAssistantMessage("Partial.", { stopReason: "length" }), fauxAssistantMessage("MUST_NOT_RUN")]);
 	await h.session.prompt("Tiny input.");
-	assert.equal(intercepted, fork ? 1 : 0);
-	assert.equal(boundaries(h).length, fork ? 1 : 0);
-	assert.equal(h.faux.state.callCount, fork ? 2 : 1);
-	if (fork) {
-		assert.equal(boundaries(h)[0].usage, undefined);
-		assert.match(retry, /Tiny input/);
-		assert.doesNotMatch(retry, /Partial\.|prompt is too long/);
-	}
+	assert.equal(intercepted, 0, "native preparation declines a tiny span");
+	assert.equal(boundaries(h).length, 0);
+	assert.equal(h.faux.state.callCount, 1);
 });
 
 for (const keepRecentTokens of [20_000, 1]) test(`second large tool result obeys native after-reset eligibility (keepRecentTokens=${keepRecentTokens})`, async (t) => {
@@ -897,13 +884,8 @@ for (const keepRecentTokens of [20_000, 1]) test(`second large tool result obeys
 	]);
 	await h.session.prompt("Inspect two outputs.");
 	assert.equal(second.filter((message) => message.role !== "system").length, 1);
-	if (fork) {
-		assert.equal(third.filter((message) => message.role !== "system").length, 1);
-		assert.ok(JSON.stringify(third).length < 30_000);
-		assert.match(JSON.stringify(third), /DUMP_HEAD/);
-		assert.match(JSON.stringify(third), /DUMP_TAIL/);
-	} else assert.ok(third.some((message) => message.role === "toolResult" && textOf(message).length > 600_000),
-		"official preparation can decline the second operation without a new user span");
+	assert.ok(third.some((message) => message.role === "toolResult" && textOf(message).length > 600_000),
+		"native preparation can decline the second operation without a new user span");
 	assert.equal(boundaries(h).length, 2, "the final response can trigger a later native operation");
 	assert.equal(h.faux.state.callCount, 3);
 });

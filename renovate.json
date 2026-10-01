@@ -10,11 +10,11 @@
       "enabled": false
     },
     {
-      "description": "Skip Pi 0.99.2 after a reproduced startup regression; later versions remain eligible.",
+      "description": "Qualify Pi updates at the supported 1.0 floor or later.",
       "matchManagers": ["npm"],
       "matchDepTypes": ["devDependencies"],
       "matchPackageNames": ["@earendil-works/**"],
-      "allowedVersions": "!/^0\\.99\\.2$/"
+      "allowedVersions": ">=1.0.0"
     }
   ]
 }
