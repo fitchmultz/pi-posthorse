@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep development TypeBox aligned with the host and exclude official Pi 0.99.2 from dependency updates after reproduced startup regressions; later Pi releases remain eligible for qualification.
 - State the active model's configured context capacity and available rollover threshold in every fresh window, and require a budget lookup before reporting remaining tokens or changing plans because of context limits.
 - Prefer incremental edits of concise current-state notes at checkpoints, leaving already-current notes unchanged and retaining full writes as a fallback.
 - Show absolute shared storage locations in notes reads and listings, with path headers included in page budgets but excluded from content offsets and compact previews.

@@ -90,7 +90,7 @@ Keep one concise current-state note per task, preserving decisions and safety co
 
 ## Data and privacy
 
-- For cached-token cost diagnosis and a safe stock-compaction comparison, see the [cached-token investigation](ARTIFACTS/investigation-report.md). It does not establish the cause of a production bill or claim a measured cost improvement.
+- For cached-token cost diagnosis and a safe stock-compaction comparison, see the [cached-token investigation](https://github.com/fitchmultz/pi-posthorse/blob/main/ARTIFACTS/investigation-report.md). It does not establish the cause of a production bill or claim a measured cost improvement.
 - Posthorse makes no network requests.
 - Notes are plaintext files under `.pi/notes`. They survive package removal and may be committed unless ignored.
 - `history` with `all: true` scans project-matching JSONL files and their nested subagent sessions in the active Pi session directory, not unrelated projects that share that directory. It runs ripgrep locally over that directory when available.
@@ -106,6 +106,8 @@ npm run check:compat                   # typecheck, unit tests, and the real-SDK
 ```
 
 `npm run check` type-checks the extension, renderers, and tests against the official npm declarations. `npm test` covers reminder policy, notes/history behavior, failed note replacement, and real native card components, including width and expansion.
+
+Development dependency policy: update TypeBox alongside the Pi cohort to match the host's version, not independently. Both reviewed hosts use 1.3.27; a standalone 1.3.34 update adds a second TypeBox graph and regresses local extension-import startup (median 274 ms → 391 ms, 12 alternating measured samples per graph). Official Pi 0.99.2 passes compatibility tests but is excluded from Renovate because isolated SDK/session/first-prompt startup regressed (288 ms → 313 ms, 20 alternating measured samples per host); steady-state 50/500-turn prompts improved, but do not offset that regression. These macOS/Node 24.21.0 offline measurements hold extension source at `ea25232` and do not measure provider latency or cost. Later Pi versions remain eligible; remove the exclusion only after repeated startup and steady-state comparisons clear the regression. Revisit the TypeBox pin when the host changes its own dependency, then qualify both hosts.
 
 `test:native` runs shared public-API suites against the installed real SDK, with host-aware assertions for actual recovery eligibility and physical request boundaries. Both cover real loading, prompt composition, explicit/automatic rollover without a summary call, owner-provenance safety, failed siblings, cancellation, recovery records, notes and history. Fork checks additionally restore the exact public checkpoint leaf and accepted next-turn queue without replaying work. There are no native-window/async compatibility shims or blanket skips. `PI_COMPAT_HOST`, `PI_HOST_INDEX`, `PI_COMPAT_EXPECTED_PACKAGE_DIR` and `PI_COMPAT_EXPECTED_VERSION` reject a different selected graph; typechecking uses that graph too.
 
