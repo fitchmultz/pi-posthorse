@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 — 2026-10-01
 
 - Support Pi 1.0.0 and later using the official public retain-none compaction path; checkpoint and legacy fork-window APIs are not required. Keep development TypeBox aligned with the exact host cohort.
 - Reuse one lazy native usage/settings snapshot per synchronous safety evaluation, including page budgets and final handoff admission. Never guess routed context capacity from a virtual model declaration.
