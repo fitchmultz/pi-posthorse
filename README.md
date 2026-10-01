@@ -90,6 +90,7 @@ Keep one concise current-state note per task, preserving decisions and safety co
 
 ## Data and privacy
 
+- For cached-token cost diagnosis and a safe stock-compaction comparison, see the [cached-token investigation](ARTIFACTS/investigation-report.md). It does not establish the cause of a production bill or claim a measured cost improvement.
 - Posthorse makes no network requests.
 - Notes are plaintext files under `.pi/notes`. They survive package removal and may be committed unless ignored.
 - `history` with `all: true` scans project-matching JSONL files and their nested subagent sessions in the active Pi session directory, not unrelated projects that share that directory. It runs ripgrep locally over that directory when available.
