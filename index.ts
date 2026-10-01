@@ -48,7 +48,6 @@ type ContextUsage = { tokens: number | null; contextWindow: number; percent: num
 
 /** Settings come from the injected policy; the compaction hook provides Pi's live policy. */
 type PolicyContext = {
-	model?: { contextWindow: number };
 	getCompactionSettings(): CompactionPolicy;
 	getContextUsage(): ContextUsage | undefined;
 	getSystemPrompt(): string;
@@ -556,14 +555,6 @@ async function* scopedSessionFiles(
 	}
 }
 
-function currentWindowId(entries: readonly EntryLike[]): string {
-	for (let i = entries.length - 1; i >= 0; i--) {
-		const entry = entries[i];
-		if (isWindow(entry) && entry.id) return entry.id;
-	}
-	return "initial";
-}
-
 function excerpt(text: string, limit: number): string {
 	if (text.length <= limit) return text;
 	const marker = "\n… middle omitted …\n";
@@ -841,7 +832,7 @@ function hasReminder(entries: readonly EntryLike[], fingerprint: ReminderFingerp
 	);
 }
 
-function budgetFor(ctx: PolicyContext, contextWindow = ctx.getContextUsage()?.contextWindow ?? ctx.model?.contextWindow): Budget | undefined {
+function budgetFor(ctx: PolicyContext, contextWindow = ctx.getContextUsage()?.contextWindow): Budget | undefined {
 	if (!contextWindow || contextWindow <= 0) return undefined;
 	const { enabled, reserveTokens } = ctx.getCompactionSettings();
 	const usable = contextWindow - reserveTokens;
@@ -925,12 +916,60 @@ function guidanceTokens(ctx: PolicyContext): number {
 /** SDK hosts can inject live settings instead of the persisted CLI snapshot. */
 export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => CompactionPolicy = persistedPolicy) => (pi: ExtensionAPI) => {
 	const resetRequests = new Map<string, string>();
-	const policy = (ctx: ExtensionContext): PolicyContext => ({
-		model: ctx.model,
-		getCompactionSettings: () => getPolicy(ctx),
-		getContextUsage: () => ctx.getContextUsage(),
-		getSystemPrompt: () => ctx.getSystemPrompt(),
-	});
+	// One synchronous safety evaluation only. Never carry this snapshot across an await.
+	const policy = (ctx: ExtensionContext, livePolicy?: CompactionPolicy): PolicyContext => {
+		let usageRead = false;
+		let usage: ContextUsage | undefined;
+		let settings: CompactionPolicy | undefined;
+		return {
+			getCompactionSettings: () => settings ??= { ...(livePolicy ?? getPolicy(ctx)) },
+			getContextUsage: () => {
+				if (!usageRead) {
+					usage = ctx.getContextUsage();
+					usageRead = true;
+				}
+				return usage;
+			},
+			getSystemPrompt: () => ctx.getSystemPrompt(),
+		};
+	};
+	type ReminderState = {
+		manager: ExtensionContext["sessionManager"];
+		sessionId: string;
+		file: string | undefined;
+		leaf: EntryLike | undefined;
+		windowId: string;
+		reminders: EntryLike[];
+	};
+	let reminderState: ReminderState | undefined;
+	const remindersFor = (ctx: ExtensionContext): ReminderState => {
+		const manager = ctx.sessionManager;
+		const sessionId = manager.getSessionId(), file = manager.getSessionFile();
+		const leaf = manager.getEntry(manager.getLeafId() ?? "") as EntryLike | undefined;
+		const previous = reminderState?.manager === manager && reminderState.sessionId === sessionId && reminderState.file === file
+			? reminderState : undefined;
+		if (previous && previous.leaf === leaf) return previous;
+		const reversed: EntryLike[] = [];
+		let boundary: EntryLike | undefined, window: EntryLike | undefined;
+		let kept = false;
+		for (let entry = leaf; entry; entry = entry.parentId ? manager.getEntry(entry.parentId) as EntryLike | undefined : undefined) {
+			// Certify append-only ancestry by entry identity, not just a reusable id.
+			if (!boundary && previous?.leaf === entry) {
+				return reminderState = { manager, sessionId, file, leaf, windowId: previous.windowId,
+					reminders: [...previous.reminders, ...reversed.reverse().filter((entry) => entry.type === "custom_message" && isReminderType(entry.customType))] };
+			}
+			reversed.push(entry);
+			if (!boundary && (entry.type === "compaction" || entry.type === "context_window")) boundary = entry;
+			if (!window && isWindow(entry)) window = entry;
+			if (boundary && (boundary.type === "context_window" || entry.id === boundary.firstKeptEntryId)) kept = true;
+			// An ordinary compaction can keep a tail preceding the Posthorse boundary.
+			// Missing kept ids or a negative window lookup must reach the root once.
+			if (window && kept) break;
+		}
+		const entries = reversed.reverse();
+		return reminderState = { manager, sessionId, file, leaf, windowId: window?.id ?? "initial",
+			reminders: entries.slice(contextStart(entries).start).filter((entry) => entry.type === "custom_message" && isReminderType(entry.customType)) };
+	};
 	registerPosthorseMessages(pi);
 	const activeToolTokens = () => {
 		const active = new Set(pi.getActiveTools());
@@ -1012,7 +1051,9 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		resetRequests.clear();
 		pendingPageTokens = 0;
 		previousPageUsage = undefined;
+		reminderState = undefined;
 	});
+	pi.on("session_tree", () => { reminderState = undefined; });
 
 	let runPromptOptions: { forceSystemPrompt?: string } | undefined;
 	pi.on("before_agent_start", (event) => {
@@ -1064,14 +1105,14 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		const remindAt = budget.rolloverAt - reminderBuffer;
 		if (usage.tokens < remindAt) return;
 
-		const branch = ctx.sessionManager.getBranch() as EntryLike[];
+		const state = remindersFor(ctx);
 		const fingerprint: ReminderFingerprint = {
-			windowId: currentWindowId(branch),
+			windowId: state.windowId,
 			contextWindow: budget.contextWindow,
 			reserveTokens: budget.reserveTokens,
 		};
 		// A reminder a compaction summarized away no longer reaches the model.
-		if (hasReminder(branch.slice(contextStart(branch).start), fingerprint)) return;
+		if (hasReminder(state.reminders, fingerprint)) return;
 		pi.sendMessage(
 			{
 				customType: REMINDER_TYPE,
@@ -1090,7 +1131,7 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		const marker = event.messages.find((message) => message.role === "custom" && message.customType === "context-window");
 		const windowId = marker?.role === "custom"
 			? (marker.details as { windowId?: unknown } | undefined)?.windowId
-			: currentWindowId(ctx.sessionManager.getBranch() as EntryLike[]);
+			: remindersFor(ctx).windowId;
 		if (typeof windowId !== "string") return;
 		const host = policy(ctx);
 		const budget = budgetFor(host);
@@ -1099,10 +1140,11 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 			contextWindow: budget?.contextWindow,
 			reserveTokens: budget?.reserveTokens,
 		};
+		const enabled = host.getCompactionSettings().enabled;
 		const stale = (message: (typeof event.messages)[number]) =>
 			message.role === "custom" &&
 			isReminderType(message.customType) &&
-			(!host.getCompactionSettings().enabled || !reminderMatches(message.details, fingerprint));
+			(!enabled || !reminderMatches(message.details, fingerprint));
 		if (event.messages.some(stale)) return { messages: event.messages.filter((message) => !stale(message)) };
 	});
 
@@ -1113,12 +1155,12 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 		if (cancelled()) return { cancel: true };
 		try {
 			// The event carries Pi's live settings; prefer them over the persisted snapshot.
-			const host: PolicyContext = { ...policy(ctx), getCompactionSettings: () => event.preparation.settings };
+			const host = policy(ctx, event.preparation.settings);
 			// Small/unknown context windows deliberately keep Pi's own compaction.
 			if (!budgetFor(host)?.supported) return;
 			const limit = freshPayloadChars(host, activeToolTokens());
 			const ownerQuestionRegistered = pi.getAllTools().some((tool) => tool.name === "ask_question" && tool.namespace === undefined);
-			const handoff = buildAutoHandoff(ctx.sessionManager.getBranch() as EntryLike[], ctx.sessionManager.buildSessionProjection().entries, limit, ownerQuestionRegistered);
+			const handoff = buildAutoHandoff(event.branchEntries, ctx.sessionManager.buildSessionProjection().entries, limit, ownerQuestionRegistered);
 			if (limit < MIN_PAGE_CHARS || handoff.length > limit) throw new Error("Too little fresh context capacity for an automatic recovery record.");
 			if (cancelled()) return { cancel: true };
 			// firstKeptEntryId must name an entry; an invisible sentinel retains no prior conversation.
@@ -1272,8 +1314,9 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 						throw new Error(`Offset ${offset} is past the end of ${relative} (${text.length} chars).`);
 					}
 					const header = `File: ${path}\n`;
-					const chars = pageSize(policy(ctx), offset, 0) - header.length;
-					if (chars <= 0) pageError(policy(ctx), `Too little context remains to include the note path. Call new_context first, then retry with offset ${offset}.`);
+					const host = policy(ctx);
+					const chars = pageSize(host, offset, 0) - header.length;
+					if (chars <= 0) pageError(host, `Too little context remains to include the note path. Call new_context first, then retry with offset ${offset}.`);
 					const end = Math.min(text.length, offset + chars);
 					const more =
 						end < text.length ? `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]` : "";
@@ -1431,13 +1474,14 @@ export const createPosthorse = (getPolicy: (ctx: ExtensionContext) => Compaction
 						if (hits[0].length > limit) break;
 					}
 				}
-				const chars = pageSize(policy(ctx), 0, 0, params.cursor);
-				if (!found) pageError(policy(ctx), "History cursor entry no longer matches; restart the search without it.", params.cursor);
+				const host = policy(ctx);
+				const chars = pageSize(host, 0, 0, params.cursor);
+				if (!found) pageError(host, "History cursor entry no longer matches; restart the search without it.", params.cursor);
 				const results = hits.flat();
 				const cursorFor = (hit: HistoryHit, offset: number) => Buffer.from(JSON.stringify([hit.id, hit.priority, offset, searchKey])).toString("base64url");
 				const footer = (next: string) => `\n[More results; continue with cursor "${next}" and the same query/scope.]`;
 				const reserve = Math.max(0, ...results.map((hit) => footer(cursorFor(hit, hit.text.length)).length));
-				if (reserve >= chars) pageError(policy(ctx), "History entry id is too large for pagination.", params.cursor);
+				if (reserve >= chars) pageError(host, "History entry id is too large for pagination.", params.cursor);
 				const skippedNote = skipped && !params.cursor
 					? `\n[Skipped ${skipped} match${skipped === 1 ? "" : "es"} already in your active context.]`
 					: "";

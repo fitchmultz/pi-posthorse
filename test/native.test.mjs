@@ -1,71 +1,21 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { findPackageJSON } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 const hostIndex = process.env.PI_HOST_INDEX ? pathToFileURL(process.env.PI_HOST_INDEX).href : import.meta.resolve("@earendil-works/pi-coding-agent");
-const { AgentSession, createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(hostIndex);
+const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = await import(hostIndex);
 
 // Resolve the faux provider from the selected host's graph as well.
 const aiManifest = pathToFileURL(findPackageJSON("@earendil-works/pi-ai", hostIndex));
 const aiPackage = JSON.parse(readFileSync(aiManifest, "utf8"));
 const { fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, InMemoryCredentialStore } = await import(new URL(aiPackage.exports["."].import, aiManifest).href);
 const { createPosthorse } = await import("../index.ts");
-const root = fileURLToPath(new URL("..", import.meta.url));
 const textOf = (message) => typeof message?.content === "string" ? message.content : message?.content?.map((part) => part.text ?? "").join("\n") ?? "";
 const nextCursor = (text) => text.match(/\[More results; continue with cursor "([^"]+)" and the same query\/scope\.\]$/)?.[1];
-
-if (typeof AgentSession.prototype.acquireCheckpoint === "function") test("public checkpoint restores the exact rollover leaf, queues, notes and raw history without replay", async (t) => {
-	const h = await fixture(t);
-	h.faux.setResponses([
-		fauxAssistantMessage([
-			fauxToolCall("notes", { op: "write", path: "checkpoint.md", content: "DURABLE_CHECKPOINT_STATE" }),
-			fauxToolCall("new_context", { handoff: "CHECKPOINT_HANDOFF" }),
-		], { stopReason: "toolUse" }),
-		fauxAssistantMessage("Ready for capture."),
-	]);
-	await h.session.prompt("CHECKPOINT_ORIGINAL_OWNER");
-	h.session.sendCustomMessage({ customType: "saved-work", content: "ACCEPTED_NEXT_TURN", display: false }, { deliverAs: "nextTurn" });
-	const hold = await h.session.acquireCheckpoint({ quiesce: () => () => {}, signal: AbortSignal.timeout(10_000) });
-	assert.equal(hold.checkpoint.boundary, "settled");
-	assert.equal(hold.checkpoint.settled, true);
-	assert.equal(hold.signal.aborted, false);
-	const checkpoint = structuredClone(hold.checkpoint);
-	assert.equal(checkpoint.selection.leafId, h.sessionManager.getLeafId());
-	assert.equal(checkpoint.queues.nextTurn[0].content, "ACCEPTED_NEXT_TURN");
-	hold.release();
-	h.session.dispose();
-	await h.resourceLoader.reload();
-	assert.deepEqual(h.resourceLoader.getExtensions().errors, []);
-	const { session: restored } = await createAgentSession({
-		checkpoint, cwd: h.cwd, agentDir: h.agentDir, modelRuntime: h.modelRuntime,
-		resourceLoader: h.resourceLoader, settingsManager: h.settingsManager,
-	});
-	t.after(() => restored.dispose());
-	await restored.bindExtensions({ mode: "print", onError(error) { throw new Error(error.error); } });
-	assert.equal(h.faux.state.callCount, 2, "capture and restore must not replay model or tool work");
-	assert.equal(restored.sessionManager.getLeafId(), checkpoint.selection.leafId);
-	assert.deepEqual(restored.getCheckpointQueues(), checkpoint.queues);
-	let first;
-	h.faux.setResponses([
-		(ctx) => { first = JSON.stringify(ctx.messages); return fauxAssistantMessage([
-			fauxToolCall("notes", { op: "read", path: "checkpoint.md" }),
-			fauxToolCall("history", { op: "search", query: "CHECKPOINT_ORIGINAL_OWNER" }),
-		], { stopReason: "toolUse" }); },
-		fauxAssistantMessage("Restored evidence."),
-	]);
-	await restored.prompt("Continue from the restored working session.");
-	assert.match(first, /CHECKPOINT_HANDOFF|ACCEPTED_NEXT_TURN/);
-	assert.doesNotMatch(first, /CHECKPOINT_ORIGINAL_OWNER/);
-	const results = restored.sessionManager.getBranch().filter((entry) => entry.message?.role === "toolResult");
-	assert.match(textOf(results.findLast((entry) => entry.message.toolName === "notes").message), /DURABLE_CHECKPOINT_STATE/);
-	assert.match(textOf(results.findLast((entry) => entry.message.toolName === "history").message), /CHECKPOINT_ORIGINAL_OWNER/);
-	assert.equal(restored.getCheckpointQueues().nextTurn.length, 0);
-});
-
 async function fixture(t, options = {}) {
 	const temp = mkdtempSync(join(tmpdir(), "posthorse-regression-"));
 	t.diagnostic(`fixture: ${temp}`);
@@ -97,6 +47,36 @@ async function fixture(t, options = {}) {
 }
 
 function reset(manager, handoff) { return manager.appendCompaction(handoff, null, 100, { posthorse: 1 }); }
+
+test("official resume keeps legacy saved window data recoverable after a public reset", async (t) => {
+	let ownerId;
+	const h = await fixture(t, { seed(manager) {
+		ownerId = manager.appendMessage({ role: "user", content: "LEGACY_OWNER_INPUT", timestamp: 1 });
+		manager.appendMessage(fauxAssistantMessage("Saved response."));
+		const file = manager.getSessionFile();
+		appendFileSync(file, `${JSON.stringify({ type: "context_window", id: "legacy-window", parentId: manager.getLeafId(), timestamp: "2026-09-01T00:00:00Z", handoff: "LEGACY_SAVED_HANDOFF" })}\n`);
+		manager.setSessionFile(file);
+	} });
+	h.faux.setResponses([
+		fauxAssistantMessage(fauxToolCall("new_context", { handoff: "Public fresh context" }), { stopReason: "toolUse" }),
+		fauxAssistantMessage([
+			fauxToolCall("history", { op: "search", query: "LEGACY_OWNER_INPUT" }),
+			fauxToolCall("history", { op: "read", id: "legacy-window" }),
+		], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Recovered saved data."),
+	]);
+	await h.session.prompt("Reset using public compaction, then recover the legacy record.");
+	const results = h.sessionManager.getBranch().filter((entry) => entry.message?.toolName === "history").map((entry) => entry.message);
+	assert.equal(results.length, 2);
+	assert.ok(results.every((result) => !result.isError));
+	assert.match(textOf(results[0]), /LEGACY_OWNER_INPUT/);
+	assert.match(textOf(results[1]), /\[window legacy-window\].*Handoff: LEGACY_SAVED_HANDOFF/);
+	const reopened = SessionManager.open(h.sessionManager.getSessionFile());
+	assert.match(JSON.stringify(reopened.getEntry(ownerId)), /LEGACY_OWNER_INPUT/);
+	assert.match(JSON.stringify(reopened.getEntry("legacy-window")), /LEGACY_SAVED_HANDOFF/);
+	assert.ok(!reopened.buildSessionProjection().entries.some(({ sourceEntry }) => [ownerId, "legacy-window"].includes(sourceEntry.id)),
+		"raw legacy inputs leave active context; only explicitly recovered tool receipts return");
+});
 
 test("all-session history scopes project sessions and their nested subagents", async (t) => {
 	let foreignId, ownId, foreignChildId, ownChildId;

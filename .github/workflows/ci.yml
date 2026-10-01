@@ -56,6 +56,15 @@ jobs:
         working-directory: extension
         run: |
           ! grep '"resolved": "' package-lock.json | grep -v '"resolved": "https://registry.npmjs.org/'
+      - name: Select supported fork target
+        id: fork-support
+        run: |
+          version="$(node -p 'require("./fork/packages/coding-agent/package.json").version')"
+          supported="$(node -e 'console.log(Number(process.argv[1].split(".")[0]) >= 1)' "$version")"
+          echo "supported=$supported" >> "$GITHUB_OUTPUT"
+          if [ "$supported" != true ]; then
+            echo "Fork $version is below Posthorse's Pi 1.0 floor; fork qualification is unattempted until a supported candidate exists." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Use the reviewed npm version
         run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
       - name: Install native test prerequisites
@@ -64,6 +73,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
       - name: Build the current fork
+        if: steps.fork-support.outputs.supported == 'true'
         working-directory: fork
         env:
           PI_FORK_REF: ${{ steps.fork.outputs.commit }}
@@ -85,6 +95,7 @@ jobs:
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host official --target "$version" --output "$RUNNER_TEMP/posthorse-official"
       - name: Qualify fork Pi
+        if: steps.fork-support.outputs.supported == 'true'
         env:
           PI_COMPAT_FORK_REF: ${{ steps.fork.outputs.commit }}
         run: |

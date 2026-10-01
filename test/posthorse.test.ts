@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createEditTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createEditTool, SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import posthorse, { createPosthorse } from "../index.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 
@@ -28,6 +28,9 @@ type TestContext = {
 	sessionManager: {
 		getBranch(): Record<string, unknown>[];
 		getLeafId?(): string | null;
+		getEntry?(id: string): Record<string, unknown> | undefined;
+		getSessionId?(): string;
+		getSessionFile?(): string | undefined;
 		getSessionDir(): string;
 		buildSessionProjection(): { entries: Array<{ sourceEntry: Record<string, unknown>; messages: unknown[] }> };
 	};
@@ -38,6 +41,24 @@ type TestContext = {
 
 /** Fixture branches put nothing in the model's active context unless a test projects entries. */
 const emptyProjection = () => ({ entries: [] });
+
+/** Unit branches have implicit ancestry; supply the same by-id access as SessionManager. */
+function indexedBranch(branch: Record<string, unknown>[]) {
+	const link = () => {
+		for (const [i, entry] of branch.entries()) {
+			entry.id ??= `fixture-${i}`;
+			entry.parentId ??= i ? branch[i - 1].id : null;
+		}
+		return branch;
+	};
+	return {
+		getBranch: () => branch,
+		getLeafId: () => link().at(-1)?.id as string ?? null,
+		getEntry: (id: string) => link().find((entry) => entry.id === id),
+		getSessionId: () => "fixture",
+		getSessionFile: () => undefined,
+	};
+}
 
 function setup() {
 	const handlers = new Map<string, Handler>();
@@ -69,7 +90,7 @@ function setup() {
 	const context: TestContext = {
 		cwd: process.cwd(),
 		model: { contextWindow: 100_000 },
-		sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => [], getSessionDir: () => tmpdir() },
+		sessionManager: { ...indexedBranch([]), buildSessionProjection: emptyProjection, getSessionDir: () => tmpdir() },
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
 		getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }),
 		getSystemPrompt: () => "You are a test assistant.",
@@ -131,8 +152,8 @@ function usageContext(base: TestContext, contextWindow: number, tokens: number, 
 
 function automaticResult(handlers: Map<string, Handler>, context: TestContext, branchEntries: Record<string, unknown>[], projected?: Array<{ sourceEntry: Record<string, unknown>; messages: unknown[] }>) {
 	const entries = projected ?? branchEntries.filter((entry) => entry.type === "message").map((entry) => ({ sourceEntry: entry, messages: [entry.message] }));
-	return handlers.get("session_before_compact")!({ reason: "threshold", signal: new AbortController().signal, preparation: { settings: context.getCompactionSettings(), tokensBefore: 100 } }, {
-		...context, sessionManager: { ...context.sessionManager, getLeafId: () => "boundary", getBranch: () => branchEntries, buildSessionProjection: () => ({ entries }) },
+	return handlers.get("session_before_compact")!({ reason: "threshold", branchEntries, signal: new AbortController().signal, preparation: { settings: context.getCompactionSettings(), tokensBefore: 100 } }, {
+		...context, sessionManager: { ...context.sessionManager, getLeafId: () => "boundary", getBranch: () => { throw new Error("Use compaction event history"); }, buildSessionProjection: () => ({ entries }) },
 	}) as { compaction?: { summary: string }; cancel?: boolean } | undefined;
 }
 function automaticHandoff(handlers: Map<string, Handler>, context: TestContext, branchEntries: Record<string, unknown>[]) {
@@ -267,7 +288,7 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 		const context: TestContext = {
 			cwd: dir,
 			model: { contextWindow },
-			sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => { branchReads++; return branch; }, getSessionDir: () => dir },
+			sessionManager: { ...indexedBranch(branch), buildSessionProjection: emptyProjection, getBranch: () => { branchReads++; return branch; }, getSessionDir: () => dir },
 			getContextUsage: () => ({ tokens, contextWindow, percent: (tokens / contextWindow) * 100 }),
 			getCompactionSettings: () => ({ enabled: true, reserveTokens: reserve }),
 			getSystemPrompt: () => "You are a test assistant.",
@@ -292,7 +313,7 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 		assert.match(messages[0].content, /Checkpoint now/);
 		assert.match(messages[0].content, /current-state note .*available file-editing tools.*Then call new_context\.$/);
 		assert.deepEqual(messages[0].details, { windowId: "window-2", contextWindow, reserveTokens: reserve });
-		assert.equal(branchReads, 1, "the first token in the reminder band checks the current window");
+		assert.equal(branchReads, 0, "reminder checks use by-id ancestry, not a full branch copy");
 		branch.push({ type: "custom_message", customType: "posthorse-reminder", details: messages[0].details });
 
 		tokens = threshold;
@@ -302,17 +323,17 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 		messages.length = 0;
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1, "Posthorse still offers a checkpoint at equality");
-		assert.equal(branchReads, 3, "in-band turns recheck persisted reminders, including threshold equality");
+		assert.equal(branchReads, 0, "in-band checks do not materialize the branch");
 
 		messages.length = 0;
 		tokens = rolloverAt;
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 0, "Pi owns the first token that actually triggers rollover");
-		assert.equal(branchReads, 3, "rollover equality must not fetch history");
+		assert.equal(branchReads, 0, "rollover equality must not fetch history");
 		tokens += 1_000;
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 0, "Posthorse also stays out of Pi's over-threshold path");
-		assert.equal(branchReads, 3, "over-threshold turns must not fetch history");
+		assert.equal(branchReads, 0, "over-threshold turns must not fetch history");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -325,6 +346,116 @@ test("a large reserve does not send checkpoint reminders in a fresh window", () 
 	turnEnd(handlers, usageContext(base, 400_000, 9001, 390_000));
 	assert.equal(messages.length, 1);
 	assert.match(messages[0].content, /1,000 tokens remain/);
+});
+
+test("each safety evaluation reads native usage and policy once, including unknown pages and final handoff validation", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "posthorse-snapshot-"));
+	try {
+		mkdirSync(join(dir, ".pi", "notes"), { recursive: true });
+		writeFileSync(join(dir, ".pi", "notes", "state.md"), "saved state");
+		const { handlers, tools, context } = setup();
+		context.cwd = dir;
+		let usageReads = 0, policyReads = 0, known = true, enabled = true, available = true;
+		context.getContextUsage = () => {
+			usageReads++;
+			if (!available) return undefined;
+			return { tokens: known ? 1000 : null, contextWindow: 100_000, percent: known ? 1 : null };
+		};
+		context.getCompactionSettings = () => {
+			policyReads++;
+			return { enabled, reserveTokens: 16_384 };
+		};
+		const once = async <T>(action: () => T, expectedPolicyReads = 1): Promise<Awaited<T>> => {
+			usageReads = policyReads = 0;
+			const result = await action();
+			assert.equal(usageReads, 1, "one authoritative native acquisition per evaluation");
+			assert.equal(policyReads, expectedPolicyReads, "at most one settings acquisition per evaluation, only when needed");
+			return result;
+		};
+		const guidance = await once(() => guidanceFor(handlers, context));
+		assert.match(guidance, /rollover line is 83,617 tokens used/);
+		for (known of [true, false]) {
+			for (const op of ["read", "list", "search"]) {
+				assert.match(toolText(await once(() => run(tools, "notes", { op, path: "state.md", query: "saved" }, context))), /state\.md|saved state/);
+			}
+			assert.match(toolText(await once(() => run(tools, "new_context", { handoff: "continue" }, context))), /Requested/);
+		}
+		enabled = false;
+		const drafts = await once(() => handlers.get("turn_end")!({
+			message: { role: "assistant", stopReason: "toolUse" }, toolResults: [{ toolName: "new_context", toolCallId: "id" }],
+			entries: [], context: { pendingMessages: [] },
+		}, context)) as { entries: Record<string, unknown>[] };
+		assert.equal(drafts.entries[0].summary, "continue", "final handoff evaluation is independent of execute");
+		const reminder = { role: "custom", customType: "posthorse-reminder", details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 } };
+		assert.deepEqual(await once(() => handlers.get("context")!({ messages: Array(30).fill(reminder) }, context)), { messages: [] });
+		available = false;
+		assert.match(toolText(await once(() => run(tools, "notes", { op: "read", path: "state.md" }, context), 0)), /saved state/,
+			"an absent native reading is memoized too");
+		assert.match(guidanceFor(handlers, { ...context, model: { contextWindow: 2_000_000 }, getContextUsage: () => undefined }), /capacity is unknown/,
+			"a virtual declaration is not a replacement for the native routed limit");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+for (const archived of [10, 43_000]) test(`reminder lookups are leaf-certified and preserve the full kept range (${archived} archived entries)`, () => {
+	const { handlers, messages, context: base } = setup();
+	const manager = SessionManager.inMemory();
+	for (let i = 0; i < archived; i++) manager.appendCustomEntry("old", {});
+	const window = manager.appendCompaction("carry on", null, 100, { posthorse: 1 });
+	const fingerprint = { windowId: window, contextWindow: 100_000, reserveTokens: 16_384 };
+	const reminder = manager.appendCustomMessageEntry("posthorse-reminder", "Checkpoint now", true, fingerprint);
+	manager.appendMessage({ role: "user", content: "kept", timestamp: 1 });
+	manager.appendCompaction("native summary", reminder, 100);
+	let reads = 0;
+	const context = {
+		...usageContext(base, 100_000, 76_000),
+		sessionManager: {
+			getSessionId: () => manager.getSessionId(), getSessionFile: () => manager.getSessionFile(),
+			getLeafId: () => manager.getLeafId(),
+			getEntry: (id: string) => { reads++; return manager.getEntry(id); },
+			getBranch: () => { throw new Error("Reminder checks must not copy full history"); },
+			getSessionDir: () => manager.getSessionDir(), buildSessionProjection: emptyProjection,
+		},
+	} as unknown as TestContext;
+	turnEnd(handlers, context);
+	assert.equal(messages.length, 0, "native compaction retains a reminder before its own entry");
+	assert.equal(reads, 4, "cold lookup stops at the Posthorse boundary, independent of archive size");
+	for (let i = 0; i < 5; i++) turnEnd(handlers, context);
+	assert.equal(reads, 9, "unchanged leaf needs only one by-id certification");
+	manager.appendCustomEntry("new", {});
+	reads = 0;
+	turnEnd(handlers, context);
+	assert.equal(reads, 2, "append lookup stops at the certified previous leaf");
+	assert.equal(messages.length, 0);
+	const removed = manager.appendCompaction("removed reminder", null, 100);
+	turnEnd(handlers, context);
+	assert.equal(messages.length, 1, "removal permits a new reminder in the same logical window");
+	assert.deepEqual(messages[0].details, fingerprint);
+	manager.branch(reminder);
+	turnEnd(handlers, context);
+	assert.equal(messages.length, 1, "navigation back restores the kept reminder without stale negative state");
+	manager.branch(removed);
+	handlers.get("session_tree")!({}, context);
+	turnEnd(handlers, context);
+	assert.equal(messages.length, 2, "navigation forward restores its absence");
+	handlers.get("session_start")!({}, context);
+	turnEnd(handlers, context);
+	assert.equal(messages.length, 3, "session lifecycle invalidates branch facts, not safety snapshots");
+
+	const initial = SessionManager.inMemory();
+	for (let i = 0; i < archived; i++) initial.appendCustomEntry("old", {});
+	const noWindow = { ...context, sessionManager: {
+		...context.sessionManager, getSessionId: () => initial.getSessionId(), getLeafId: () => initial.getLeafId(),
+		getEntry: (id: string) => { reads++; return initial.getEntry(id); },
+	} } as unknown as TestContext;
+	reads = 0;
+	turnEnd(handlers, noWindow);
+	assert.equal(reads, archived, "a negative cold lookup is complete, never capped");
+	reads = 0;
+	turnEnd(handlers, noWindow);
+	assert.equal(reads, 1, "negative state is cached only for the certified leaf and session");
+	assert.equal(messages.at(-1)?.details?.windowId, "initial");
 });
 
 test("guidance uses request-local sections and preserves custom or forced prompts", () => {
@@ -378,7 +509,7 @@ test("disabling compaction filters persisted reminders without changing history 
 	let enabled = true;
 	const reminder = { role: "custom", customType: "posthorse-reminder", content: "Checkpoint now", details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 } };
 	const branch = [{ ...reminder, type: "custom_message", id: "reminder" }];
-	const context = { ...usageContext(base, 100_000, 76_000), getCompactionSettings: () => ({ enabled, reserveTokens: 16_384 }), sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => tmpdir() } };
+	const context = { ...usageContext(base, 100_000, 76_000), getCompactionSettings: () => ({ enabled, reserveTokens: 16_384 }), sessionManager: { ...indexedBranch(branch), buildSessionProjection: emptyProjection, getSessionDir: () => tmpdir() } };
 	const owner = { role: "user", content: "continue" };
 	assert.equal(handlers.get("context")!({ messages: [owner, reminder] }, context), undefined);
 	enabled = false;
@@ -796,7 +927,7 @@ test("a reminder before a native compaction does not suppress the next reminder"
 		{ type: "message", id: "kept", message: { role: "user", content: "kept tail" } },
 		{ type: "compaction", id: "native", summary: "native summary", firstKeptEntryId: "kept" },
 	];
-	const context = { ...usageContext(base, 100_000, 76_000), sessionManager: { buildSessionProjection: emptyProjection, getBranch: () => branch, getSessionDir: () => tmpdir() } };
+	const context = { ...usageContext(base, 100_000, 76_000), sessionManager: { ...indexedBranch(branch), buildSessionProjection: emptyProjection, getSessionDir: () => tmpdir() } };
 	turnEnd(handlers, context);
 	assert.equal(messages.length, 1);
 	branch.push({ type: "custom_message", id: "new-reminder", customType: "posthorse-reminder", details: messages[0].details });
@@ -1124,7 +1255,7 @@ test("read pages shrink to the remaining budget and refuse unsafe pages while pr
 		// Disabled compaction measures against the configured context limit instead of the rollover line.
 		const disabled = withBranch(usageContext(base, 100_000, 98_000, 16_384, false));
 		assert.match(toolText(await run(tools, "notes", { op: "read", path: "long.md" }, disabled)), new RegExp(`continue with offset ${4000 - header.length}`));
-		const unknown = withBranch({ ...base, model: { contextWindow: 4096 }, getContextUsage: () => undefined });
+		const unknown = withBranch({ ...base, model: { contextWindow: 4096 }, getContextUsage: () => ({ tokens: null, contextWindow: 4096, percent: null }) });
 		handlers.get("turn_start")?.({}, unknown);
 		const unknownPage = toolText(await run(tools, "notes", { op: "read", path: "long.md" }, unknown));
 		const unknownOffset = unknownPage.match(/continue with offset (\d+)/)?.[1];
