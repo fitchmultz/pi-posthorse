@@ -1,4 +1,20 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>fitchmultz/.github:pi-extensions"]
+  "extends": ["github>fitchmultz/.github:pi-extensions"],
+  "packageRules": [
+    {
+      "description": "Update development TypeBox with the host cohort, not independently; see README Develop.",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "matchPackageNames": ["typebox"],
+      "enabled": false
+    },
+    {
+      "description": "Skip Pi 0.99.2 after a reproduced startup regression; later versions remain eligible.",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "matchPackageNames": ["@earendil-works/**"],
+      "allowedVersions": "!/^0\\.99\\.2$/"
+    }
+  ]
 }
