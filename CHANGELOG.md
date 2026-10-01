@@ -2,14 +2,66 @@
 
 ## Unreleased
 
-- Bound oversized retained native receipts before fresh-window dispatch, including results completed during rollover preparation. Requires the fork's synchronous `registerContextWindowHook`; excerpts share model capacity and preserve complete history or replacement recovery references.
+- State the active model's configured context capacity and available rollover threshold in every fresh window, and require a budget lookup before reporting remaining tokens or changing plans because of context limits.
+- Prefer incremental edits of concise current-state notes at checkpoints, leaving already-current notes unchanged and retaining full writes as a fallback.
+- Show absolute shared storage locations in notes reads and listings, with path headers included in page budgets but excluded from content offsets and compact previews.
+- Upgrade the development Pi cohort to 0.99.1 and host TypeBox 1.3.27 without changing runtime peers or the Node floor.
+- Use public retain-none compaction on both hosts; remove retired native-window, early-auto-compaction and receipt-bounding hooks. Preserve legacy journal history and current notes/recovery tools.
+- Require positively identified projected `ask_question` calls and an effective registered unnamespaced definition for owner answers, including providers that omit call namespaces. Namespaced, unregistered or orphaned results stay tool evidence.
+- Bind explicit rollover to Posthorse's own successful callback and admitted handoff, not a foreign same-name tool result. Consume requests once at settlement and preserve failed/aborted batches.
+- Verify fork early/after-reset recovery and public working-session checkpoint restoration alongside official-host eligibility limits.
+- Remove the obsolete source-copying fork integration suite and script after migrating distinct protections to the current public real-SDK owners.
+- Correct official automatic-hook credential ordering and identify the native compaction card as the current reset-success indicator; context-window cards are historical.
+
+## 0.7.0
+
+### Changed
+
+- `history search` skips entries whose full text the model already sees in its active context and reports how many it skipped, instead of repeating what the model can already see. Edited-away originals and checkpoint reminders stay searchable.
+- All-session history hits carry a 10-character file key instead of the session file path and a 43-character hash, and hits from nested subagent runs are tagged `[subagent]`. Full-length keys from earlier releases still read. Reads that resolve a bare ID in another session file print its qualified ID.
+- All-session search and bare-ID history reads use ripgrep (Pi's managed copy, then `PATH`) to skip session files that cannot match. Without ripgrep, and for queries that could match escaped or label-only text (quotes, backslashes, brackets, parentheses, braces, colons, `$`, edge spaces, or phrases such as "Call ID" and "No handoff"), every file is scanned as before; image-count and comma queries also search every file with an image block. Results always match a full scan.
+- `notes list` shows notes newest first with size and modification time, and takes an optional folder `path`. `notes read` of a folder returns its listing.
+- Notes and history pages hold up to 40,000 characters, up from 20,000, when the window has room. Handoffs stay capped at 20,000.
+- Automatic recovery records cap each tool-result excerpt at 1,500 characters and index the remaining current-window inputs by entry ID, with a one-line preview for owner inputs, instead of quoting them until the record fills.
+- Shorter guidance, reminder, and tool descriptions. The reminder asks for rewriting one current-state note in place, the guidance asks for readable prose in handoffs and notes, and `get_context_remaining` is no longer promoted for routine checks.
+
+### Fixed
+
+- On the fork, a checkpoint reminder sent after Pi compacted inside a Posthorse window was removed from model input, leaving the model an extra request with nothing new and no checkpoint prompt.
+- `notes search` skips binary files and streams text notes asynchronously; before, one search could block Pi for seconds and load hundreds of megabytes of databases or archives as text. `notes read` of a binary file now says so instead of returning decoded bytes.
+- `history read` errors explain what a valid entry ID looks like and point to `history search`.
+
+### Removed
+
+- The experimental Codex prototype (`adapters/codex-posthorse`) and its CI workflow. It was never part of the Pi package.
+
+## 0.6.0
+
+### Breaking Changes
+
+- Requires Node `>=24.12.0`.
+- Removes pi-headroom compatibility: `headroom-reminder` entries are no longer recognized, and checkout-local notes are no longer imported into the shared notes directory.
+
+### Added
+
+- Runs on official Pi. Rollover there is a compaction entry that keeps no earlier conversation and carries the handoff as its summary, with no summary model call. `new_context` commits at turn end once every tool in the batch succeeds; automatic threshold and overflow rollover answers `session_before_compact`. The fork keeps native context windows. The host is detected when Posthorse loads.
+- `createPosthorse(getPolicy)` lets SDK hosts on official Pi supply their live compaction settings.
+
+### Changed
+
+- Note writes use Posthorse's own same-directory replacement instead of the fork-only `publishLocalFile`, and writes and appends to one note run in order within a Pi process.
+- Development baseline: Pi 0.87.1, TypeScript 7, typebox 1.3.34, npm 12. The Codex prototype uses MCP SDK v2 and is tested against Codex 0.157.1.
+
+### Fixed
+
+- Active tool size estimates count tools on official Pi, which reports tool names but not fork tool ids.
+- After Pi's own `/compact`, automatic recovery records start at the compaction's kept tail and carry its summary as the prior checkpoint instead of re-listing summarized inputs, and a reminder the compaction summarized away no longer suppresses the next one.
+- On the fork, bound oversized retained native receipts before fresh-window dispatch, including results completed during rollover preparation, through the synchronous `registerContextWindowHook`; excerpts share model capacity and preserve complete history or replacement recovery references.
 - Align rollover guidance and request cards with native background work continuing across context resets, while foreground tools must succeed before an explicit rollover commits.
 - Retain native async receipts across later complete responses during rollover, labeled as evidence that may already have been received or handled.
-- Skip circular directory links during note migration, listing, and search while preserving ordinary linked notes.
+- Skip circular directory links and missing targets during note listing and search while preserving ordinary linked notes.
 - Preserve completed asynchronous tool results during rollover when the response that started them fails or is interrupted.
 - Keep namespaced `ask_question` results as ordinary tool evidence instead of treating them as owner answers during rollover.
-- Skip missing legacy note targets so broken symlinks do not block shared note reads and writes.
-- Prevent legacy note migration from copying the shared destination back through directory symlinks.
 - Read large history records without repeatedly copying and scanning their unfinished lines.
 - Honor Pi context edits and native projection in automatic recovery handoffs, including assistant checkpoints and omitted asynchronous results. Still-visible results remain in the handoff even when their call was edited out or predates the window, without borrowing another call's identity or arguments. Edited handoff references recover replacement text and images through `history read`.
 - Keep `history` searches and reads within the current project's session files and their nested subagents, even when distinct projects share a session directory.

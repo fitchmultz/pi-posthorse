@@ -1,18 +1,19 @@
 import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
 	CustomMessageComponent,
 	initTheme,
 	ToolExecutionComponent,
 	type ExtensionAPI,
-	type ExtensionContext,
+	type ExtensionToolContext,
 	type MessageRenderer,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, visibleWidth, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import posthorse from "../index.ts";
+import { createPosthorse } from "../index.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 
 initTheme("dark");
@@ -20,9 +21,8 @@ initTheme("dark");
 function setup() {
 	const tools = new Map<string, ToolDefinition>();
 	const messages = new Map<string, MessageRenderer>();
-	posthorse({
+	createPosthorse((ctx) => (ctx as ExtensionToolContext & { getCompactionSettings(): { enabled: boolean; reserveTokens: number } }).getCompactionSettings())({
 		on() {},
-		registerContextWindowHook() {},
 		registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
 		registerMessageRenderer: (name: string, renderer: MessageRenderer) => messages.set(name, renderer),
 		getActiveTools: () => [...tools.keys()],
@@ -49,7 +49,7 @@ function click(component: { handleMouse(event: TuiMouseEvent): { handled?: boole
 	return component.handleMouse({ type: "click", button: "left", x: 2, y, screenX: 2, screenY: y, width, height: 100, shift: false, alt: false, ctrl: false });
 }
 
-function context(cwd: string, branch: unknown[] = []): ExtensionContext {
+function context(cwd: string, branch: unknown[] = []): ExtensionToolContext {
 	return {
 		cwd,
 		model: { contextWindow: 100_000 },
@@ -57,10 +57,10 @@ function context(cwd: string, branch: unknown[] = []): ExtensionContext {
 		getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }),
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
 		getSystemPrompt: () => "test",
-		sessionManager: { getBranch: () => branch, getSessionDir: () => cwd },
-	} as unknown as ExtensionContext;
+		sessionManager: { buildSessionProjection: () => ({ entries: [] }), getBranch: () => branch, getSessionDir: () => cwd },
+	} as unknown as ExtensionToolContext;
 }
-async function execute(name: string, args: Record<string, unknown>, ctx: ExtensionContext) {
+async function execute(name: string, args: Record<string, unknown>, ctx: ExtensionToolContext) {
 	return setup().tools.get(name)!.execute("tool-1", args, undefined, undefined, ctx);
 }
 
@@ -116,11 +116,15 @@ test("notes show page range and next offset even when the preview fills the comp
 		const component = card("notes", args);
 		component.updateResult({ ...output, isError: false });
 		const compact = text(component, 40);
-		assert.match(compact, /0[–-]20,000.*56,186/s);
-		assert.match(compact, /offset 20,000/);
+		const end = 40_000 - `File: ${join(cwd, ".pi", "notes", "ledger.md")}\n`.length;
+		assert.match(compact, new RegExp(`0[–-]${end.toLocaleString("en-US")}.*56,186`, "s"));
+		assert.match(compact, new RegExp(`offset ${end.toLocaleString("en-US")}`));
+		assert.match(compact, /START/);
+		assert.doesNotMatch(compact, /File:/, "the path header must not displace the compact content preview");
 		assert.ok(lines(component, 40).length <= 10);
 		assert.equal(click(component, 40, 4)?.handled, true, "the visible body also expands");
-		assert.match(text(component), /continue with offset 20000/);
+		assert.match(text(component), new RegExp(`continue with offset ${end}`));
+		assert.ok(text(component, 196).includes(join(cwd, ".pi", "notes", "ledger.md")));
 		assert.deepEqual(output, snapshot, "rendering must not mutate model-visible output");
 		assert.ok(JSON.stringify(output.details).length < 200, "page metadata must not duplicate the note");
 	} finally {
@@ -189,7 +193,9 @@ test("paginated searches retain accurate counts, spans, identifiers and continua
 		message: { role: "user", content: `needle station ${index} ${"r".repeat(500)}` },
 	}));
 	const args = { op: "search", query: "needle", limit: 50 };
-	const output = await execute("history", args, context(tmpdir(), branch));
+	// Late in the window, the remaining budget rather than the result limit ends the page.
+	const late = Object.assign(context(tmpdir(), branch), { getContextUsage: () => ({ tokens: 78_000, contextWindow: 100_000, percent: 78 }) });
+	const output = await execute("history", args, late);
 	const display = output.details as PosthorseDisplay;
 	assert.equal(display.kind, "history-search");
 	if (display.kind !== "history-search") throw new Error("missing search spans");
@@ -211,7 +217,7 @@ test("paginated searches retain accurate counts, spans, identifiers and continua
 	try {
 		const ctx = context(cwd);
 		await execute("notes", { op: "write", path: "ledger.md", content: Array.from({ length: 30 }, (_, index) => `needle ${index} ${"n".repeat(150)}`).join("\n") }, ctx);
-		Object.assign(ctx, { getContextUsage: () => ({ tokens: 98_700, contextWindow: 100_000, percent: 98.7 }), getCompactionSettings: () => ({ enabled: false, reserveTokens: 16_384 }) });
+		Object.assign(ctx, { getContextUsage: () => ({ tokens: 98_000, contextWindow: 100_000, percent: 98 }), getCompactionSettings: () => ({ enabled: false, reserveTokens: 16_384 }) });
 		const result = await execute("notes", { op: "search", query: "needle" }, ctx);
 		const details = result.details as PosthorseDisplay;
 		assert.equal(details.kind, "notes-search");
@@ -245,7 +251,7 @@ test("context summaries preserve approximation and native disabled, unsupported,
 		assert.doesNotMatch(text(component, 80), /0%|hard limit/);
 		if (tokens !== null) assert.match(text(component, 80), /configured context limit/);
 		component.setExpanded(true);
-		assert.ok(text(component, 196).includes("native estimate") || tokens === null);
+		assert.ok(/native\s+estimate/.test(text(component, 196)) || tokens === null);
 	}
 });
 
@@ -321,14 +327,14 @@ test("partial and error results cannot inherit a success summary or terminal con
 
 test("history pages keep paging, metadata, and native image attachments without copied bodies", async () => {
 	const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" };
-	const body = `ENTRY HEAD ${"route ".repeat(5000)} ENTRY TAIL`;
+	const body = `ENTRY HEAD ${"route ".repeat(8000)} ENTRY TAIL`;
 	const branch = [{ type: "message", id: "picture-entry", timestamp: "2026-09-06T17:43:46Z", message: { role: "user", content: [{ type: "text", text: body }, image] } }];
 	const args = { op: "read", id: "picture-entry" };
 	const output = await execute("history", args, context(tmpdir(), branch));
 	const component = card("history", args);
 	component.updateResult({ ...output, isError: false });
 	component.setShowImages(false);
-	assert.match(text(component, 40), /Next offset 20,000/);
+	assert.match(text(component, 40), /Next offset 40,000/);
 	assert.match(text(component, 40), /1 image attached/);
 	assert.ok(lines(component, 40).length <= 10);
 	assert.deepEqual(output.content.slice(1), [image]);
@@ -338,7 +344,7 @@ test("history pages keep paging, metadata, and native image attachments without 
 	assert.ok(expanded.indexOf("ENTRY HEAD") < expanded.indexOf("2026-09-06T17"));
 	assert.match(expanded, /\[picture-entry\]/);
 	assert.match(expanded, /More remains; call history read/);
-	const continuation = await execute("history", { ...args, offset: 20_000 }, context(tmpdir(), branch));
+	const continuation = await execute("history", { ...args, offset: 40_000 }, context(tmpdir(), branch));
 	assert.equal(continuation.content.length, 1);
 
 	const manyImages = [{ ...branch[0], message: { role: "user", content: [{ type: "text", text: body }, ...Array.from({ length: 13 }, () => image)] } }];
@@ -371,15 +377,14 @@ test("legacy history and malformed display spans fall back to the complete retur
 });
 
 test("owned reminders are compact, expandable, and sanitize terminal control content", () => {
-	for (const customType of ["posthorse-reminder", "headroom-reminder"]) {
-		const renderer = setup().messages.get(customType);
-		assert.equal(typeof renderer, "function");
-		const message = { role: "custom" as const, customType, display: true, timestamp: 0, content: `Checkpoint now\n${"remember\n".repeat(50)}LAST\x1b[2J\x1b]52;c;c2VjcmV0\x07\x00` };
-		const component = new CustomMessageComponent(message, renderer, undefined, 2);
-		assert.ok(lines(component, 24).length <= 10);
-		component.setExpanded(true);
-		assert.match(text(component), /LAST/);
-		const raw = component.render(80).join("\n");
-		assert.doesNotMatch(raw, /\x1b\[2J|\x1b\]52|\x00/);
-	}
+	const customType = "posthorse-reminder";
+	const renderer = setup().messages.get(customType);
+	assert.equal(typeof renderer, "function");
+	const message = { role: "custom" as const, customType, display: true, timestamp: 0, content: `Checkpoint now\n${"remember\n".repeat(50)}LAST\x1b[2J\x1b]52;c;c2VjcmV0\x07\x00` };
+	const component = new CustomMessageComponent(message, renderer, undefined, 2);
+	assert.ok(lines(component, 24).length <= 10);
+	component.setExpanded(true);
+	assert.match(text(component), /LAST/);
+	const raw = component.render(80).join("\n");
+	assert.doesNotMatch(raw, /\x1b\[2J|\x1b\]52|\x00/);
 });

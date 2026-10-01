@@ -4,10 +4,10 @@ import { Box, MouseRegion, Text, stripTerminalSequences, truncateToWidth, type C
 /** Display-only facts and offsets into content, never a second copy of a note or history page. */
 export type PosthorseDisplay =
 	| { kind: "context"; usage?: { tokens: number | null; contextWindow: number; percent: number | null }; rollover?: "enabled" | "disabled" | "unsupported"; rolloverAt?: number }
-	| { kind: "notes-list" | "notes-search"; count: number; page?: { offset: number; end: number; total: number } }
-	| { kind: "note-read"; offset: number; end: number; total: number }
+	| { kind: "notes-list" | "notes-search"; count: number; headerLength?: number; page?: { offset: number; end: number; total: number } }
+	| { kind: "note-read"; headerLength?: number; offset: number; end: number; total: number }
 	| { kind: "note-write" | "note-append" | "new-context" }
-	| { kind: "history-search"; entries: Array<{ headerLength: number; length: number }>; footerLength?: number }
+	| { kind: "history-search"; entries: Array<{ headerLength: number; length: number }>; footerLength?: number; more?: boolean; skipped?: number }
 	| { kind: "history-read"; headerLength: number; offset: number; end: number; total: number; imageOffset?: number; imageEnd?: number; imageTotal?: number };
 
 type ToolName = "notes" | "history" | "get_context_remaining" | "new_context";
@@ -62,7 +62,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 			const args = argsOf(rawArgs);
 			const action = name === "notes" || name === "history" ? ` · ${argument(args.op, "op")}` : name === "new_context" ? " · request" : "";
 			const status = context.isError ? " · error" : context.isPartial ? context.executionStarted ? " · running" : " · preparing" : "";
-			const target = args.op === "search" ? ` · “${argument(args.query, "query")}”` : name === "notes" && args.op !== "list" ? ` · ${argument(args.path, "path")}` : name === "history" && args.op === "read" ? ` · ${argument(args.id, "id")}` : "";
+			const target = args.op === "search" ? ` · “${argument(args.query, "query")}”` : name === "notes" && (args.op !== "list" || args.path !== undefined) ? ` · ${argument(args.path, "path")}` : name === "history" && args.op === "read" ? ` · ${argument(args.id, "id")}` : "";
 			const label = `${context.isPartial ? "…" : context.expanded ? "▾" : "▸"} ${titles[name]}${action}${status}${target}`;
 			return {
 				invalidate() {},
@@ -103,7 +103,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 					case "note-read": summary = pageSummary(display); break;
 					case "note-write": summary = args.content === "" ? "Cleared note" : "Saved note"; break;
 					case "note-append": summary = "Appended to note"; break;
-					case "history-search": if (Array.isArray(display.entries) && (!display.entries.length || sections)) summary = `${display.entries.length ? `${n(display.entries.length)} matches` : "No matches"} · ${args.all === true ? "all sessions" : "current branch"}${display.footerLength ? "\nMore results; continue with cursor" : ""}`; break;
+					case "history-search": if (Array.isArray(display.entries) && (!display.entries.length || sections)) summary = `${display.entries.length ? `${n(display.entries.length)} matches` : "No matches"} · ${args.all === true ? "all sessions" : "current branch"}${display.skipped ? ` · ${n(display.skipped)} in context skipped` : ""}${(display.more ?? display.footerLength) ? "\nMore results; continue with cursor" : ""}`; break;
 					case "history-read":
 						summary = pageSummary(display);
 						if (display.imageTotal && display.imageEnd !== undefined) {
@@ -127,7 +127,8 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 			const submittedText = textBlock(submitted, theme);
 			const attachmentText = textBlock(attachment, theme, "muted");
 			// Old results have no spans. Only the preview sheds the known history prefix.
-			const preview = sections ? sections.map(({ body }) => body).join("\n") : name === "history" && !context.isError ? body.replace(/^[^\n]*?\[window [^\]\n]+\] \[[^\]\n]+\](?: \[chars \d+-\d+ of \d+\])? /gm, "") : body;
+			const noteHeaderLength = !context.isError && (display?.kind === "note-read" || display?.kind === "notes-list") ? display.headerLength ?? 0 : 0;
+			const preview = sections ? sections.map(({ body }) => body).join("\n") : noteHeaderLength ? body.slice(noteHeaderLength) : name === "history" && !context.isError ? body.replace(/^[^\n]*?\[window [^\]\n]+\] \[[^\]\n]+\](?: \[chars \d+-\d+ of \d+\])? /gm, "") : body;
 			const previewText = textBlock(preview, theme, color);
 			const searchPreviews = sections && display?.kind === "history-search" ? sections.slice(0, 3).map(({ body }) => theme.fg("toolOutput", clean(body).replace(/\s+/g, " "))) : undefined;
 			const summaryOnly = display?.kind === "context" || display?.kind === "new-context" || display?.kind === "note-write" || display?.kind === "note-append" || ((display?.kind === "notes-list" || display?.kind === "notes-search") && display.count === 0) || (display?.kind === "note-read" && display.total === 0) || (display?.kind === "history-search" && Array.isArray(display.entries) && display.entries.length === 0);
@@ -142,7 +143,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 						? searchPreviews.map((line) => truncateToWidth(line, width))
 						: previewText.render(width);
 					const shown = previewRows.slice(0, Math.max(0, Math.min(3, 5 - summaryRows.length - (attachment ? 1 : 0))));
-					const hidden = summaryOnly || previewRows.length > shown.length || Boolean(sections || submitted);
+					const hidden = summaryOnly || previewRows.length > shown.length || Boolean(sections || submitted || noteHeaderLength);
 					return [...summaryRows, ...shown, ...(attachment ? [truncateToWidth(theme.fg("muted", attachment), width)] : []), ...(hidden ? [hint(theme, width)] : [])];
 				},
 			};
@@ -190,5 +191,5 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 			return { handled: true };
 		});
 	};
-	for (const type of ["context-window", "posthorse-reminder", "headroom-reminder"]) pi.registerMessageRenderer(type, renderer);
+	for (const type of ["context-window", "posthorse-reminder"]) pi.registerMessageRenderer(type, renderer);
 }
