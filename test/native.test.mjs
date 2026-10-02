@@ -387,7 +387,7 @@ test("namespaced tools count toward the fresh handoff budget", async (t) => {
 	const result = branch.findLast((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "new_context").message;
 	assert.equal(result.isError, true, "active namespaced tool declarations must reduce the handoff budget");
 	assert.match(textOf(result), /Handoff is too large for the active model/);
-	assert.ok(!branch.some((entry) => entry.type === "compaction" && entry.details?.posthorse === 1 && entry.handoff === handoff));
+	assert.equal(branch.filter((entry) => entry.type === "compaction" && entry.details?.posthorse === 1).length, 0, "a denied handoff must not commit any Posthorse boundary");
 });
 
 for (const [enabled, reads] of [[false, 4], [true, 4], [false, 6], [false, 50]]) test(`public mixed searches/list/reads stay below configured capacity (compaction=${enabled}, reads=${reads})`, async (t) => {
@@ -486,13 +486,14 @@ test("public checkpoint reminder reaches the model after Pi compacts inside a ro
 	assert.match(input ?? "", /Checkpoint now:/);
 });
 
-test("public history search skips entries still in the active context", async (t) => {
+for (const nativeCompact of [false, true]) test(`public history search skips entries still in the active context (nativeCompact=${nativeCompact})`, async (t) => {
 	const h = await fixture(t, { seed(manager) {
 		manager.appendMessage({ role: "user", content: "IN_CONTEXT_NEEDLE before rollover", timestamp: 1 });
 		manager.appendMessage(fauxAssistantMessage("ok"));
-		reset(manager, "carry on");
-		manager.appendMessage({ role: "user", content: "IN_CONTEXT_NEEDLE after rollover", timestamp: 2 });
+		if (!nativeCompact) reset(manager, "carry on");
+		const kept = manager.appendMessage({ role: "user", content: "IN_CONTEXT_NEEDLE after rollover", timestamp: 2 });
 		manager.appendMessage(fauxAssistantMessage("ok"));
+		if (nativeCompact) manager.appendCompaction("Earlier work summarized", kept, 100);
 	} });
 	h.faux.setResponses([
 		fauxAssistantMessage([
