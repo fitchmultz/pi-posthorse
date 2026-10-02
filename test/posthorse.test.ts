@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createEditTool, SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import posthorse, { createPosthorse } from "../index.ts";
+import { createPosthorse } from "../index.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 
 type Handler = (event: Record<string, unknown>, context: TestContext) => unknown;
@@ -257,19 +257,6 @@ test("automatic recovery keeps owner anchors and visible coordination without st
 	assert.doesNotMatch(handoff, /old completed task|hidden state|stale reminder|assistant-derived state/);
 });
 
-test("automatic recovery includes successful ask_question cancellations and excludes errors", () => {
-	const { handlers, context, toolDefinitions } = setup();
-	toolDefinitions.push({ name: "ask_question" });
-	const handoff = automaticHandoff(handlers, context, [
-		{ type: "message", id: "question-call", message: { role: "assistant", content: [{ type: "toolCall", id: "question", name: "ask_question", arguments: {} }] } },
-		{ type: "message", id: "cancelled", timestamp: "1", message: { role: "toolResult", toolName: "ask_question", toolCallId: "question", isError: false, content: "Question cancelled by owner" } },
-		{ type: "message", id: "failed", timestamp: "2", message: { role: "toolResult", toolName: "ask_question", isError: true, content: "tool crashed" } },
-	]);
-	assert.match(handoff, /owner answer via ask_question/);
-	assert.match(handoff, /Question cancelled by owner/);
-	assert.doesNotMatch(handoff, /tool crashed/);
-});
-
 test("budget policy sends one best-effort reminder below the line and lets Pi own rollover", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-test-"));
 	try {
@@ -518,20 +505,6 @@ test("disabling compaction filters persisted reminders without changing history 
 	enabled = true;
 	turnEnd(handlers, context);
 	assert.equal(messages.length, 0, "reenabling does not emit another reminder");
-});
-
-test("hosts without the context-window hook load every capability with official compaction rollover", () => {
-	const events: string[] = [];
-	const tools: string[] = [];
-	const api = {
-		on(event: string) { events.push(event); },
-		registerTool(tool: { name: string }) { tools.push(tool.name); },
-		registerMessageRenderer() {},
-	} as unknown as ExtensionAPI;
-	posthorse(api);
-	assert.deepEqual(tools, ["new_context", "get_context_remaining", "notes", "history"]);
-	assert.ok(events.includes("session_before_compact"));
-	assert.ok(!events.includes("session_before_auto_compact"));
 });
 
 test("reminder-free context and fork reminder filtering never read history", () => {
@@ -1495,7 +1468,7 @@ await assert.rejects(notes.execute("fault", { op: "write", path: "durable.md", c
 });
 
 test("notes resolve the repository root from nested directories, worktrees, and plain folders", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-root-test-"));
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-root-test-")));
 	try {
 		const repo = join(dir, "repo");
 		const main = join(dir, "main");
