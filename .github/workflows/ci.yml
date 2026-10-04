@@ -13,23 +13,46 @@ on:
       - scripts/**
       - test/**
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      official-version:
+        description: Official stable version resolved for this run; blank resolves latest
+        type: string
+        default: ''
+      fork-ref:
+        description: Maintained fork commit resolved for this run; blank resolves main
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: pi-${{ github.ref }}
+  group: pi-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: bbc0048a363444cde7890c09e80cea00a47fc463 # fitchmultz/.github#33: dual-host Posthorse
+  PI_AUTOMATION_REF: 33c292e42ab4f4c815c0f1c8e775d5adf0a3e5b3 # main
 
 jobs:
+  resolve:
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@33c292e42ab4f4c815c0f1c8e775d5adf0a3e5b3 # main
+    with:
+      automation-ref: 33c292e42ab4f4c815c0f1c8e775d5adf0a3e5b3 # main
+      official-version: ${{ inputs.official-version }}
+      fork-ref: ${{ inputs.fork-ref }}
+
   verify:
+    needs: resolve
+    if: ${{ !cancelled() }}
     name: Pi fork and official
     runs-on: ubuntu-26.04
     timeout-minutes: 12
     steps:
+      - name: Require resolved latest hosts
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+        run: test "$RESOLVE" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: extension
@@ -44,7 +67,7 @@ jobs:
         id: fork
         with:
           repository: fitchmultz/pi
-          ref: main
+          ref: ${{ needs.resolve.outputs.fork-ref }}
           path: fork
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -56,15 +79,6 @@ jobs:
         working-directory: extension
         run: |
           ! grep '"resolved": "' package-lock.json | grep -v '"resolved": "https://registry.npmjs.org/'
-      - name: Select supported fork target
-        id: fork-support
-        run: |
-          version="$(node -p 'require("./fork/packages/coding-agent/package.json").version')"
-          supported="$(node -e 'console.log(Number(process.argv[1].split(".")[0]) >= 1)' "$version")"
-          echo "supported=$supported" >> "$GITHUB_OUTPUT"
-          if [ "$supported" != true ]; then
-            echo "Fork $version is below Posthorse's Pi 1.0 floor; fork qualification is unattempted until a supported candidate exists." >> "$GITHUB_STEP_SUMMARY"
-          fi
       - name: Use the reviewed npm version
         run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
       - name: Install native test prerequisites
@@ -73,7 +87,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
       - name: Build the current fork
-        if: steps.fork-support.outputs.supported == 'true'
         working-directory: fork
         env:
           PI_FORK_REF: ${{ steps.fork.outputs.commit }}
@@ -89,16 +102,26 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit
         working-directory: extension
       - name: Qualify official Pi
+        env:
+          version: ${{ needs.resolve.outputs.official-version }}
         run: |
-          version="$(node -p 'require("./extension/package.json").devDependencies["@earendil-works/pi-coding-agent"]')"
-          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
+          node automation/scripts/qualify.mjs \
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host official --target "$version" --output "$RUNNER_TEMP/posthorse-official"
       - name: Qualify fork Pi
-        if: steps.fork-support.outputs.supported == 'true'
         env:
           PI_COMPAT_FORK_REF: ${{ steps.fork.outputs.commit }}
         run: |
-          env -u GITHUB_STEP_SUMMARY node automation/scripts/qualify.mjs \
+          node automation/scripts/qualify.mjs \
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host fork --target "$RUNNER_TEMP/fork-package" --output "$RUNNER_TEMP/posthorse-fork"
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-qualification
+          path: |
+            ${{ runner.temp }}/posthorse-official
+            ${{ runner.temp }}/posthorse-fork
+          if-no-files-found: error
+          retention-days: 3

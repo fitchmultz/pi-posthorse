@@ -13,7 +13,7 @@ Pi owns the persisted boundary. Posthorse owns the policy: stable window guidanc
 - Node `>=24.12.0`.
 - Pi `>=1.0.0`, official (`@earendil-works/pi-coding-agent`) or a maintained fork with the same public compaction contracts. No checkpoint, metadata iterator, or native context-window API is required.
 
-Development baseline: exact official Pi `1.0.0` ([source `a13d35a`](https://github.com/earendil-works/pi/commit/a13d35a742c6ef8462812a28fbe1d8c8b7431c32)), TypeBox `1.3.27`, tested on Node `24.21.0`. Host identities, not version strings alone, select compatibility checks. A future fork 1.0 artifact must be qualified separately; this update does not install, activate, or restart the live runtime.
+Required qualification targets: latest stable official Pi and latest maintained fork `main`, resolved once per workflow run and retained with exact SDK/CLI identity evidence. Locked development dependencies are reproducible build snapshots, not validation targets. Historical official Pi `1.0.0` ([source `a13d35a`](https://github.com/earendil-works/pi/commit/a13d35a742c6ef8462812a28fbe1d8c8b7431c32)), TypeBox `1.3.27` and Node `24.21.0` evidence does not certify newer hosts. Qualification does not install, activate, or restart the live runtime.
 
 ## Install
 
@@ -102,6 +102,14 @@ Keep one concise current-state note per task, preserving decisions and safety co
 - History can return user text, assistant text and thinking, assistant failure status and error messages, tool arguments and results, handoffs, custom messages, and images. Direct shell entries Pi marked `excludeFromContext` come back as a placeholder only.
 - Returned history content enters the currently selected model and provider context.
 - Removing Posthorse does not remove notes or Pi session history.
+
+For latest-host qualification, run `node /path/to/automation/scripts/qualify.mjs --repo pi-posthorse --source "$PWD" --host official --target latest --output /tmp/pi-posthorse-official`, then qualify the packed latest maintained fork with `--host fork --target /path/to/fork-package`. Plain `npm ci` checks only the locked development snapshot, not latest qualification.
+
+## Automatic npm releases (maintainers)
+
+Follow the [shared release procedure](https://github.com/fitchmultz/.github#automatic-npm-releases): merge a reviewed PR into `main` with an intentional `package.json` version bump and a matching versioned `CHANGELOG.md` section. Once configured and enabled, publication is unattended after the full existing CI workflow and candidate-tarball qualification pass. Complete any applicable package-specific release evidence before merging the bump. Automation never bumps versions, overwrites releases, or republishes an existing version; existing manual publisher instructions remain valid.
+
+Failed/unpublished candidates can retry daily at 12:17 UTC or via manual dispatch of `npm release` on `main`, without another bump. Set repository variable `NPM_RELEASE_ENABLED` to anything other than `true` to stop new release plans; cancel pending runs separately when needed. Workflow validation is not evidence of a completed real OIDC publication.
 
 ## Develop
 
