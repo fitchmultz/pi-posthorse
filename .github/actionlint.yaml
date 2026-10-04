@@ -1,0 +1,4 @@
+# ponytail: actionlint 1.7.12 lacks Ubuntu 26.04; remove when its runner catalog recognizes this label.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04
