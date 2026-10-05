@@ -29,7 +29,10 @@ function compilerDirectiveProblem(file: string, text: string): string | undefine
 
 const authorizedRules = new Map([
 	["no-await-in-loop", (_file: string, next: string) => /\bawait\b/u.test(next)],
-	["no-control-regex", (file: string) => file === "src/ui/text.ts"],
+	[
+		"no-control-regex",
+		(file: string) => ["src/ui/text.ts", "test/renderers.test.ts"].includes(file),
+	],
 	[
 		"typescript/no-unnecessary-condition",
 		(_file: string, next: string) => /\.(?:aborted|deleted)\b/u.test(next),

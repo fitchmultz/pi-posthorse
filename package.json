@@ -17,7 +17,8 @@
 	"license": "MIT",
 	"files": [
 		"index.ts",
-		"ui.ts"
+		"ui.ts",
+		"src"
 	],
 	"engines": {
 		"node": ">=24.12.0"
