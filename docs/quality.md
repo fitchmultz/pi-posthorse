@@ -135,6 +135,24 @@ APIs. Existing lifecycle/persistence and native rendering tests retain their int
 Formatting is presentation work; these responsibility/ownership changes are substantive
 maintainability improvements, not claimed runtime bug fixes.
 
+The former `toolCards.renderResult` also combined an unchecked display assertion, summary
+selection, history slicing, terminal sanitation and collapsed/expanded layout. Before:
+
+```ts
+const display = result.details as PosthorseDisplay | undefined;
+```
+
+After, the SDK boundary validates unknown saved metadata:
+
+```ts
+display: displayOf(result.details);
+```
+
+`src/ui/display.ts` owns readonly display contracts, validation and history-span boundaries;
+`src/ui/text.ts` owns safe terminal text; `src/ui/cards.ts` owns presentation and row budgets.
+`ui.ts` retains the public exports and per-message click state. A summary change no longer requires
+editing sanitation or message expansion, and malformed legacy metadata falls back to ordinary text.
+
 ## Verification and review
 
 The probes check installed CLI rule IDs and source locations, not just exit status or schema

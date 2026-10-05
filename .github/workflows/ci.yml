@@ -117,6 +117,10 @@ jobs:
           git diff --exit-code
       - name: Use the extension npm version
         run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.1"
+          cache: false
       - run: npm ci --ignore-scripts --no-audit
         working-directory: extension
       - name: Qualify official Pi
