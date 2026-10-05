@@ -3,19 +3,30 @@
 	"version": "0.8.0",
 	"type": "module",
 	"description": "Posthorse: fresh context, same journey. No-summary context rollover for Pi, with sparse budget reminders, handoffs, notes, and history.",
-	"keywords": ["pi-package", "pi-extension", "context", "posthorse", "rollover"],
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"context",
+		"posthorse",
+		"rollover"
+	],
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/fitchmultz/pi-posthorse.git"
 	},
 	"license": "MIT",
-	"files": ["index.ts", "ui.ts"],
+	"files": [
+		"index.ts",
+		"ui.ts"
+	],
 	"engines": {
 		"node": ">=24.12.0"
 	},
 	"packageManager": "npm@12.2.0",
 	"pi": {
-		"extensions": ["./index.ts"],
+		"extensions": [
+			"./index.ts"
+		],
 		"image": "https://raw.githubusercontent.com/fitchmultz/pi-posthorse/main/diagram.png"
 	},
 	"scripts": {
@@ -46,6 +57,9 @@
 		"@earendil-works/pi-coding-agent": "1.0.0",
 		"@earendil-works/pi-tui": "1.0.0",
 		"@types/node": "24.19.1",
+		"oxfmt": "0.72.0",
+		"oxlint": "1.87.0",
+		"oxlint-tsgolint": "7.0.2003",
 		"typebox": "1.3.27",
 		"typescript": "7.0.2"
 	}
