@@ -3,22 +3,6 @@ name: Pi
 on:
   pull_request:
     branches: [main]
-    paths:
-      - .github/workflows/**
-      - index.ts
-      - ui.ts
-      - package.json
-      - package-lock.json
-      - tsconfig.json
-      - scripts/**
-      - test/**
-      - src/**
-      - .oxlintrc.json
-      - .oxfmtrc.json
-      - .vscode/**
-      - AGENTS.md
-      - docs/**
-      - patches/**
   workflow_dispatch:
   workflow_call:
     inputs:

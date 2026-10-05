@@ -68,12 +68,14 @@ and native-engine build caches are under ignored `node_modules`, not production 
 - Framework-owned Node test registration is eligible only after the corrected declaration matcher
   passes the complete identity matrix. Native Promise/PromiseLike are not safe-Promise allowances.
   Ordinary work, local shadows, foreign packages/files, aliases and unawaited subtests remain checked.
-- SDK `execute` requires five parameters at three exact tool-registration boundaries. Its single-site
-  directives do not change the four-parameter limit of neighboring application helpers.
+- SDK `execute` requires five parameters at three exact tool-registration boundaries. The policy
+  checker resolves the actual `ExtensionAPI.registerTool` declaration before permitting a directive;
+  matching method/interface names and neighboring application helpers retain the ordinary limit.
 - Sequential persistence, streams and cleanup keep explained single-site `no-await-in-loop`
   exceptions. Concurrency is chosen by actual dependencies, not by diagnostic counts.
 - `src/ui/text.ts` deliberately rejects terminal controls and Unicode interlinear annotations.
-  Only its exact control-character validation expression receives an explained native directive.
+  Its exact validation expression and intentional `test/renderers.test.ts` control fixtures receive
+  explained native directives.
 - Necessary post-await lifecycle guards may use explained single-site condition exceptions, and
   plain generic callbacks may use the authorized readonly-result exception. Neither permits unsafe
   callback bodies, mutable attached properties or floating Promises.
@@ -87,8 +89,10 @@ and native-engine build caches are under ignored `node_modules`, not production 
   are retained. Application APIs use the read operations they actually need; no Map/Record/Readonly
   blanket allowance is added. A checker upgrade must re-evaluate this known limitation.
 
-The policy checker reads compiler-parsed comment trivia, not source-text grep. It rejects blanket,
-line-wide, unapproved or unexplained directives and legacy ESLint suppressions. `@ts-ignore` and
+The policy checker uses Oxc's complete parsed comment stream, including comments inside empty
+containers and punctuation gaps, not source-text grep or partial AST trivia. Strings, regexes,
+template literals and JSX text are not directives; real JSX expression comments remain checked.
+It rejects blanket, line-wide, unapproved or unexplained directives and legacy ESLint suppressions. `@ts-ignore` and
 `@ts-nocheck` are forbidden. Described `@ts-expect-error` belongs only in dedicated `.test-d.ts`
 negative type tests. Unused-disable diagnostics stay enabled. New configuration/ignore/CI/suppression
 changes go through the repository's ordinary PR review, with positive and negative probes.

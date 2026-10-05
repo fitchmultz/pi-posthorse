@@ -51,9 +51,9 @@ await test("suppression policy parses actual comments, never strings, regexes or
 	const project = fixture({
 		files: {
 			"examples.ts": [
-				"export const quoted = '// oxlint-disable';",
+				"export const quoted = '🙂 // oxlint-disable';",
 				"export const template = `/* @ts-nocheck */ ${'// eslint-disable'}`;",
-				"export const regex = /oxlint-disable-next-line no-floating-promises/u;",
+				"export const regex = /[/*]oxlint-disable-next-line no-floating-promises/u;",
 				"/** Documentation mentions oxlint-disable-next-line and @ts-ignore without applying either. */",
 				"// @ts-nocheck",
 				"/* oxlint-disable */",
@@ -69,6 +69,96 @@ await test("suppression policy parses actual comments, never strings, regexes or
 			"examples.ts:5: compiler suppression is forbidden",
 			"examples.ts:6: only one named rule on oxlint-disable-next-line is permitted",
 			"examples.ts:7: directive needs an adjacent contract explanation",
+		]);
+	} finally {
+		project.dispose();
+	}
+});
+
+await test("suppression governance detects directives inside empty containers and punctuation gaps", () => {
+	const containers = [
+		"export const empty = { /* oxlint-disable eqeqeq */ };",
+		"export const empty = [ /* oxlint-disable eqeqeq */ ];",
+		"export function empty(): void { /* oxlint-disable eqeqeq */ }",
+		"export const number = ( /* oxlint-disable eqeqeq */ 1 );",
+		"export const first = 1; /* oxlint-disable eqeqeq */ export const second = 2;",
+	];
+	for (const container of containers) {
+		const files = {
+			"hidden.ts": `${container}\nexport function unsafe(n: number): boolean { return n == 1; }\n`,
+		};
+		expectFindings({ files }, []);
+		const project = fixture({ files });
+		try {
+			const source = sourcePolicies(project.root, ["hidden.ts"]).at(0);
+			assert.ok(source);
+			assert.deepEqual(suppressionProblems(source), [
+				"hidden.ts:1: only one named rule on oxlint-disable-next-line is permitted",
+			]);
+		} finally {
+			project.dispose();
+		}
+	}
+});
+
+await test("JSX text and template literals are not directives, but JSX expression comments are", () => {
+	const project = fixture({
+		files: {
+			"example.tsx": [
+				"export const template = `🙂 /* oxlint-disable */`;",
+				"export const view = <div>// oxlint-disable",
+				"@ts-nocheck",
+				"{/* oxlint-disable eqeqeq */}</div>;",
+			].join("\n"),
+		},
+		compiler: { jsx: "preserve" },
+	});
+	try {
+		const source = sourcePolicies(project.root, ["example.tsx"]).at(0);
+		assert.ok(source);
+		assert.deepEqual(suppressionProblems(source), [
+			"example.tsx:4: only one named rule on oxlint-disable-next-line is permitted",
+		]);
+	} finally {
+		project.dispose();
+	}
+});
+
+await test("arity directives require SDK declaration identity rather than method or interface names", () => {
+	const files = {
+		"src/context-tools.ts": [
+			"import type { ExtensionAPI as NativeExtensionAPI } from '@earendil-works/pi-coding-agent';",
+			"import { Type } from 'typebox';",
+			"export function register(pi: NativeExtensionAPI): void {",
+			"pi.registerTool({ name: 'native', label: 'Native', description: 'Native callback', parameters: Type.Object({}),",
+			"// The actual SDK supplies id, parameters, cancellation, updates and context.",
+			"// oxlint-disable-next-line max-params",
+			"async execute(_id, _params, _signal, _onUpdate, _ctx) { return { content: [], details: {} }; },",
+			"});",
+			"}",
+			"export const unrelated = {",
+			"// An unrelated method cannot claim the native framework callback contract.",
+			"// oxlint-disable-next-line max-params",
+			"execute(a: number, b: number, c: number, d: number, e: number): number { return a + b + c + d + e; },",
+			"};",
+			"interface ExtensionAPI { readonly registerTool: NativeExtensionAPI['registerTool']; }",
+			"export function fake(pi: ExtensionAPI): void {",
+			"pi.registerTool({ name: 'fake', label: 'Fake', description: 'Local declaration', parameters: Type.Object({}),",
+			"// A local same-named interface is not the SDK registration declaration.",
+			"// oxlint-disable-next-line max-params",
+			"async execute(_id, _params, _signal, _onUpdate, _ctx) { return { content: [], details: {} }; },",
+			"});",
+			"}",
+		].join("\n"),
+	};
+	expectFindings({ files }, []);
+	const project = fixture({ files });
+	try {
+		const source = sourcePolicies(project.root, ["src/context-tools.ts"]).at(0);
+		assert.ok(source);
+		assert.deepEqual(suppressionProblems(source), [
+			"src/context-tools.ts:12: arity allowance requires an actual five-argument SDK tool registration",
+			"src/context-tools.ts:19: arity allowance requires an actual five-argument SDK tool registration",
 		]);
 	} finally {
 		project.dispose();

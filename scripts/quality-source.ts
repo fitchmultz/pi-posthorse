@@ -1,9 +1,14 @@
 import { API } from "typescript/unstable/sync";
 import {
-	getLeadingCommentRanges,
-	getTrailingCommentRanges,
+	isCallExpression,
+	isIdentifier,
+	isMethodDeclaration,
+	isObjectLiteralExpression,
+	isPropertyAccessExpression,
 	type Node,
 } from "typescript/unstable/ast";
+import { parseSync } from "oxc-parser";
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 export interface SourceComment {
@@ -20,11 +25,73 @@ export interface SourcePolicy {
 	readonly strict: boolean;
 	readonly noImplicitReturns: boolean;
 	readonly project: string;
+	readonly sdkCallbackLines: readonly number[];
 }
 
-/** The installed compiler parses strings, regexes, templates and JSX before we inspect trivia. */
+/** The parser's complete comment stream includes empty containers and punctuation gaps. */
+function parsedComments(
+	file: string,
+	text: string,
+	line: (position: number) => number,
+): readonly SourceComment[] {
+	const parsed = parseSync(file, text);
+	if (parsed.errors.length > 0) {
+		throw new Error(
+			`Could not parse ${file}: ${parsed.errors.map((error) => error.message).join("; ")}`,
+		);
+	}
+	return parsed.comments.map((comment) => ({
+		text: text.slice(comment.start, comment.end),
+		offset: comment.start,
+		line: line(comment.start),
+		endLine: line(comment.end),
+	}));
+}
+
+/** Only five-argument execute methods inside actual SDK registrations have the arity contract. */
+function sdkCallbackLines(
+	source: Node,
+	isRegistration: (node: Node) => boolean,
+	line: (position: number) => number,
+): readonly number[] {
+	const lines: number[] = [];
+	const visit = (node: Node): void => {
+		if (isCallExpression(node) && isRegistration(node)) {
+			const definition = node.arguments[0];
+			for (const property of executeMethods(definition)) {
+				lines.push(line(property.getStart()));
+			}
+		}
+		node.forEachChild((child) => {
+			visit(child);
+		});
+	};
+	visit(source);
+	return lines;
+}
+
+function executeMethods(definition: Node | undefined): readonly Node[] {
+	if (definition === undefined || !isObjectLiteralExpression(definition)) {
+		return [];
+	}
+	return definition.properties.filter(
+		(property) =>
+			isMethodDeclaration(property) &&
+			isIdentifier(property.name) &&
+			property.name.text === "execute" &&
+			property.parameters.length === 5,
+	);
+}
+
+/** Compiler projects supply effective language settings and declaration identity, not lint scope. */
 export function sourcePolicies(root: string, files: readonly string[]): readonly SourcePolicy[] {
 	const api = new API({ cwd: root });
+	const sdkDeclaration = realpathSync(
+		resolve(
+			root,
+			"node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts",
+		),
+	);
 	try {
 		const snapshot = api.updateSnapshot({
 			openFiles: files.map((file) => resolve(root, file)),
@@ -37,26 +104,10 @@ export function sourcePolicies(root: string, files: readonly string[]): readonly
 				if (source === undefined || project === undefined) {
 					throw new Error(`Compiler could not assign maintained source ${file}`);
 				}
-				const ranges = new Map<number, SourceComment>();
-				const visit = (node: Node): void => {
-					const comments = [
-						...(getLeadingCommentRanges(source.text, node.pos) ?? []),
-						...(getTrailingCommentRanges(source.text, node.end) ?? []),
-					];
-					for (const comment of comments) {
-						ranges.set(comment.pos, {
-							text: source.text.slice(comment.pos, comment.end),
-							offset: comment.pos,
-							line: source.getLineAndCharacterOfPosition(comment.pos).line,
-							endLine: source.getLineAndCharacterOfPosition(comment.end).line,
-						});
-					}
-					node.forEachChild((child) => {
-						visit(child);
-					});
-				};
-				visit(source);
-				const comments = [...ranges.values()].toSorted((a, b) => a.line - b.line);
+				const sdkPath = project.program.getSourceFile(sdkDeclaration)?.path;
+				const line = (position: number) =>
+					source.getLineAndCharacterOfPosition(position).line;
+				const comments = parsedComments(file, source.text, line);
 				const prologueEnd = source.statements.at(0)?.getStart(source) ?? source.text.length;
 				const directives = comments.filter(
 					(comment) =>
@@ -64,6 +115,26 @@ export function sourcePolicies(root: string, files: readonly string[]): readonly
 						/^[/*\s]*@ts-(?:check|nocheck)\b/u.test(comment.text),
 				);
 				const last = directives.at(-1);
+				const callbacks = sdkCallbackLines(
+					source,
+					(node) => {
+						if (
+							!isCallExpression(node) ||
+							!isPropertyAccessExpression(node.expression) ||
+							node.expression.name.text !== "registerTool"
+						) {
+							return false;
+						}
+						const symbol = project.checker.getSymbolAtLocation(node.expression);
+						return (
+							symbol?.name === "registerTool" &&
+							symbol.getParent()?.name === "ExtensionAPI" &&
+							symbol.declarations.length > 0 &&
+							symbol.declarations.every((declaration) => declaration.path === sdkPath)
+						);
+					},
+					line,
+				);
 				return {
 					file,
 					comments,
@@ -76,6 +147,7 @@ export function sourcePolicies(root: string, files: readonly string[]): readonly
 					strict: project.compilerOptions.strict === true,
 					noImplicitReturns: project.compilerOptions.noImplicitReturns === true,
 					project: project.configFileName,
+					sdkCallbackLines: callbacks,
 				};
 			});
 		} finally {

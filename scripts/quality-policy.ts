@@ -58,6 +58,21 @@ function hasExplanation(source: SourcePolicy, comment: SourceComment): boolean {
 	return text.length >= 20 && !/^(?:oxlint-|eslint-|@ts-)/u.test(text);
 }
 
+function ruleScopeProblem(
+	source: SourcePolicy,
+	comment: SourceComment,
+	rule: string,
+): string | undefined {
+	const next = source.lines[comment.endLine + 1] ?? "";
+	if (rule === "max-params" && !source.sdkCallbackLines.includes(comment.endLine + 1)) {
+		return "arity allowance requires an actual five-argument SDK tool registration";
+	}
+	if (authorizedRules.get(rule)?.(source.file, next) === true) {
+		return;
+	}
+	return `unapproved rule or scope: ${rule}`;
+}
+
 function directiveProblem(source: SourcePolicy, comment: SourceComment): string | undefined {
 	const text = comment.text.replace(/^[/*\s]+|\*\/$/gu, "").trim();
 	const compiler = compilerDirectiveProblem(source.file, text);
@@ -77,12 +92,7 @@ function directiveProblem(source: SourcePolicy, comment: SourceComment): string 
 	if (!hasExplanation(source, comment)) {
 		return "directive needs an adjacent contract explanation";
 	}
-	const rule = match[1];
-	const next = source.lines[comment.endLine + 1] ?? "";
-	if (authorizedRules.get(rule)?.(source.file, next) === true) {
-		return;
-	}
-	return `unapproved rule or scope: ${rule}`;
+	return ruleScopeProblem(source, comment, match[1]);
 }
 
 export function suppressionProblems(source: SourcePolicy): readonly string[] {
