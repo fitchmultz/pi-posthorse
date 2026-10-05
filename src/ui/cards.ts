@@ -151,11 +151,12 @@ function resultColor(facts: ResultFacts): OutputColor {
 	if (facts.isError) {
 		return "error";
 	}
-	return !facts.isPartial &&
-		facts.display?.kind === "context" &&
-		facts.display.rollover === "unsupported"
-		? "warning"
-		: "toolOutput";
+	const { display } = facts;
+	if (facts.isPartial || display?.kind !== "context" || display.rollover !== "unsupported") {
+		return "toolOutput";
+	}
+	const tokens = display.usage?.tokens;
+	return tokens !== undefined && tokens !== null ? "warning" : "toolOutput";
 }
 
 function resultBody(facts: ResultFacts): string {
