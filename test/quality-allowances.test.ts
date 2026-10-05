@@ -111,25 +111,3 @@ await test("native Pi, TUI and compiler input allowances exclude local and unrel
 		})),
 	);
 });
-
-await test("readonly primitive maps are reproduced without hiding mutable containers or nested values", () => {
-	const findings = lintFixture({
-		files: {
-			"containers.ts": [
-				"export function primitive(value: ReadonlyMap<string, number>): number | undefined { return value.get('key'); }",
-				"export function mutable(value: Map<string, number>): number | undefined { return value.get('key'); }",
-				"export function nested(value: ReadonlyMap<string, { count: number }>): number | undefined { return value.get('key')?.count; }",
-			].join("\n"),
-		},
-	});
-	// ponytail: 7.0.2003 reports native ReadonlyMap methods with treatMethodsAsReadonly:false.
-	// Retain the unsuppressed reproducer and upgrade this expectation when the checker is fixed.
-	assert.deepEqual(
-		findings,
-		[1, 2, 3].map((line) => ({
-			code: "typescript/prefer-readonly-parameter-types",
-			file: "containers.ts",
-			line,
-		})),
-	);
-});

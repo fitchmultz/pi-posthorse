@@ -84,10 +84,11 @@ and native-engine build caches are under ignored `node_modules`, not production 
 - Native mock-provider `opts` mutations in `test/native.test.mjs` and `test/official.test.mjs`, and
   context-hook `event` mutation in `test/official.test.mjs`, preserve explicit platform contracts.
   Ordinary input mutation remains checked, including outside those exact files.
-- `ReadonlyMap<string, number>` currently triggers a readonly checker false positive under
-  `treatMethodsAsReadonly: false`. The unsuppressed reproducer and mutable/nested negative controls
-  are retained. Application APIs use the read operations they actually need; no Map/Record/Readonly
-  blanket allowance is added. A checker upgrade must re-evaluate this known limitation.
+- The corrected checker recognizes actual native `ReadonlyMap`/`ReadonlySet` contracts while checking
+  generic keys, values and attached application state. Mutable Map/Set APIs remain mutable even under
+  a `Readonly` wrapper. Unsuppressed positive and negative reproducers are retained; there are no
+  blanket Map/Record/Readonly allowances. Application APIs still expose only the read capabilities
+  they need.
 
 The policy checker uses Oxc's complete parsed comment stream, including comments inside empty
 containers and punctuation gaps, not source-text grep or partial AST trivia. Strings, regexes,

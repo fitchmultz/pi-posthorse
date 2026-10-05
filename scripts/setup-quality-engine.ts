@@ -18,6 +18,7 @@ const root = resolve(import.meta.dirname, "..");
 const revision = "eb9339115edde6811ca94c3433adf69ea9852880";
 const typescriptRevision = "2bd066d87f5bafd315be9f40889d0a60b9e58e0b";
 const patch = join(root, "patches/tsgolint-safe-call.patch");
+const readonlyPatch = join(root, "patches/tsgolint-readonly.patch");
 const cache = join(root, "node_modules/.cache/pi-quality-engine");
 const binary = join(cache, process.platform === "win32" ? "tsgolint.exe" : "tsgolint");
 const manifestPath = join(cache, "manifest.json");
@@ -33,6 +34,7 @@ interface EngineIdentity {
 	readonly revision: string;
 	readonly typescriptRevision: string;
 	readonly patchSha256: string;
+	readonly readonlyPatchSha256: string;
 	readonly platform: string;
 	readonly arch: string;
 }
@@ -99,8 +101,10 @@ function prepareSources(source: string): void {
 			cpSync(join(tsSource, "internal/collections", name), join(collections, name));
 		}
 	}
-	run("git", ["apply", "--check", patch], source);
-	run("git", ["apply", patch], source);
+	for (const correction of [patch, readonlyPatch]) {
+		run("git", ["apply", "--check", correction], source);
+		run("git", ["apply", correction], source);
+	}
 }
 
 function cachedEngineMatches(identity: EngineIdentity): boolean {
@@ -193,6 +197,7 @@ function setup(): void {
 		revision,
 		typescriptRevision,
 		patchSha256: digest(patch),
+		readonlyPatchSha256: digest(readonlyPatch),
 		platform: process.platform,
 		arch: process.arch,
 	};

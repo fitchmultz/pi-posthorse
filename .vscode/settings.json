@@ -3,5 +3,5 @@
 	"editor.formatOnSave": true,
 	"editor.codeActionsOnSave": { "source.fixAll.oxc": "explicit" },
 	"oxc.typeAware": true,
-	"oxc.path.tsgolint": "./node_modules/.cache/pi-quality-engine/tsgolint"
+	"oxc.unusedDisableDirectives": "deny"
 }

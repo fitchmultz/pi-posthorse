@@ -93,13 +93,48 @@ await test("native handles cannot hide mutable attached or nested application-ow
 					"export function nested(value: Readonly<{ handle: Theme; nested: { count: number } }>): number { return value.nested.count; }",
 					"export function attached(value: Theme & { counter: number }): number { return value.counter; }",
 					"export function readonlyAttached(value: Theme & { readonly counter: number }): number { return value.counter; }",
+					"export function union(value: Theme | { counter: number }): unknown { return value; }",
 				].join("\n"),
 			},
 		},
-		[4, 5].map((line) => ({
+		[4, 5, 7].map((line) => ({
 			code: "typescript/prefer-readonly-parameter-types",
 			file: "owned.ts",
 			line,
 		})),
 	);
+});
+
+await test("native and SDK allowances check application-owned declaration augmentations deeply", () => {
+	const members = [
+		{ declaration: "readonly counter: number", mutable: false },
+		{ declaration: "counter: number", mutable: true },
+		{ declaration: "readonly counter: { readonly count: number }", mutable: false },
+		{ declaration: "readonly counter: { count: number }", mutable: true },
+	];
+	for (const name of ["URL", "Theme"]) {
+		for (const member of members) {
+			const sdk = name === "Theme";
+			expectFindings(
+				{
+					files: {
+						"augmentation.d.ts": sdk
+							? `import '@earendil-works/pi-coding-agent'; declare module '@earendil-works/pi-coding-agent' { interface Theme { ${member.declaration}; } }\n`
+							: `export {}; declare global { interface URL { ${member.declaration}; } }\n`,
+						"input.ts": `${sdk ? "import type { Theme } from '@earendil-works/pi-coding-agent'; " : ""}export function value(input: ${name}): unknown { return input.counter; }\n`,
+					},
+					paths: ["input.ts"],
+				},
+				member.mutable
+					? [
+							{
+								code: "typescript/prefer-readonly-parameter-types",
+								file: "input.ts",
+								line: 1,
+							},
+						]
+					: [],
+			);
+		}
+	}
 });

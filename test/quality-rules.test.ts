@@ -6,13 +6,7 @@ import test from "node:test";
 import { objectValue } from "../scripts/quality-policy.ts";
 import { ruleCases } from "./quality-rule-cases.ts";
 import { optionCases } from "./quality-rule-options.ts";
-import {
-	expectFindings,
-	fixture,
-	lintFixture,
-	repository,
-	type Finding,
-} from "./quality-support.ts";
+import { expectFindings, fixture, repository, type Finding } from "./quality-support.ts";
 
 for (const example of [...ruleCases, ...optionCases]) {
 	test(`configured rule boundary: ${example.name}`, () => {
@@ -157,7 +151,7 @@ test("declaration files retain API safety without structural metrics", () => {
 	]);
 });
 
-test("readonly application contracts do not allow mutable maps or nested values", () => {
+test("readonly application contracts expose only the read capabilities they need", () => {
 	expectFindings(
 		{
 			files: {
@@ -167,41 +161,54 @@ test("readonly application contracts do not allow mutable maps or nested values"
 		},
 		[],
 	);
-	expectFindings(
-		{
-			files: {
-				"fail.ts":
-					"export function value(input: Map<string, number>): number { return input.size; }",
-			},
-		},
-		[{ code: "typescript/prefer-readonly-parameter-types", file: "fail.ts", line: 1 }],
-	);
-	expectFindings(
-		{
-			files: {
-				"fail.ts":
-					"export function value(input: ReadonlyMap<string, { count: number }>): number { return input.size; }",
-			},
-		},
-		[{ code: "typescript/prefer-readonly-parameter-types", file: "fail.ts", line: 1 }],
-	);
 });
 
-test("readonly map checker reproducers remain unsuppressed for upgrade review", () => {
-	// The installed checker misclassifies even primitive ReadonlyMap values. Keep the
-	// unsuppressed reproductions; a fixed upgrade must update this evidence, not allow Map.
-	const findings = lintFixture({
-		files: {
-			"primitive-repro.ts":
-				"export function lookup(input: ReadonlyMap<string, number>): number { return input.size; }",
-			"callback-repro.ts":
-				"export function lookup(input: ReadonlyMap<string, () => void>): number { return input.size; }",
+test("native readonly collections check keys, values, mapped mutators and attached application state", () => {
+	const accepted = [
+		"ReadonlyMap<string, number>",
+		"ReadonlySet<number>",
+		"ReadonlyMap<string, () => void>",
+		"ReadonlyMap<{ readonly key: number }, { readonly count: number }>",
+		"ReadonlySet<{ readonly count: number }>",
+		"Readonly<ReadonlyMap<string, number>>",
+		"Readonly<ReadonlySet<number>>",
+		"ReadonlyMap<string, number> & { readonly counter: number }",
+		"Readonly<Pick<Map<string, number>, 'get' | 'size'>>",
+		"Readonly<Pick<Set<number>, 'has' | 'size'>>",
+	];
+	const rejected = [
+		"Map<string, number>",
+		"Set<number>",
+		"Readonly<Map<string, number>>",
+		"Readonly<Set<number>>",
+		"ReadonlyMap<string, { count: number }>",
+		"ReadonlyMap<{ key: number }, number>",
+		"ReadonlySet<{ count: number }>",
+		"Readonly<ReadonlyMap<string, { count: number }>>",
+		"Readonly<ReadonlySet<{ count: number }>>",
+		"ReadonlyMap<string, (() => void) & { counter: number }>",
+		"ReadonlyMap<string, number> & { counter: number }",
+		"ReadonlySet<number> & { counter: number }",
+		"Readonly<Pick<Map<string, number>, 'get' | 'set' | 'size'>>",
+		"Readonly<Pick<Map<string, { count: number }>, 'get' | 'size'>>",
+	];
+	const source = (types: readonly string[]) =>
+		types
+			.map(
+				(type, index) =>
+					`export function lookup${index}(input: ${type}): number { return input.size; }`,
+			)
+			.join("\n");
+	expectFindings(
+		{
+			files: { "pass.ts": source(accepted), "fail.ts": source(rejected) },
 		},
-	});
-	assert.deepEqual(findings.map(({ code, file, line }) => `${file}:${line}:${code}`).toSorted(), [
-		"callback-repro.ts:1:typescript/prefer-readonly-parameter-types",
-		"primitive-repro.ts:1:typescript/prefer-readonly-parameter-types",
-	]);
+		rejected.map((_type, index) => ({
+			code: "typescript/prefer-readonly-parameter-types",
+			file: "fail.ts",
+			line: index + 1,
+		})),
+	);
 });
 
 test("application types named like native readonly containers retain mutation checks", () => {
