@@ -32,12 +32,11 @@ export function textOf(content: unknown): string {
 		return "";
 	}
 	return content
-		.map((part: unknown) => {
+		.flatMap((part: unknown) => {
 			return isRecord(part) && part.type === "text" && typeof part.text === "string"
-				? part.text
-				: "";
+				? [part.text]
+				: [];
 		})
-		.filter((text) => text.length > 0)
 		.join("\n");
 }
 
