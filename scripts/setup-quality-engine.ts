@@ -142,7 +142,7 @@ function buildEngine(identity: EngineIdentity): void {
 			{
 				...process.env,
 				CGO_ENABLED: "0",
-				GOOS: process.platform,
+				GOOS: process.platform === "win32" ? "windows" : process.platform,
 				GOARCH: process.arch === "x64" ? "amd64" : "arm64",
 			},
 		);
@@ -184,7 +184,7 @@ function setup(): void {
 		throw new Error("Unknown argument. Use --help for usage.");
 	}
 	if (
-		!["darwin", "linux"].includes(process.platform) ||
+		!["darwin", "linux", "win32"].includes(process.platform) ||
 		!["arm64", "x64"].includes(process.arch)
 	) {
 		throw new Error(`Unsupported build host: ${process.platform}/${process.arch}`);
