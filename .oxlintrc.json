@@ -108,7 +108,9 @@
 				"checkThenables": true,
 				"ignoreIIFE": false,
 				"ignoreVoid": false,
-				"allowForKnownSafeCalls": [],
+				"allowForKnownSafeCalls": [
+					{ "from": "package", "package": "@types/node", "name": ["test"] }
+				],
 				"allowForKnownSafePromises": []
 			}
 		],
@@ -150,6 +152,30 @@
 				"ignoreInferredTypes": true,
 				"treatMethodsAsReadonly": false,
 				"allow": [
+					{
+						"from": "package",
+						"package": "@earendil-works/pi-coding-agent",
+						"name": [
+							"ExtensionAPI",
+							"ExtensionContext",
+							"ExtensionFactory",
+							"ExtensionRuntime",
+							"Extension",
+							"ReadonlySessionManager",
+							"TurnEndEvent",
+							"Theme"
+						]
+					},
+					{
+						"from": "package",
+						"package": "@earendil-works/pi-tui",
+						"name": ["Component", "TUI"]
+					},
+					{
+						"from": "package",
+						"package": "typescript",
+						"name": ["Node"]
+					},
 					{
 						"from": "lib",
 						"name": [
@@ -249,7 +275,11 @@
 				"**/*.test.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
 				"**/*.spec.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
 				"**/__tests__/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
-				"**/*.test-d.ts"
+				"**/*.test-d.ts",
+				"test/harness.ts",
+				"test/results.ts",
+				"test/pi-loader.ts",
+				"test/quality-support.ts"
 			],
 			"rules": {
 				"typescript/no-unnecessary-condition": [
@@ -290,6 +320,33 @@
 						"ts-nocheck": true,
 						"minimumDescriptionLength": 10
 					}
+				]
+			}
+		},
+		{
+			"files": ["test/native.test.mjs"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{ "props": true, "ignorePropertyModificationsFor": ["opts"] }
+				]
+			}
+		},
+		{
+			"files": ["test/official.test.mjs"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{ "props": true, "ignorePropertyModificationsFor": ["opts", "event"] }
+				]
+			}
+		},
+		{
+			"files": ["test/posthorse.test.ts", "test/renderers.test.ts"],
+			"rules": {
+				"unicorn/no-useless-undefined": [
+					"error",
+					{ "checkArrowFunctionBody": false, "checkArguments": false }
 				]
 			}
 		},

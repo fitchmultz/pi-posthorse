@@ -11,5 +11,12 @@
 	"sortImports": false,
 	"sortPackageJson": false,
 	"sortTailwindcss": false,
-	"jsdoc": false
+	"jsdoc": false,
+	"ignorePatterns": ["package-lock.json"],
+	"overrides": [
+		{
+			"files": ["**/*.md", "**/*.yml", "**/*.yaml"],
+			"options": { "useTabs": false, "tabWidth": 2 }
+		}
+	]
 }

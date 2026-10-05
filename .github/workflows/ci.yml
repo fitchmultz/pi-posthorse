@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - .github/workflows/ci.yml
+      - .github/workflows/**
       - index.ts
       - ui.ts
       - package.json
@@ -12,17 +12,24 @@ on:
       - tsconfig.json
       - scripts/**
       - test/**
+      - src/**
+      - .oxlintrc.json
+      - .oxfmtrc.json
+      - .vscode/**
+      - AGENTS.md
+      - docs/**
+      - patches/**
   workflow_dispatch:
   workflow_call:
     inputs:
       official-version:
         description: Official stable version resolved for this run; blank resolves latest
         type: string
-        default: ''
+        default: ""
       fork-ref:
         description: Maintained fork commit resolved for this run; blank resolves main
         type: string
-        default: ''
+        default: ""
 
 permissions:
   contents: read
@@ -35,6 +42,33 @@ env:
   PI_AUTOMATION_REF: 3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
 
 jobs:
+  quality:
+    name: Strict code quality
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          check-latest: true
+          package-manager-cache: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.1"
+          cache: false
+      - name: Use the repository npm version
+        run: npm install --global "$(node -p 'require("./package.json").packageManager')"
+      - name: Install native test prerequisites
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
+      - run: npm ci --ignore-scripts --no-audit
+      - run: npm run verify
+
   resolve:
     uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
     with:
@@ -72,7 +106,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: "24"
           check-latest: true
           package-manager-cache: false
       - name: Lockfile resolves only from the public npm registry
