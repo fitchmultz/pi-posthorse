@@ -81,3 +81,25 @@ await test("SDK allowances cannot transfer to matching types from another instal
 		})),
 	);
 });
+
+await test("native handles cannot hide mutable attached or nested application-owned state", () => {
+	expectFindings(
+		{
+			files: {
+				"owned.ts": [
+					"import type { Theme } from '@earendil-works/pi-coding-agent';",
+					"export function native(value: Theme): Theme { return value; }",
+					"export function owned(value: Readonly<{ handle: Theme; counter: number }>): number { return value.counter; }",
+					"export function nested(value: Readonly<{ handle: Theme; nested: { count: number } }>): number { return value.nested.count; }",
+					"export function attached(value: Theme & { counter: number }): number { return value.counter; }",
+					"export function readonlyAttached(value: Theme & { readonly counter: number }): number { return value.counter; }",
+				].join("\n"),
+			},
+		},
+		[4, 5].map((line) => ({
+			code: "typescript/prefer-readonly-parameter-types",
+			file: "owned.ts",
+			line,
+		})),
+	);
+});
