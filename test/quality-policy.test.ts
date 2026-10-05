@@ -3,7 +3,7 @@ import test from "node:test";
 import { checkPolicy, objectValue, suppressionProblems } from "../scripts/quality-policy.ts";
 import { sourcePolicies } from "../scripts/quality-source.ts";
 import { expectFindings, fixture, policy, repository } from "./quality-support.ts";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 await test("unchecked-JavaScript overrides disable installed type-aware metadata, not namespaces", () => {
@@ -155,4 +155,22 @@ await test("contract-required undefined options retain checks outside the two ex
 
 await test("maintained source inventory and effective projects remain covered in normal lint", () => {
 	assert.deepEqual(checkPolicy(repository), []);
+});
+
+await test("semantic scope fails closed when an unchecked JavaScript fixture opts into ts-check", () => {
+	const project = fixture({
+		files: {
+			"test/host.test.mjs": "export const value = 1;\n",
+			"test/native.test.mjs": "// @ts-check\nexport const value = 1;\n",
+			"test/official.test.mjs": "export const value = 1;\n",
+		},
+	});
+	try {
+		execFileSync("git", ["init", "--quiet"], { cwd: project.root });
+		assert.deepEqual(checkPolicy(project.root), [
+			"Semantic lint scope disagrees with effective compiler/directive scope: test/native.test.mjs",
+		]);
+	} finally {
+		project.dispose();
+	}
 });

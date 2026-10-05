@@ -44,6 +44,7 @@ export function fixture(options: FixtureOptions): {
 			);
 		}
 		writeFileSync(join(root, "package.json"), JSON.stringify({ type: "module" }));
+		writeFileSync(join(root, ".gitignore"), "node_modules/\n");
 		writeFileSync(
 			join(root, "tsconfig.json"),
 			JSON.stringify({
