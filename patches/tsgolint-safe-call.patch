@@ -1,0 +1,60 @@
+diff --git a/internal/rules/no_floating_promises/no_floating_promises.go b/internal/rules/no_floating_promises/no_floating_promises.go
+index 3fd2337..4ee4fe5 100644
+--- a/internal/rules/no_floating_promises/no_floating_promises.go
++++ b/internal/rules/no_floating_promises/no_floating_promises.go
+@@ -211,24 +211,22 @@ var NoFloatingPromisesRule = rule.Rule{
+ 				return false
+ 			}
+ 
+-			callExpression := node.AsCallExpression()
+-
+-			t := ctx.TypeChecker.GetTypeAtLocation(callExpression.Expression)
+-
+-			if utils.ValueMatchesSomeSpecifier(
+-				callExpression.Expression,
+-				opts.AllowForKnownSafeCalls,
+-				ctx.Program,
+-				t,
+-			) {
+-				return true
++			callee := ast.SkipParentheses(node.AsCallExpression().Expression)
++			symbol := ctx.TypeChecker.GetSymbolAtLocation(callee)
++			if symbol == nil {
++				return false
+ 			}
+-
+-			return utils.TypeMatchesSomeSpecifier(
+-				t,
+-				opts.AllowForKnownSafeCalls,
+-				ctx.Program,
+-			)
++			if utils.IsSymbolFlagSet(symbol, ast.SymbolFlagsAlias) {
++				symbol = ctx.TypeChecker.GetAliasedSymbol(symbol)
++			}
++			// Registration functions do not confer ownership on same-named instance
++			// methods, nor on unrelated values with the same callable type.
++			if symbol == nil || utils.IsSymbolFlagSet(symbol, ast.SymbolFlagsMethod|ast.SymbolFlagsPropertyOrAccessor) {
++				return false
++			}
++			return utils.Some(opts.AllowForKnownSafeCalls, func(specifier utils.TypeOrValueSpecifier) bool {
++				return utils.SymbolMatchesSpecifierNameAndSource(symbol, symbol.Name, specifier, ctx.Program)
++			})
+ 		}
+ 
+ 		isAsyncIife := func(node *ast.ExpressionStatement) bool {
+diff --git a/internal/utils/type_matches_specifier.go b/internal/utils/type_matches_specifier.go
+index 524ebda..cfcaaab 100644
+--- a/internal/utils/type_matches_specifier.go
++++ b/internal/utils/type_matches_specifier.go
+@@ -178,8 +178,10 @@ func typeDeclaredInFile(
+ 		})
+ 	}
+ 	absPath := tspath.GetNormalizedAbsolutePath(relativePath, cwd)
++	fs := program.Host().FS()
++	path := tspath.ToPath(fs.Realpath(absPath), cwd, fs.UseCaseSensitiveFileNames())
+ 	return Some(declarationFiles, func(f *ast.SourceFile) bool {
+-		return f.FileName() == absPath
++		return tspath.ToPath(fs.Realpath(f.FileName()), cwd, fs.UseCaseSensitiveFileNames()) == path
+ 	})
+ }
+ 
