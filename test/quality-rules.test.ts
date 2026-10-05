@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
+import { objectValue } from "../scripts/quality-policy.ts";
 import { ruleCases } from "./quality-rule-cases.ts";
 import { optionCases } from "./quality-rule-options.ts";
-import { expectFindings, lintFixture, type Finding } from "./quality-support.ts";
+import {
+	expectFindings,
+	fixture,
+	lintFixture,
+	repository,
+	type Finding,
+} from "./quality-support.ts";
 
 for (const example of [...ruleCases, ...optionCases]) {
 	test(`configured rule boundary: ${example.name}`, () => {
@@ -192,6 +202,18 @@ test("readonly map checker reproducers remain unsuppressed for upgrade review", 
 		"callback-repro.ts:1:typescript/prefer-readonly-parameter-types",
 		"primitive-repro.ts:1:typescript/prefer-readonly-parameter-types",
 	]);
+});
+
+test("application types named like native readonly containers retain mutation checks", () => {
+	expectFindings(
+		{
+			files: {
+				"fail.ts":
+					"export interface ReadonlyMap<K, V> { values: [K, V][] } export function value(input: ReadonlyMap<string, number>): number { return input.values.length; }",
+			},
+		},
+		[{ code: "typescript/prefer-readonly-parameter-types", file: "fail.ts", line: 1 }],
+	);
 });
 
 test("nullable object presence checks and genuine void shorthand remain permitted", () => {
@@ -473,4 +495,34 @@ test("argument-presence and undefined-return exceptions stay in exact boundary f
 		{ files: { "test/posthorse.test.ts": argumentsCase, "test/renderers.test.ts": arrowCase } },
 		[],
 	);
+});
+
+test("normal lint fixes cannot manufacture unknown contracts from explicit any", () => {
+	const text = "export type Value = any;";
+	const project = fixture({ files: { "fail.ts": text } });
+	try {
+		const result = spawnSync(
+			join(repository, "node_modules/.bin/oxlint"),
+			["--fix", "--format=json", "fail.ts"],
+			{ cwd: project.root, encoding: "utf8", timeout: 30_000 },
+		);
+		assert.equal(result.error, undefined);
+		assert.equal(result.signal, null);
+		assert.equal(result.stderr, "");
+		assert.equal(result.status, 1);
+		const output: unknown = JSON.parse(result.stdout);
+		assert.ok(objectValue(output) && Array.isArray(output.diagnostics));
+		const locations = output.diagnostics.map((value: unknown) => {
+			assert.ok(objectValue(value) && Array.isArray(value.labels));
+			const label: unknown = value.labels[0];
+			assert.ok(objectValue(label) && objectValue(label.span));
+			return { code: value.code, file: value.filename, line: label.span.line };
+		});
+		assert.deepEqual(locations, [
+			{ code: "typescript(no-explicit-any)", file: "fail.ts", line: 1 },
+		]);
+		assert.equal(readFileSync(join(project.root, "fail.ts"), "utf8"), text);
+	} finally {
+		project.dispose();
+	}
 });
