@@ -137,6 +137,10 @@ the [supported editor and LSP options](https://oxc.rs/docs/guide/usage/linter/ls
 A clean install must be prepared before editor linting. The first builds need GitHub, the Go
 module proxy and the Cargo registry. Verified cached builds need neither compilers nor network.
 Build failure preserves the previously installed backend and fails the invoking acceptance command.
+Qualification creates a private HOME. Its caller prepends `$(rustc --print sysroot)/bin` to PATH
+before that isolation, so the selected physical Rust toolchain remains available without rustup
+settings from the original HOME. Posthorse's Linux qualification command reserves 20 minutes for
+cold native compilation; individual test timeouts, assertions and production deadlines are unchanged.
 
 Pinned inputs:
 
