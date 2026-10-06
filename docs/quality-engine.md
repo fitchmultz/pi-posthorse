@@ -142,6 +142,12 @@ before that isolation, so the selected physical Rust toolchain remains available
 settings from the original HOME. Posthorse's Linux qualification command reserves 20 minutes for
 cold native compilation; individual test timeouts, assertions and production deadlines are unchanged.
 
+Linux qualification creates its private tree under `/var/tmp/pc-*` to avoid
+[Ubuntu 26.04's quota-enabled `/tmp` tmpfs](https://documentation.ubuntu.com/release-notes/26.04/summary-for-lts-users/).
+Darwin keeps `/tmp/pc-*` for its tighter Unix socket pathname limit; Windows uses its native
+temporary directory. HOME, caches and temporary build files remain inside that isolated tree,
+and qualification removes the complete tree afterward.
+
 Pinned inputs:
 
 - tsgolint 7.0.2003 source: `eb9339115edde6811ca94c3433adf69ea9852880`.

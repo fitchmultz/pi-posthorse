@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: a3162eae9e700a5045d5c2b5e0323c453cc3d5f4 # main
+  PI_AUTOMATION_REF: a465b71c0707336df89073240d5100354d31566f # main
 
 jobs:
   quality:
@@ -61,9 +61,9 @@ jobs:
       - run: npm run verify
 
   resolve:
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@a3162eae9e700a5045d5c2b5e0323c453cc3d5f4 # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@a465b71c0707336df89073240d5100354d31566f # main
     with:
-      automation-ref: a3162eae9e700a5045d5c2b5e0323c453cc3d5f4 # main
+      automation-ref: a465b71c0707336df89073240d5100354d31566f # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
@@ -139,6 +139,11 @@ jobs:
         run: |
           sysroot="$(rustc --print sysroot)"
           printf '%s\n' "$sysroot/bin" >> "$GITHUB_PATH"
+      - name: Report native build storage
+        run: |
+          df -hT /tmp /var/tmp "$RUNNER_TEMP"
+          findmnt -T /tmp
+          findmnt -T /var/tmp
       - run: npm ci --ignore-scripts --no-audit
         working-directory: extension
       - name: Qualify official Pi
