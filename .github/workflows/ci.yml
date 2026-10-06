@@ -3,26 +3,17 @@ name: Pi
 on:
   pull_request:
     branches: [main]
-    paths:
-      - .github/workflows/ci.yml
-      - index.ts
-      - ui.ts
-      - package.json
-      - package-lock.json
-      - tsconfig.json
-      - scripts/**
-      - test/**
   workflow_dispatch:
   workflow_call:
     inputs:
       official-version:
         description: Official stable version resolved for this run; blank resolves latest
         type: string
-        default: ''
+        default: ""
       fork-ref:
         description: Maintained fork commit resolved for this run; blank resolves main
         type: string
-        default: ''
+        default: ""
 
 permissions:
   contents: read
@@ -32,13 +23,47 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: 3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+  PI_AUTOMATION_REF: a465b71c0707336df89073240d5100354d31566f # main
 
 jobs:
+  quality:
+    name: Strict code quality
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          check-latest: true
+          package-manager-cache: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.1"
+          cache: false
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: "1.99.0"
+          components: llvm-tools
+          cache: false
+          override: true
+          rustflags: ""
+      - name: Use the repository npm version
+        run: npm install --global "$(node -p 'require("./package.json").packageManager')"
+      - name: Install native test prerequisites
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
+      - run: npm ci --ignore-scripts --no-audit
+      - run: npm run verify
+
   resolve:
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@a465b71c0707336df89073240d5100354d31566f # main
     with:
-      automation-ref: 3b7a5f72d9c2d67d6fb53ef7bd308b005c385af3 # main
+      automation-ref: a465b71c0707336df89073240d5100354d31566f # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
@@ -47,7 +72,7 @@ jobs:
     if: ${{ !cancelled() }}
     name: Pi fork and official
     runs-on: ubuntu-26.04
-    timeout-minutes: 12
+    timeout-minutes: 30
     steps:
       - name: Require resolved latest hosts
         env:
@@ -72,7 +97,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: "24"
           check-latest: true
           package-manager-cache: false
       - name: Lockfile resolves only from the public npm registry
@@ -99,6 +124,26 @@ jobs:
           git diff --exit-code
       - name: Use the extension npm version
         run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.1"
+          cache: false
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: "1.99.0"
+          components: llvm-tools
+          cache: false
+          override: true
+          rustflags: ""
+      - name: Keep Rust available with isolated HOME
+        run: |
+          sysroot="$(rustc --print sysroot)"
+          printf '%s\n' "$sysroot/bin" >> "$GITHUB_PATH"
+      - name: Report native build storage
+        run: |
+          df -hT /tmp /var/tmp "$RUNNER_TEMP"
+          findmnt -T /tmp
+          findmnt -T /var/tmp
       - run: npm ci --ignore-scripts --no-audit
         working-directory: extension
       - name: Qualify official Pi

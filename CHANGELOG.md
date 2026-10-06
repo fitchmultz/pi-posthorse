@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Enforce strict type-aware Oxlint, Oxfmt, compiler diagnostics, suppression policy, and
+  declaration-isolation probes through local acceptance and CI.
+- Reproducibly correct native checker declaration isolation, readonly data exposure, and literal
+  dynamic/external import-cycle detection for both the CLI and editor.
+- Separate extension lifecycle, recovery, notes, history, page accounting, and renderer
+  responsibilities while preserving the public tools and rollover contracts.
+- Make application inputs readonly-compatible and validate serialized renderer metadata before
+  using it. Preserve native SDK handles through declaration-qualified allowances.
+- Retain the lifecycle suites and their behavioral assertions while replacing unsafe fixture
+  contracts.
+
 ## 0.8.0 — 2026-10-01
 
 - Support Pi 1.0.0 and later using the official public retain-none compaction path; checkpoint and legacy fork-window APIs are not required. Keep development TypeBox aligned with the exact host cohort.

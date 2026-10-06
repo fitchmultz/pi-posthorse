@@ -1,0 +1,375 @@
+diff --git a/crates/oxc_linter/fixtures/import/cycles/native-imports/a.ts b/crates/oxc_linter/fixtures/import/cycles/native-imports/a.ts
+new file mode 100644
+index 000000000..ef747c5da
+--- /dev/null
++++ b/crates/oxc_linter/fixtures/import/cycles/native-imports/a.ts
+@@ -0,0 +1,2 @@
++export type T = number;
++export const value = 1;
+diff --git a/crates/oxc_linter/fixtures/import/cycles/native-imports/b.ts b/crates/oxc_linter/fixtures/import/cycles/native-imports/b.ts
+new file mode 100644
+index 000000000..72a2538e8
+--- /dev/null
++++ b/crates/oxc_linter/fixtures/import/cycles/native-imports/b.ts
+@@ -0,0 +1,3 @@
++import "./a.ts";
++export type T = number;
++export const value = 1;
+diff --git a/crates/oxc_linter/fixtures/import/cycles/native-imports/dynamic.ts b/crates/oxc_linter/fixtures/import/cycles/native-imports/dynamic.ts
+new file mode 100644
+index 000000000..a8f2ff85d
+--- /dev/null
++++ b/crates/oxc_linter/fixtures/import/cycles/native-imports/dynamic.ts
+@@ -0,0 +1 @@
++export const load = () => import("./b.ts");
+diff --git a/crates/oxc_linter/fixtures/import/cycles/native-imports/node_modules/native-cycle/index.ts b/crates/oxc_linter/fixtures/import/cycles/native-imports/node_modules/native-cycle/index.ts
+new file mode 100644
+index 000000000..67156fe38
+--- /dev/null
++++ b/crates/oxc_linter/fixtures/import/cycles/native-imports/node_modules/native-cycle/index.ts
+@@ -0,0 +1 @@
++import "../../a.ts";
+diff --git a/crates/oxc_linter/fixtures/import/cycles/native-imports/node_modules/native-cycle/package.json b/crates/oxc_linter/fixtures/import/cycles/native-imports/node_modules/native-cycle/package.json
+new file mode 100644
+index 000000000..cca5338a6
+--- /dev/null
++++ b/crates/oxc_linter/fixtures/import/cycles/native-imports/node_modules/native-cycle/package.json
+@@ -0,0 +1 @@
++{"name":"native-cycle","type":"module","exports":"./index.ts"}
+diff --git a/crates/oxc_linter/src/module_record.rs b/crates/oxc_linter/src/module_record.rs
+index 685a7be02..5034a7bdf 100644
+--- a/crates/oxc_linter/src/module_record.rs
++++ b/crates/oxc_linter/src/module_record.rs
+@@ -8,8 +8,9 @@ use std::{
+
+ use rustc_hash::{FxHashMap, FxHashSet};
+
++use oxc_ast::{AstKind, ast::Expression};
+ use oxc_semantic::Semantic;
+-use oxc_span::Span;
++use oxc_span::{GetSpan, Span};
+ use oxc_str::CompactStr;
+ pub use oxc_syntax::module_record::RequestedModule;
+
+@@ -39,6 +40,9 @@ pub struct ModuleRecord {
+     /// Keyed by ModuleSpecifier, valued by all node occurrences
+     pub requested_modules: FxHashMap<CompactStr, Vec<RequestedModule>>,
+
++    /// Literal dynamic import occurrences, separate from static ESM declarations.
++    pub dynamic_imports: FxHashMap<CompactStr, Vec<RequestedModule>>,
++
+     /// `[[LoadedModules]]`
+     ///
+     /// A map from the specifier strings used by the module represented by this record to request
+@@ -463,7 +467,7 @@ impl ModuleRecord {
+     pub fn new(
+         path: &Path,
+         other: &oxc_syntax::module_record::ModuleRecord,
+-        _semantic: &Semantic,
++        semantic: &Semantic,
+     ) -> Self {
+         Self {
+             has_module_syntax: other.has_module_syntax,
+@@ -479,6 +483,7 @@ impl ModuleRecord {
+                 })
+                 .collect(),
+             import_entries: other.import_entries.iter().map(ImportEntry::from).collect(),
++            dynamic_imports: Self::collect_dynamic_imports(semantic),
+
+             local_export_entries: other
+                 .local_export_entries
+@@ -539,6 +544,30 @@ impl ModuleRecord {
+         loaded_modules.get(key).map(|weak| Weak::upgrade(weak).unwrap())
+     }
+
++    fn collect_dynamic_imports(semantic: &Semantic) -> FxHashMap<CompactStr, Vec<RequestedModule>> {
++        let mut requests: FxHashMap<CompactStr, Vec<RequestedModule>> = FxHashMap::default();
++        for node in semantic.nodes().iter() {
++            let AstKind::ImportExpression(import) = node.kind() else { continue };
++            let value = match import.source.get_inner_expression() {
++                Expression::StringLiteral(literal) => Some(literal.value.as_str()),
++                Expression::TemplateLiteral(literal) if literal.expressions.is_empty() => {
++                    literal.quasis.first().and_then(|quasi| quasi.value.cooked.as_deref())
++                }
++                // Runtime-computed specifiers cannot be resolved by the native module graph.
++                _ => None,
++            };
++            if let Some(value) = value {
++                requests.entry(CompactStr::from(value)).or_default().push(RequestedModule {
++                    statement_span: import.span,
++                    span: import.source.span(),
++                    is_type: false,
++                    is_import: true,
++                });
++            }
++        }
++        requests
++    }
++
+     pub(crate) fn exported_bindings_from_star_export(
+         &self,
+     ) -> &FxHashMap<PathBuf, Vec<CompactStr>> {
+diff --git a/crates/oxc_linter/src/rules/import/no_cycle.rs b/crates/oxc_linter/src/rules/import/no_cycle.rs
+index 49c1a0f56..769ad9fca 100644
+--- a/crates/oxc_linter/src/rules/import/no_cycle.rs
++++ b/crates/oxc_linter/src/rules/import/no_cycle.rs
+@@ -167,7 +167,13 @@ impl Rule for NoCycle {
+                 continue;
+             }
+
+-            let requested_module = module_record.requested_modules[&key][0];
++            let Some(requested_module) = self.traversable_request(
++                module_record,
++                &key,
++                &loaded_module_record.resolved_absolute_path,
++            ) else {
++                continue;
++            };
+             let span = requested_module.span;
+             let mut stack =
+                 vec![(key.clone(), loaded_module_record.resolved_absolute_path.clone())];
+@@ -269,54 +275,62 @@ impl NoCycle {
+             .components()
+             .any(|c| matches!(c, Component::Normal(p) if p == OsStr::new("node_modules")));
+
+-        if is_node_module {
++        if self.ignore_external && is_node_module {
+             return false;
+         }
+
+-        if self.ignore_types {
+-            // Equivalent to collecting both entry lists and testing `!is_empty() && all(is_type)`,
+-            // without materializing either `Vec`. This runs once per graph edge considered.
+-            let mut types = parent
+-                .import_entries
+-                .iter()
+-                .filter(|entry| entry.module_request.name() == key)
+-                .map(|entry| entry.is_type)
+-                .chain(
+-                    parent
+-                        .indirect_export_entries
+-                        .iter()
+-                        .filter(|entry| {
+-                            entry
+-                                .module_request
+-                                .as_ref()
+-                                .is_some_and(|module_request| module_request.name() == key)
+-                        })
+-                        .map(|entry| entry.is_type),
+-                )
+-                .peekable();
++        self.traversable_request(parent, key, path).is_some()
++    }
+
+-            if types.peek().is_some() && types.all(|is_type| is_type) {
+-                return false;
++    fn traversable_request(
++        &self,
++        parent: &ModuleRecord,
++        key: &CompactStr,
++        target: &Path,
++    ) -> Option<crate::module_record::RequestedModule> {
++        let static_request = parent.requested_modules.get(key).and_then(|requests| {
++            requests.iter().find(|request| {
++                if self.ignore_types && Self::type_only_request(parent, request) {
++                    return false;
++                }
++                // Preserve named self-reexports without laundering other occurrences.
++                !(target == parent.resolved_absolute_path
++                    && !request.is_import
++                    && parent.indirect_export_entries.iter().any(|entry| {
++                        entry.statement_span == request.statement_span
++                            && entry.export_name.is_name()
++                    }))
++            })
++        });
++        static_request.copied().or_else(|| {
++            if self.allow_unsafe_dynamic_cyclic_dependency {
++                return None;
+             }
+-        }
++            parent.dynamic_imports.get(key).and_then(|requests| requests.first().copied())
++        })
++    }
+
+-        // Allow self referencing named export.
+-        // In test.js:
+-        // ```
+-        // export function example1() { }
+-        // export * as Example from './test.js';
+-        // ```
+-        if path == &parent.resolved_absolute_path
+-            && let Some(e) = module
+-                .indirect_export_entries
+-                .iter()
+-                .find(|e| e.module_request.as_ref().is_some_and(|r| r.name.as_str() == key))
+-            && e.export_name.is_name()
+-        {
+-            return false;
++    fn type_only_request(
++        parent: &ModuleRecord,
++        request: &crate::module_record::RequestedModule,
++    ) -> bool {
++        if request.is_type {
++            return true;
+         }
+-
+-        true
++        let mut types = parent
++            .import_entries
++            .iter()
++            .filter(|entry| entry.statement_span == request.statement_span)
++            .map(|entry| entry.is_type)
++            .chain(
++                parent
++                    .indirect_export_entries
++                    .iter()
++                    .filter(|entry| entry.statement_span == request.statement_span)
++                    .map(|entry| entry.is_type),
++            )
++            .peekable();
++        types.peek().is_some() && types.all(|is_type| is_type)
+     }
+ }
+
+@@ -521,6 +535,91 @@ fn test() {
+         .test_and_snapshot();
+ }
+
++#[test]
++fn test_literal_dynamic_and_external_cycles() {
++    use crate::tester::Tester;
++    use serde_json::json;
++
++    let mut pass = vec![
++        (r#"import("./b.ts");"#, Some(json!([{"allowUnsafeDynamicCyclicDependency":true}]))),
++        (r#"import type { T } from "./b.ts";"#, Some(json!([{"ignoreTypes":true}]))),
++        (r#"import { type T } from "./b.ts";"#, Some(json!([{"ignoreTypes":true}]))),
++        (
++            r#"import type { T } from "./b.ts"; import("./b.ts");"#,
++            Some(json!([{"ignoreTypes":true,"allowUnsafeDynamicCyclicDependency":true}])),
++        ),
++        (r#"import "native-cycle";"#, Some(json!([{"ignoreExternal":true}]))),
++        (r#"const path = "./b.ts"; import(path);"#, None),
++        (r#"export const value = 1; export * as ns from "./a.ts";"#, None),
++    ];
++    let mut fail = vec![
++        (r#"import("./b.ts");"#, None),
++        (r#"import("./\u0062.ts");"#, None),
++        (r#"import(`./b.ts`);"#, None),
++        (r#"import("./a.ts");"#, None),
++        (r#"import type { T } from "./b.ts";"#, Some(json!([{"ignoreTypes":false}]))),
++        (
++            r#"import type { T } from "./b.ts"; import("./b.ts");"#,
++            Some(json!([{"ignoreTypes":true}])),
++        ),
++        (
++            r#"import type { T } from "./b.ts"; import("./b.ts");"#,
++            Some(json!([{"ignoreTypes":false,"allowUnsafeDynamicCyclicDependency":true}])),
++        ),
++        (
++            r#"import "./b.ts"; import("./b.ts");"#,
++            Some(json!([{"allowUnsafeDynamicCyclicDependency":true}])),
++        ),
++        (
++            r#"import type { T } from "./b.ts"; import { value } from "./b.ts";"#,
++            Some(json!([{"ignoreTypes":true}])),
++        ),
++        (r#"import "native-cycle";"#, Some(json!([{"ignoreExternal":false}]))),
++        (r#"export const value = 1; export * as ns from "./a.ts"; import("./a.ts");"#, None),
++    ];
++
++    for source in [
++        r#"import(("./b.ts"));"#,
++        r#"import((`./b.ts`));"#,
++        r#"import("./b.ts" as const);"#,
++        r#"import(<string>"./b.ts");"#,
++        r#"import("./b.ts"!);"#,
++        r#"import("./b.ts" satisfies string);"#,
++        r#"import((("./b.ts" as const)! satisfies string));"#,
++    ] {
++        fail.push((source, None));
++        pass.push((source, Some(json!([{"allowUnsafeDynamicCyclicDependency":true}]))));
++    }
++    for source in [
++        r#"const path = "./b.ts"; import((path as string)!);"#,
++        r#"const path = "b"; import((`./${path}.ts` satisfies string));"#,
++    ] {
++        pass.push((source, None));
++        pass.push((source, Some(json!([{"allowUnsafeDynamicCyclicDependency":true}]))));
++    }
++
++    Tester::new(NoCycle::NAME, NoCycle::PLUGIN, pass, fail)
++        .change_rule_path("cycles/native-imports/a.ts")
++        .with_import_plugin(true)
++        .test();
++
++    let pass = vec![
++        (
++            r#"import "./es6/depth-one-dynamic";"#,
++            Some(json!([{"allowUnsafeDynamicCyclicDependency":true}])),
++        ),
++        (r#"import("./es6/depth-two");"#, Some(json!([{"maxDepth":1}]))),
++    ];
++    let fail = vec![
++        (r#"import "./es6/depth-one-dynamic";"#, None),
++        (r#"import("./es6/depth-two");"#, Some(json!([{"maxDepth":2}]))),
++    ];
++    Tester::new(NoCycle::NAME, NoCycle::PLUGIN, pass, fail)
++        .change_rule_path("cycles/depth-zero.js")
++        .with_import_plugin(true)
++        .test();
++}
++
+ #[test]
+ fn test_issue_19245_type_only_branch_does_not_hide_cycle() {
+     use crate::tester::Tester;
+diff --git a/crates/oxc_linter/src/rules/oxc/no_barrel_file.rs b/crates/oxc_linter/src/rules/oxc/no_barrel_file.rs
+index aa07548e0..529d217e5 100644
+--- a/crates/oxc_linter/src/rules/oxc/no_barrel_file.rs
++++ b/crates/oxc_linter/src/rules/oxc/no_barrel_file.rs
+@@ -133,11 +133,16 @@ impl Rule for NoBarrelFile {
+ }
+
+ fn count_loaded_modules(module_record: &ModuleRecord) -> Option<u32> {
+-    if module_record.loaded_modules().is_empty() {
++    if !module_record
++        .loaded_modules()
++        .iter()
++        .any(|(key, _)| module_record.requested_modules.contains_key(key))
++    {
+         return None;
+     }
+     Some(
+         ModuleGraphVisitorBuilder::default()
++            .filter(|(key, _), parent| parent.requested_modules.contains_key(key))
+             .visit_fold(0, module_record, |acc, _, _| VisitFoldWhile::Next(acc + 1))
+             .result,
+     )
+@@ -148,6 +153,10 @@ fn test() {
+     use crate::tester::Tester;
+
+     let pass = vec![
++        (
++            r#"export * from "./cycles/native-imports/dynamic.ts";"#,
++            Some(serde_json::json!([{"threshold": 1}])),
++        ),
+         (r#"export type * from "foo";"#, None),
+         (r#"export type { foo } from "foo";"#, None),
+         (r#"export type * from "foo"; export type { bar } from "bar";"#, None),
+diff --git a/crates/oxc_linter/src/service/runtime.rs b/crates/oxc_linter/src/service/runtime.rs
+index 5c0922a6d..23e91273c 100644
+--- a/crates/oxc_linter/src/service/runtime.rs
++++ b/crates/oxc_linter/src/service/runtime.rs
+@@ -1171,6 +1171,11 @@ impl Runtime {
+             resolved_module_requests = module_record
+                 .requested_modules
+                 .keys()
++                .chain(
++                    module_record.dynamic_imports.keys().filter(|specifier| {
++                        !module_record.requested_modules.contains_key(*specifier)
++                    }),
++                )
+                 .filter_map(|specifier| {
+                     let resolution = resolver.resolve_file(path, specifier).ok()?;
+                     Some(ResolvedModuleRequest {

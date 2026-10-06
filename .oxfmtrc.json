@@ -1,0 +1,22 @@
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"printWidth": 100,
+	"tabWidth": 4,
+	"useTabs": true,
+	"semi": true,
+	"singleQuote": false,
+	"trailingComma": "all",
+	"endOfLine": "lf",
+	"insertFinalNewline": true,
+	"sortImports": false,
+	"sortPackageJson": false,
+	"sortTailwindcss": false,
+	"jsdoc": false,
+	"ignorePatterns": ["package-lock.json"],
+	"overrides": [
+		{
+			"files": ["**/*.md", "**/*.yml", "**/*.yaml"],
+			"options": { "useTabs": false, "tabWidth": 2 }
+		}
+	]
+}

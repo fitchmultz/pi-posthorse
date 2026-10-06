@@ -115,8 +115,12 @@ Failed/unpublished candidates can retry daily at 12:17 UTC or via manual dispatc
 
 ```bash
 npm ci --ignore-scripts
+npm run verify                        # strict policy, lint, formatting, typecheck, tests, package build
 npm run check:compat                   # typecheck, unit tests, and the real-SDK suite for the installed host
 ```
+
+Oxlint owns code quality; Oxfmt owns formatting. See [Code quality](docs/quality.md) for coverage,
+exception governance, editor setup, and the enforced acceptance workflow.
 
 `npm run check` type-checks the extension, renderers, and tests against the official npm declarations. `npm test` covers reminder policy, notes/history behavior, failed note replacement, and real native card components, including width and expansion.
 
