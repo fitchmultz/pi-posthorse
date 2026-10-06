@@ -32,7 +32,7 @@
 	},
 	"scripts": {
 		"check": "tsc",
-		"quality:prepare": "node scripts/setup-quality-engine.ts",
+		"quality:prepare": "node scripts/setup-oxlint-engine.ts && node scripts/setup-quality-engine.ts",
 		"quality:policy": "node scripts/quality-policy.ts",
 		"quality:probes": "npm run quality:prepare && node --test test/quality*.test.ts",
 		"lint": "npm run quality:prepare && npm run quality:policy && oxlint --deny-warnings .",

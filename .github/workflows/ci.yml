@@ -29,7 +29,7 @@ jobs:
   quality:
     name: Strict code quality
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,6 +43,13 @@ jobs:
         with:
           go-version: "1.27.1"
           cache: false
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: "1.99.0"
+          components: llvm-tools
+          cache: false
+          override: true
+          rustflags: ""
       - name: Use the repository npm version
         run: npm install --global "$(node -p 'require("./package.json").packageManager')"
       - name: Install native test prerequisites
@@ -65,7 +72,7 @@ jobs:
     if: ${{ !cancelled() }}
     name: Pi fork and official
     runs-on: ubuntu-26.04
-    timeout-minutes: 12
+    timeout-minutes: 30
     steps:
       - name: Require resolved latest hosts
         env:
@@ -121,6 +128,13 @@ jobs:
         with:
           go-version: "1.27.1"
           cache: false
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: "1.99.0"
+          components: llvm-tools
+          cache: false
+          override: true
+          rustflags: ""
       - run: npm ci --ignore-scripts --no-audit
         working-directory: extension
       - name: Qualify official Pi

@@ -1,11 +1,13 @@
 diff --git a/internal/rules/prefer_readonly_parameter_types/prefer_readonly_parameter_types.go b/internal/rules/prefer_readonly_parameter_types/prefer_readonly_parameter_types.go
-index a55c730..818dc7c 100644
+index a55c730..9bb4858 100644
 --- a/internal/rules/prefer_readonly_parameter_types/prefer_readonly_parameter_types.go
 +++ b/internal/rules/prefer_readonly_parameter_types/prefer_readonly_parameter_types.go
-@@ -136,6 +136,204 @@ func propertyIsReadonly(typeChecker *checker.Checker, property *ast.Symbol) bool
- 	return checker.GetDeclarationModifierFlagsFromSymbol(property)&ast.ModifierFlagsReadonly != 0
+@@ -108,32 +108,394 @@ func propertyIsPrivateMappedProperty(property *ast.Symbol) bool {
+ 		checker.GetDeclarationModifierFlagsFromSymbol(property)&ast.ModifierFlagsPrivate != 0
  }
  
+-func propertyIsReadonly(typeChecker *checker.Checker, property *ast.Symbol) bool {
+-	if property == nil {
 +// Library collection APIs have explicit mutation contracts. Do not grant the
 +// same contract to a same-named application interface or an added property.
 +func nativeCollectionOwner(program *compiler.Program, property *ast.Symbol) string {
@@ -21,7 +23,7 @@ index a55c730..818dc7c 100644
 +			return ""
 +		}
 +		switch name.Text() {
-+		case "Map", "Set", "ReadonlyMap", "ReadonlySet":
++		case "Map", "Set", "ReadonlyMap", "ReadonlySet", "ReadonlyArray":
 +			if owner != "" && owner != name.Text() {
 +				return ""
 +			}
@@ -33,33 +35,182 @@ index a55c730..818dc7c 100644
 +	return owner
 +}
 +
++func readonlyNativeCollectionPropertyContents(
++	program *compiler.Program,
++	typeChecker *checker.Checker,
++	property *ast.Symbol,
++	opts readonlynessOptions,
++	seenTypes map[*checker.Type]struct{},
++) readonlyness {
++	valueLinks := checker.Checker_valueSymbolLinks(typeChecker)
++	mappedLinks := checker.Checker_mappedSymbolLinks(typeChecker)
++	var mappers []*checker.TypeMapper
++	for {
++		if property.CheckFlags&ast.CheckFlagsInstantiated != 0 {
++			links := valueLinks.TryGet(property)
++			if links == nil || checker.ValueSymbolLinks_target(links) == nil {
++				return readonlynessMutable
++			}
++			mappers = append(mappers, checker.ValueSymbolLinks_mapper(links))
++			property = checker.ValueSymbolLinks_target(links)
++		} else if property.CheckFlags&ast.CheckFlagsMapped != 0 {
++			links := mappedLinks.TryGet(property)
++			if links == nil || checker.MappedSymbolLinks_syntheticOrigin(links) == nil {
++				return readonlynessMutable
++			}
++			property = checker.MappedSymbolLinks_syntheticOrigin(links)
++		} else {
++			break
++		}
++	}
++	owner := nativeCollectionOwner(program, property)
++	if owner != "ReadonlySet" && owner != "ReadonlyArray" {
++		return readonlynessMutable
++	}
++	parameters := property.Declarations[0].Parent.TypeParameters()
++	if len(parameters) != 1 {
++		return readonlynessMutable
++	}
++	data := typeChecker.GetTypeAtLocation(parameters[0])
++	for i := len(mappers) - 1; i >= 0; i-- {
++		if mappers[i] != nil {
++			data = checker.Checker_instantiateType(typeChecker, data, mappers[i])
++		}
++	}
++	if _, seen := seenTypes[data]; seen {
++		return readonlynessReadonly
++	}
++	return isTypeReadonlyRecurser(program, typeChecker, data, opts, seenTypes)
++}
++
 +func readonlyCollectionContents(
 +	program *compiler.Program,
 +	typeChecker *checker.Checker,
 +	t *checker.Type,
++	property *ast.Symbol,
++	owner string,
 +	opts readonlynessOptions,
 +	seenTypes map[*checker.Type]struct{},
 +) readonlyness {
-+	// `has` exposes map keys / set values; `get` exposes map values. Inspect
-+	// instantiated signatures so mapped views retain the actual generic data.
-+	for _, name := range []string{"has", "get"} {
-+		propertyType := checker.Checker_getTypeOfPropertyOfType(typeChecker, t, name)
-+		if propertyType == nil {
-+			continue
++	check := func(data *checker.Type) bool {
++		if data == nil {
++			return false
 +		}
-+		for _, signature := range utils.GetCallSignatures(typeChecker, propertyType) {
++		if _, seen := seenTypes[data]; seen {
++			return true
++		}
++		return isTypeReadonlyRecurser(program, typeChecker, data, opts, seenTypes) == readonlynessReadonly
++	}
++	name := property.Name
++	iterator := name == checker.Checker_getPropertyNameForKnownSymbolName(typeChecker, "iterator")
++	switch name {
++	case "size":
++		return readonlynessReadonly
++	case "isSupersetOf":
++		// Unlike subset/disjoint, superset only inspects the other set's keys.
++		return readonlynessReadonly
++	}
++	if name == checker.Checker_getPropertyNameForKnownSymbolName(typeChecker, "toStringTag") {
++		return readonlynessReadonly
++	}
++	propertyType := checker.Checker_getTypeOfPropertyOfType(typeChecker, t, name)
++	if propertyType == nil {
++		return readonlynessMutable
++	}
++	propertyType = checker.Checker_GetNonNullableType(typeChecker, propertyType)
++	if name == "isSubsetOf" || name == "isDisjointFrom" {
++		// Both can pass stored elements to the other set's user-defined has.
++		return readonlyNativeCollectionPropertyContents(program, typeChecker, property, opts, seenTypes)
++	}
++	signatures := utils.GetCallSignatures(typeChecker, propertyType)
++	if len(signatures) == 0 {
++		return readonlynessMutable
++	}
++	if owner == "ReadonlyArray" && !iterator && name != "keys" && name != "values" && name != "entries" {
++		element := typeChecker.GetTypeAtLocation(property.Declarations[0].Parent.TypeParameters()[0])
++		for _, signature := range signatures {
++			for _, parameter := range signature.Parameters() {
++				// A stored callable T (e.g. includes' search value) is data, not a callback.
++				if declaration := parameter.ValueDeclaration; declaration != nil && declaration.Type() != nil &&
++					typeChecker.GetTypeAtLocation(declaration.Type()) == element {
++					continue
++				}
++				callbackType := checker.Checker_GetNonNullableType(typeChecker, checker.Checker_getTypeOfSymbol(typeChecker, parameter))
++				for _, callback := range utils.GetCallSignatures(typeChecker, callbackType) {
++					for _, argument := range callback.Parameters() {
++						if !check(checker.Checker_getTypeOfSymbol(typeChecker, argument)) {
++							return readonlynessMutable
++						}
++					}
++				}
++			}
++		}
++		return readonlyNativeCollectionPropertyContents(program, typeChecker, property, opts, seenTypes)
++	}
++	for _, signature := range signatures {
++		switch {
++		case name == "has" || name == "get":
 +			for _, parameter := range checker.Signature_parameters(signature) {
-+				parameterType := checker.Checker_getTypeOfSymbol(typeChecker, parameter)
-+				if isTypeReadonlyRecurser(program, typeChecker, parameterType, opts, seenTypes) != readonlynessReadonly {
++				if !check(checker.Checker_getTypeOfSymbol(typeChecker, parameter)) {
 +					return readonlynessMutable
 +				}
 +			}
-+			if name == "get" {
-+				result := typeChecker.GetReturnTypeOfSignature(signature)
-+				if isTypeReadonlyRecurser(program, typeChecker, result, opts, seenTypes) != readonlynessReadonly {
-+					return readonlynessMutable
++			if name == "get" && !check(typeChecker.GetReturnTypeOfSignature(signature)) {
++				return readonlynessMutable
++			}
++		case name == "forEach":
++			parameters := checker.Signature_parameters(signature)
++			if len(parameters) == 0 {
++				return readonlynessMutable
++			}
++			callbacks := utils.GetCallSignatures(typeChecker, checker.Checker_getTypeOfSymbol(typeChecker, parameters[0]))
++			if len(callbacks) == 0 {
++				return readonlynessMutable
++			}
++			for _, callback := range callbacks {
++				// Include the collection handle, not just the value and key.
++				for _, parameter := range checker.Signature_parameters(callback) {
++					if !check(checker.Checker_getTypeOfSymbol(typeChecker, parameter)) {
++						return readonlynessMutable
++					}
 +				}
 +			}
++		case iterator || name == "keys" || name == "values" || name == "entries" ||
++			name == "union" || name == "intersection" || name == "difference" || name == "symmetricDifference":
++			result := typeChecker.GetReturnTypeOfSignature(signature)
++			symbol := checker.Type_symbol(result)
++			if symbol == nil || !utils.Every(symbol.Declarations, func(declaration *ast.Node) bool {
++				return utils.IsSourceFileDefaultLibrary(program, ast.GetSourceFileOfNode(declaration))
++			}) {
++				return readonlynessMutable
++			}
++			switch symbol.Name {
++			case "MapIterator", "SetIterator", "ArrayIterator", "Set":
++			default:
++				return readonlynessMutable
++			}
++			arguments := checker.Checker_getTypeArguments(typeChecker, result)
++			if len(arguments) != 1 {
++				return readonlynessMutable
++			}
++			data := arguments[0]
++			if name == "entries" || (iterator && owner == "ReadonlyMap") {
++				// Entry pairs are freshly allocated; only their contents alias stored data.
++				if !checker.IsTupleType(data) {
++					return readonlynessMutable
++				}
++				for _, element := range checker.Checker_getTypeArguments(typeChecker, data) {
++					if !check(element) {
++						return readonlynessMutable
++					}
++				}
++			} else if !check(data) {
++				return readonlynessMutable
++			}
++		default:
++			// ponytail: unknown native data channels are rejected; add their
++			// instantiated exposure analysis here when the library API grows.
++			return readonlynessMutable
 +		}
 +	}
 +	return readonlynessReadonly
@@ -79,6 +230,38 @@ index a55c730..818dc7c 100644
 +			return
 +		}
 +		owners[declaration] = struct{}{}
++		if declaration.Kind == ast.KindTypeAliasDeclaration {
++			// A native alias owns its resolved native API, not foreign augmentations.
++			ownsMember := func(member *ast.Node) bool {
++				return utils.IsSourceFileDefaultLibrary(program, ast.GetSourceFileOfNode(member)) ||
++					utils.Some(specifiers, func(specifier utils.TypeOrValueSpecifier) bool {
++						return utils.DeclarationMatchesSpecifierSource(declaration, specifier, program) &&
++							utils.DeclarationMatchesSpecifierSource(member, specifier, program)
++					})
++			}
++			for _, api := range utils.UnionTypeParts(t) {
++				if symbol := checker.Type_symbol(api); symbol != nil {
++					for _, member := range symbol.Declarations {
++						if ownsMember(member) {
++							include(member)
++						}
++					}
++				}
++				for _, property := range checker.Checker_getPropertiesOfType(typeChecker, api) {
++					for _, member := range property.Declarations {
++						if member.Parent != nil && ownsMember(member) {
++							include(member.Parent)
++						}
++					}
++				}
++				for _, info := range checker.Checker_getIndexInfosOfType(typeChecker, api) {
++					member := info.Declaration()
++					if member != nil && member.Parent != nil && ownsMember(member) {
++						include(member.Parent)
++					}
++				}
++			}
++		}
 +		clauses := utils.GetHeritageClauses(declaration)
 +		if clauses == nil {
 +			return
@@ -130,28 +313,35 @@ index a55c730..818dc7c 100644
 +		original = symbol.Parent.ValueDeclaration
 +	}
 +	if original == nil {
-+		return false
-+	}
+ 		return false
+ 	}
+-
+-	if checker.Checker_isReadonlySymbol(typeChecker, property) {
+-		return true
 +	originalFile := ast.GetSourceFileOfNode(original)
 +	if originalFile == nil {
 +		return false
-+	}
+ 	}
 +	// Class/interface inheritance spelled in the approved declaration includes
 +	// its native base API, but not foreign declarations augmenting that base.
 +	return utils.DeclarationMatchesSpecifierSource(declaration, utils.TypeOrValueSpecifier{
 +		From: utils.TypeOrValueSpecifierFromFile, Path: originalFile.FileName(),
 +	}, program)
 +}
-+
+ 
+-	if property.CheckFlags&ast.CheckFlagsReadonly != 0 {
+-		return true
 +func declarationOwnedBy(declaration *ast.Node, owners map[*ast.Node]struct{}) bool {
 +	for node := declaration; node != nil; node = node.Parent {
 +		if _, owned := owners[node]; owned {
 +			return true
 +		}
-+	}
+ 	}
 +	return false
 +}
-+
+ 
+-	if property.CheckFlags&ast.CheckFlagsSyntheticMethod != 0 {
+-		return true
 +func allowedNativeTypeIsReadonly(
 +	program *compiler.Program,
 +	typeChecker *checker.Checker,
@@ -166,78 +356,104 @@ index a55c730..818dc7c 100644
 +		return specifier.From == utils.TypeOrValueSpecifierFromName
 +	}) {
 +		return readonlynessReadonly
-+	}
+ 	}
+-
+-	if property.Flags&ast.SymbolFlagsMethod != 0 && property.CheckFlags&ast.CheckFlagsMapped != 0 {
+-		return true
 +	owners := allowedNativeDeclarations(program, typeChecker, t, matched)
-+	for _, property := range checker.Checker_getPropertiesOfType(typeChecker, t) {
-+		if len(property.Declarations) > 0 && utils.Every(property.Declarations, func(declaration *ast.Node) bool {
-+			return declarationOwnedBy(declaration, owners)
-+		}) {
-+			continue
-+		}
-+		if !propertyIsReadonly(typeChecker, property) &&
-+			!(opts.treatMethodsAsReadonly && property.Flags&ast.SymbolFlagsMethod != 0) &&
-+			!propertyHasPrivateIdentifierName(property) && !propertyIsPrivateMappedProperty(property) {
-+			return readonlynessMutable
-+		}
-+		propertyType := checker.Checker_getTypeOfPropertyOfType(typeChecker, t, property.Name)
-+		if propertyType != nil {
-+			if _, seen := seenTypes[propertyType]; !seen &&
-+				isTypeReadonlyRecurser(program, typeChecker, propertyType, opts, seenTypes) == readonlynessMutable {
++	for _, t := range utils.UnionTypeParts(t) {
++		for _, property := range checker.Checker_getPropertiesOfType(typeChecker, t) {
++			if len(property.Declarations) > 0 && utils.Every(property.Declarations, func(declaration *ast.Node) bool {
++				return declarationOwnedBy(declaration, owners)
++			}) {
++				continue
++			}
++			if !checker.Checker_isReadonlySymbol(typeChecker, property) &&
++				!(opts.treatMethodsAsReadonly && property.Flags&ast.SymbolFlagsMethod != 0) &&
++				!propertyHasPrivateIdentifierName(property) && !propertyIsPrivateMappedProperty(property) {
 +				return readonlynessMutable
 +			}
-+		}
-+	}
-+	for _, info := range checker.Checker_getIndexInfosOfType(typeChecker, t) {
-+		if declaration := info.Declaration(); declaration != nil && declarationOwnedBy(declaration, owners) {
-+			continue
-+		}
-+		if !info.IsReadonly() {
-+			return readonlynessMutable
-+		}
-+		if value := info.ValueType(); value != nil {
-+			if _, seen := seenTypes[value]; !seen &&
-+				isTypeReadonlyRecurser(program, typeChecker, value, opts, seenTypes) == readonlynessMutable {
-+				return readonlynessMutable
++			propertyType := checker.Checker_getTypeOfPropertyOfType(typeChecker, t, property.Name)
++			if propertyType != nil {
++				if _, seen := seenTypes[propertyType]; !seen &&
++					isTypeReadonlyRecurser(program, typeChecker, propertyType, opts, seenTypes) == readonlynessMutable {
++					return readonlynessMutable
++				}
 +			}
 +		}
-+	}
++		for _, info := range checker.Checker_getIndexInfosOfType(typeChecker, t) {
++			if declaration := info.Declaration(); declaration != nil && declarationOwnedBy(declaration, owners) {
++				continue
++			}
++			if info.Declaration() == nil {
++				// Mapped native APIs (such as HeadersInit's Record) have generated indices.
++				if symbol := checker.Type_symbol(t); symbol != nil && len(symbol.Declarations) > 0 &&
++					utils.Every(symbol.Declarations, func(declaration *ast.Node) bool {
++						return declarationOwnedBy(declaration, owners)
++					}) {
++					continue
++				}
++			}
++			if !info.IsReadonly() {
++				return readonlynessMutable
++			}
++			if value := info.ValueType(); value != nil {
++				if _, seen := seenTypes[value]; !seen &&
++					isTypeReadonlyRecurser(program, typeChecker, value, opts, seenTypes) == readonlynessMutable {
++					return readonlynessMutable
++				}
++			}
++		}
+ 	}
+-
+-	if property.ValueDeclaration == nil && property.CheckFlags&ast.CheckFlagsMapped != 0 {
+-		return true
+-	}
+-
+-	return checker.GetDeclarationModifierFlagsFromSymbol(property)&ast.ModifierFlagsReadonly != 0
 +	return readonlynessReadonly
-+}
-+
+ }
+ 
  func isTypeReadonlyObject(
- 	program *compiler.Program,
- 	typeChecker *checker.Checker,
-@@ -144,7 +342,22 @@ func isTypeReadonlyObject(
- 	seenTypes map[*checker.Type]struct{},
+@@ -145,11 +507,34 @@ func isTypeReadonlyObject(
  ) readonlyness {
  	properties := checker.Checker_getPropertiesOfType(typeChecker, t)
-+	collection := false
  	for _, property := range properties {
-+		switch nativeCollectionOwner(program, property) {
++		owner := nativeCollectionOwner(program, property)
++		switch owner {
 +		case "Map", "Set":
 +			// ponytail: admit only get/has/size capabilities from a mutable
 +			// collection view; iterator/callback exposure needs separate ownership analysis.
 +			if (property.Name != "get" && property.Name != "has" && property.Name != "size") ||
-+				!propertyIsReadonly(typeChecker, property) {
++				!checker.Checker_isReadonlySymbol(typeChecker, property) {
 +				return readonlynessMutable
 +			}
-+			collection = true
-+			continue
-+		case "ReadonlyMap", "ReadonlySet":
-+			collection = true
++		}
++		if owner != "" {
++			if owner == "ReadonlyArray" {
++				if property.Name != "length" && property.Name != checker.Checker_getPropertyNameForKnownSymbolName(typeChecker, "unscopables") &&
++					readonlyCollectionContents(program, typeChecker, t, property, owner, opts, seenTypes) != readonlynessReadonly {
++					return readonlynessMutable
++				}
++				continue
++			}
++			if readonlyCollectionContents(program, typeChecker, t, property, owner, opts, seenTypes) != readonlynessReadonly {
++				return readonlynessMutable
++			}
 +			continue
 +		}
  		if opts.treatMethodsAsReadonly && property.Flags&ast.SymbolFlagsMethod != 0 {
  			continue
  		}
-@@ -165,7 +378,14 @@ func isTypeReadonlyObject(
- 		return readonlynessMutable
+ 
+-		if propertyIsReadonly(typeChecker, property) {
++		if checker.Checker_isReadonlySymbol(typeChecker, property) {
+ 			continue
+ 		}
+ 
+@@ -166,6 +551,9 @@ func isTypeReadonlyObject(
  	}
  
-+	if collection && readonlyCollectionContents(program, typeChecker, t, opts, seenTypes) != readonlynessReadonly {
-+		return readonlynessMutable
-+	}
-+
  	for _, property := range properties {
 +		if nativeCollectionOwner(program, property) != "" {
 +			continue
@@ -245,7 +461,7 @@ index a55c730..818dc7c 100644
  		if property.Flags&ast.SymbolFlagsMethod != 0 {
  			continue
  		}
-@@ -226,10 +446,24 @@ func isTypeReadonlyRecurser(
+@@ -226,10 +614,24 @@ func isTypeReadonlyRecurser(
  ) readonlyness {
  	seenTypes[t] = struct{}{}
  
@@ -271,7 +487,7 @@ index a55c730..818dc7c 100644
  	if utils.IsUnionType(t) {
  		for _, subType := range t.Types() {
  			if _, ok := seenTypes[subType]; ok {
-@@ -242,33 +476,6 @@ func isTypeReadonlyRecurser(
+@@ -242,33 +644,6 @@ func isTypeReadonlyRecurser(
  		return readonlynessReadonly
  	}
  
@@ -305,8 +521,22 @@ index a55c730..818dc7c 100644
  	if !utils.IsObjectType(t) {
  		return readonlynessReadonly
  	}
+@@ -278,9 +653,11 @@ func isTypeReadonlyRecurser(
+ 	}
+ 
+ 	readonlyArray := isTypeReadonlyArrayOrTuple(program, typeChecker, t, opts, seenTypes)
+-	if readonlyArray != readonlynessUnknown {
+-		return readonlyArray
++	if readonlyArray == readonlynessMutable {
++		return readonlynessMutable
+ 	}
++	// Native array contents do not confer readonly permission to foreign members.
++	// Validate the exposed declarations even after the element/tuple check passes.
+ 
+ 	readonlyObject := isTypeReadonlyObject(program, typeChecker, t, opts, seenTypes)
+ 	if readonlyObject != readonlynessUnknown {
 diff --git a/internal/utils/type_matches_specifier.go b/internal/utils/type_matches_specifier.go
-index cfcaaab..38921b9 100644
+index cfcaaab..92b93ba 100644
 --- a/internal/utils/type_matches_specifier.go
 +++ b/internal/utils/type_matches_specifier.go
 @@ -200,38 +200,6 @@ func typeDeclaredInLib(
@@ -384,7 +614,21 @@ index cfcaaab..38921b9 100644
  }
  
  func typeMatchesSpecifier(
-@@ -407,7 +390,7 @@ func typeMatchesSpecifier(
+@@ -385,11 +368,8 @@ func typeMatchesSpecifier(
+ 	}
+ 
+ 	symbol := checker.Type_symbol(t)
+-	if symbol == nil {
+-		alias := checker.Type_alias(t)
+-		if alias != nil {
+-			symbol = alias.Symbol()
+-		}
++	if alias := checker.Type_alias(t); alias != nil {
++		symbol = alias.Symbol()
+ 	}
+ 	var declarations []*ast.Node
+ 	if symbol != nil {
+@@ -407,7 +387,7 @@ func typeMatchesSpecifier(
  	case TypeOrValueSpecifierFromLib:
  		return typeDeclaredInLib(declarationFiles, program)
  	case TypeOrValueSpecifierFromPackage:
@@ -393,7 +637,7 @@ index cfcaaab..38921b9 100644
  	default:
  		panic(fmt.Sprintf("unknown type specifier from: %v", specifier.From))
  	}
-@@ -443,7 +426,7 @@ func SymbolMatchesSpecifierNameAndSource(
+@@ -443,7 +423,7 @@ func SymbolMatchesSpecifierNameAndSource(
  	case TypeOrValueSpecifierFromLib:
  		return typeDeclaredInLib(declarationFiles, program)
  	case TypeOrValueSpecifierFromPackage:
@@ -402,7 +646,7 @@ index cfcaaab..38921b9 100644
  	default:
  		panic(fmt.Sprintf("unknown value specifier from: %v", specifier.From))
  	}
-@@ -583,33 +566,13 @@ func valueMatchesSpecifier(
+@@ -583,33 +563,13 @@ func valueMatchesSpecifier(
  		return false
  	}
  
@@ -442,3 +686,95 @@ index cfcaaab..38921b9 100644
  }
  
  func ValueMatchesSomeSpecifier(
+diff --git a/shim/checker/extra-shim.json b/shim/checker/extra-shim.json
+index 2fb95a1..49ae2d5 100644
+--- a/shim/checker/extra-shim.json
++++ b/shim/checker/extra-shim.json
+@@ -31,6 +31,7 @@
+       "getApparentTypeOfContextualType",
+       "getAwaitedType",
+       "getTypeOfSymbol",
++      "instantiateType",
+       "getTypeOfPropertyOfType",
+       "getTypeOfPropertyOrIndexSignatureOfType",
+       "getIndexedAccessTypeOrUndefined",
+@@ -76,7 +77,16 @@
+       "numberType",
+       "stringType",
+       "booleanType",
+-      "globalRegExpType"
++      "globalRegExpType",
++      "valueSymbolLinks",
++      "mappedSymbolLinks"
++    ],
++    "ValueSymbolLinks": [
++      "target",
++      "mapper"
++    ],
++    "MappedSymbolLinks": [
++      "syntheticOrigin"
+     ],
+     "InterfaceType": [
+       "thisType"
+diff --git a/shim/checker/shim.go b/shim/checker/shim.go
+index 0607a27..afcb61f 100644
+--- a/shim/checker/shim.go
++++ b/shim/checker/shim.go
+@@ -123,6 +123,8 @@ func Checker_getReturnTypeOfSignature(recv *checker.Checker, sig *checker.Signat
+ func Checker_getApparentType(recv *checker.Checker, t *checker.Type) *checker.Type
+ //go:linkname Checker_getTypeArguments github.com/microsoft/typescript-go/internal/checker.(*Checker).getTypeArguments
+ func Checker_getTypeArguments(recv *checker.Checker, t *checker.Type) []*checker.Type
++//go:linkname Checker_instantiateType github.com/microsoft/typescript-go/internal/checker.(*Checker).instantiateType
++func Checker_instantiateType(recv *checker.Checker, t *checker.Type, m *checker.TypeMapper) *checker.Type
+ //go:linkname Checker_getTypeFromTypeNode github.com/microsoft/typescript-go/internal/checker.(*Checker).getTypeFromTypeNode
+ func Checker_getTypeFromTypeNode(recv *checker.Checker, node *ast.Node) *checker.Type
+ //go:linkname Checker_isArrayType github.com/microsoft/typescript-go/internal/checker.(*Checker).isArrayType
+@@ -505,6 +507,12 @@ func Checker_booleanType(v *checker.Checker) *checker.Type {
+ func Checker_globalRegExpType(v *checker.Checker) *checker.Type {
+   return ((*extra_Checker)(unsafe.Pointer(v))).globalRegExpType
+ }
++func Checker_valueSymbolLinks(v *checker.Checker) core.LinkStore[*ast.Symbol, checker.ValueSymbolLinks] {
++  return ((*extra_Checker)(unsafe.Pointer(v))).valueSymbolLinks
++}
++func Checker_mappedSymbolLinks(v *checker.Checker) core.LinkStore[*ast.Symbol, checker.MappedSymbolLinks] {
++  return ((*extra_Checker)(unsafe.Pointer(v))).mappedSymbolLinks
++}
+ //go:linkname CompareTypes github.com/microsoft/typescript-go/internal/checker.CompareTypes
+ func CompareTypes(t1 *checker.Type, t2 *checker.Type) int
+ type CompositeSignature = checker.CompositeSignature
+@@ -789,6 +797,13 @@ type LateBoundLinks = checker.LateBoundLinks
+ type LiteralType = checker.LiteralType
+ const MAX_REVERSE_MAPPED_NESTING_INSPECTION_DEPTH = checker.MAX_REVERSE_MAPPED_NESTING_INSPECTION_DEPTH
+ type MappedSymbolLinks = checker.MappedSymbolLinks
++type extra_MappedSymbolLinks struct {
++  keyType *checker.Type
++  syntheticOrigin *ast.Symbol
++}
++func MappedSymbolLinks_syntheticOrigin(v *checker.MappedSymbolLinks) *ast.Symbol {
++  return ((*extra_MappedSymbolLinks)(unsafe.Pointer(v))).syntheticOrigin
++}
+ type MappedType = checker.MappedType
+ type extra_MappedType struct {
+   checker.ObjectType
+@@ -1335,6 +1350,21 @@ type UnusedKind = checker.UnusedKind
+ const UnusedKindLocal = checker.UnusedKindLocal
+ const UnusedKindParameter = checker.UnusedKindParameter
+ type ValueSymbolLinks = checker.ValueSymbolLinks
++type extra_ValueSymbolLinks struct {
++  resolvedType *checker.Type
++  writeType *checker.Type
++  target *ast.Symbol
++  mapper *checker.TypeMapper
++  nameType *checker.Type
++  containingType *checker.Type
++  functionOrConstructorChecked bool
++}
++func ValueSymbolLinks_target(v *checker.ValueSymbolLinks) *ast.Symbol {
++  return ((*extra_ValueSymbolLinks)(unsafe.Pointer(v))).target
++}
++func ValueSymbolLinks_mapper(v *checker.ValueSymbolLinks) *checker.TypeMapper {
++  return ((*extra_ValueSymbolLinks)(unsafe.Pointer(v))).mapper
++}
+ //go:linkname ValueToString github.com/microsoft/typescript-go/internal/checker.ValueToString
+ func ValueToString(value any) string
+ type VarianceFlags = checker.VarianceFlags

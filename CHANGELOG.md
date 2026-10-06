@@ -4,6 +4,8 @@
 
 - Enforce strict type-aware Oxlint, Oxfmt, compiler diagnostics, suppression policy, and
   declaration-isolation probes through local acceptance and CI.
+- Reproducibly correct native checker declaration isolation, readonly data exposure, and literal
+  dynamic/external import-cycle detection for both the CLI and editor.
 - Separate extension lifecycle, recovery, notes, history, page accounting, and renderer
   responsibilities while preserving the public tools and rollover contracts.
 - Make application inputs readonly-compatible and validate serialized renderer metadata before

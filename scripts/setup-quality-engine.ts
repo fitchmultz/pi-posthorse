@@ -19,6 +19,7 @@ const revision = "eb9339115edde6811ca94c3433adf69ea9852880";
 const typescriptRevision = "2bd066d87f5bafd315be9f40889d0a60b9e58e0b";
 const patch = join(root, "patches/tsgolint-safe-call.patch");
 const readonlyPatch = join(root, "patches/tsgolint-readonly.patch");
+const readonlyArrayPatch = join(root, "patches/tsgolint-readonly-flatmap.patch");
 const cache = join(root, "node_modules/.cache/pi-quality-engine");
 const binary = join(cache, process.platform === "win32" ? "tsgolint.exe" : "tsgolint");
 const manifestPath = join(cache, "manifest.json");
@@ -35,6 +36,7 @@ interface EngineIdentity {
 	readonly typescriptRevision: string;
 	readonly patchSha256: string;
 	readonly readonlyPatchSha256: string;
+	readonly readonlyArrayPatchSha256: string;
 	readonly platform: string;
 	readonly arch: string;
 }
@@ -94,6 +96,8 @@ function prepareSources(source: string): void {
 		],
 		tsSource,
 	);
+	run("git", ["apply", "--check", readonlyArrayPatch], tsSource);
+	run("git", ["apply", readonlyArrayPatch], tsSource);
 	const collections = join(source, "internal/collections");
 	mkdirSync(collections, { recursive: true });
 	for (const name of readdirSync(join(tsSource, "internal/collections"))) {
@@ -134,6 +138,7 @@ function buildEngine(identity: EngineIdentity): void {
 			[
 				"build",
 				"-mod=readonly",
+				"-modcacherw",
 				"-p=2",
 				"-buildvcs=false",
 				"-ldflags=-s -w",
@@ -180,7 +185,7 @@ function setup(): void {
 	const args = process.argv.slice(2);
 	if (args.includes("--help") || args.includes("-h")) {
 		console.log(
-			"Usage: node scripts/setup-quality-engine.ts [--force]\nBuild the pinned declaration-corrected tsgolint (Git and Go >=1.26 required).\nExample: npm ci --ignore-scripts && npm run quality:prepare\nUse OXLINT_TSGOLINT_PATH=node_modules/.cache/pi-quality-engine/tsgolint with Oxlint.",
+			"Usage: node scripts/setup-quality-engine.ts [--force]\nBuild the pinned declaration-corrected tsgolint (Git and Go >=1.26 required).\nExample: npm ci --ignore-scripts && npm run quality:prepare\nThe verified project cache atomically installs the backend used by raw Oxlint and the editor. Use --force for a fresh build. Exit 1 on preparation failure.",
 		);
 		return;
 	}
@@ -198,6 +203,7 @@ function setup(): void {
 		typescriptRevision,
 		patchSha256: digest(patch),
 		readonlyPatchSha256: digest(readonlyPatch),
+		readonlyArrayPatchSha256: digest(readonlyArrayPatch),
 		platform: process.platform,
 		arch: process.arch,
 	};

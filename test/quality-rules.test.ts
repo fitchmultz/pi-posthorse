@@ -175,6 +175,19 @@ test("native readonly collections check keys, values, mapped mutators and attach
 		"ReadonlyMap<string, number> & { readonly counter: number }",
 		"Readonly<Pick<Map<string, number>, 'get' | 'size'>>",
 		"Readonly<Pick<Set<number>, 'has' | 'size'>>",
+		"Pick<ReadonlyMap<string, number>, 'values' | 'size'>",
+		"Pick<ReadonlyMap<string, { readonly count: number }>, 'entries' | 'forEach' | 'size'>",
+		"Pick<ReadonlySet<{ readonly count: number }>, 'values' | 'size'>",
+		"Pick<ReadonlyMap<string, { count: number }>, 'size'>",
+		"Pick<ReadonlySet<{ count: number }>, 'size'>",
+		"Pick<ReadonlySet<{ readonly count: number }>, 'union' | 'intersection' | 'difference' | 'symmetricDifference' | 'size'>",
+		"Partial<ReadonlyMap<string, number>>",
+		"Partial<ReadonlySet<string>>",
+		"Partial<Pick<ReadonlyMap<string, { readonly count: number }>, 'values' | 'size'>>",
+		"Readonly<Partial<Pick<Map<string, number>, 'get' | 'has' | 'size'>>>",
+		"Readonly<Partial<Pick<Set<number>, 'has' | 'size'>>>",
+		"Pick<ReadonlySet<{ readonly count: number }>, 'isSubsetOf' | 'isDisjointFrom' | 'size'>",
+		"Pick<ReadonlySet<{ count: number }>, 'isSupersetOf' | 'size'>",
 	];
 	const rejected = [
 		"Map<string, number>",
@@ -191,23 +204,104 @@ test("native readonly collections check keys, values, mapped mutators and attach
 		"ReadonlySet<number> & { counter: number }",
 		"Readonly<Pick<Map<string, number>, 'get' | 'set' | 'size'>>",
 		"Readonly<Pick<Map<string, { count: number }>, 'get' | 'size'>>",
+		"Pick<ReadonlyMap<string, { count: number }>, 'values' | 'size'>",
+		"Pick<ReadonlySet<{ count: number }>, 'values' | 'size'>",
+		"Pick<ReadonlyMap<string, { count: number }>, 'forEach' | 'size'>",
+		"Omit<ReadonlyMap<string, { count: number }>, 'get'>",
+		"Pick<ReadonlyMap<{ key: number }, number>, 'entries' | 'size'>",
+		"Pick<ReadonlyMap<{ key: number }, number>, 'keys' | 'size'>",
+		"Pick<ReadonlyMap<{ key: number }, number>, 'forEach' | 'size'>",
+		"Pick<ReadonlyMap<string, { count: number }>, typeof Symbol.iterator | 'size'>",
+		"Pick<ReadonlySet<{ count: number }>, typeof Symbol.iterator | 'size'>",
+		"Pick<ReadonlyMap<string, [number, number]>, 'values' | 'size'>",
+		"Pick<ReadonlyMap<string, readonly [number, { count: number }]>, 'values' | 'size'>",
+		"Pick<ReadonlySet<{ count: number }>, 'union' | 'size'>",
+		"Pick<ReadonlySet<{ count: number }>, 'intersection' | 'size'>",
+		"Pick<ReadonlySet<{ count: number }>, 'difference' | 'size'>",
+		"Pick<ReadonlySet<{ count: number }>, 'symmetricDifference' | 'size'>",
+		"Partial<ReadonlyMap<string, { count: number }>>",
+		"Partial<ReadonlySet<{ count: number }>>",
+		"Partial<Pick<ReadonlyMap<string, { count: number }>, 'values' | 'size'>>",
+		"Readonly<Partial<Pick<Map<string, { count: number }>, 'get' | 'has' | 'size'>>>",
+		"Pick<ReadonlySet<{ count: number }>, 'isSubsetOf' | 'size'>",
+		"Pick<ReadonlySet<{ count: number }>, 'isDisjointFrom' | 'size'>",
+		"Pick<Map<string, number>, 'get' | 'size'>",
+		"Partial<Pick<Map<string, number>, 'get' | 'size'>>",
+		"Pick<Set<number>, 'has' | 'size'>",
+		"Partial<Pick<Set<number>, 'has' | 'size'>>",
+		"Readonly<Partial<Map<string, number>>>",
+		"Readonly<Partial<Set<number>>>",
 	];
 	const source = (types: readonly string[]) =>
 		types
 			.map(
 				(type, index) =>
-					`export function lookup${index}(input: ${type}): number { return input.size; }`,
+					`export function lookup${index}(input: ${type}): number { return input.size${type.includes("Partial<") ? " ?? 0" : ""}; }`,
 			)
 			.join("\n");
+	const arrayTypes = [
+		{ type: "readonly number[]", mutable: false },
+		{ type: "readonly { readonly count: number }[]", mutable: false },
+		{ type: "Pick<readonly number[], 'map' | 'length'>", mutable: false },
+		{ type: "Partial<Pick<readonly number[], 'map'>>", mutable: false },
+		{ type: "readonly { count: number }[]", mutable: true },
+		{ type: "Pick<readonly { count: number }[], 'map' | 'length'>", mutable: true },
+		{ type: "Partial<Pick<readonly { count: number }[], 'map'>>", mutable: true },
+	];
 	expectFindings(
 		{
-			files: { "pass.ts": source(accepted), "fail.ts": source(rejected) },
+			files: {
+				"pass.ts": source(accepted),
+				"fail.ts": source(rejected),
+				"mixed.ts":
+					"interface Mixed extends Pick<ReadonlyMap<string, number>, 'get'>, Pick<ReadonlyMap<string, { count: number }>, 'values' | 'size'> {} export function value(input: Mixed): number { return input.size; }",
+				"node_modules/@quality/methods/package.json": JSON.stringify({
+					name: "@quality/methods",
+					type: "module",
+					exports: "./index.d.ts",
+				}),
+				"node_modules/@quality/methods/index.d.ts":
+					"export interface Mutable { get(): number; }",
+				"methods.ts": [
+					"import type { Mutable } from '@quality/methods';",
+					"export function replace(input: Partial<Pick<Mutable, 'get'>>): void { const view = input; view.get = () => 123; }",
+					"export function read(input: Readonly<Partial<Pick<Mutable, 'get'>>>): number { return input.get?.() ?? 0; }",
+				].join("\n"),
+				"array-views.ts": arrayTypes
+					.map(
+						({ type }, index) =>
+							`export function view${index}(input: ${type}): unknown { return input; }`,
+					)
+					.join("\n"),
+				"flatmap.ts": [
+					"export function read(input: readonly number[]): readonly number[] { return input.flatMap((value) => [value]); }",
+					"export function mutate(input: readonly number[]): readonly number[] { return input.flatMap((value, _index, array) => { const original = array; original.push(value); return [value]; }); }",
+					"export const mutable = [1, 2].flatMap((value, _index, array) => { const original = array; original.push(value); return [value]; });",
+				].join("\n"),
+			},
 		},
-		rejected.map((_type, index) => ({
-			code: "typescript/prefer-readonly-parameter-types",
-			file: "fail.ts",
-			line: index + 1,
-		})),
+		[
+			...rejected.map((_type, index) => ({
+				code: "typescript/prefer-readonly-parameter-types",
+				file: "fail.ts",
+				line: index + 1,
+			})),
+			{ code: "typescript/prefer-readonly-parameter-types", file: "mixed.ts", line: 1 },
+			{ code: "typescript/prefer-readonly-parameter-types", file: "methods.ts", line: 2 },
+			...arrayTypes.flatMap(({ mutable }, index) =>
+				mutable
+					? [
+							{
+								code: "typescript/prefer-readonly-parameter-types",
+								file: "array-views.ts",
+								line: index + 1,
+							},
+						]
+					: [],
+			),
+			{ code: "typescript/TS2339", file: "flatmap.ts", line: 2 },
+			{ code: "typescript/no-unsafe-call", file: "flatmap.ts", line: 2 },
+		],
 	);
 });
 
@@ -384,6 +478,70 @@ test("runtime dependency cycles remain detectable in both modules", () => {
 			{ code: "import/no-cycle", file: "a.ts", line: 1 },
 			{ code: "import/no-cycle", file: "b.ts", line: 1 },
 		],
+	);
+	expectFindings(
+		{
+			files: {
+				"a.ts": "export async function a(): Promise<number> { const { b } = await import('./b.ts'); return b(); }",
+				"b.ts": "import { a } from './a.ts'; export async function b(): Promise<number> { return a(); }",
+			},
+		},
+		[
+			{ code: "import/no-cycle", file: "a.ts", line: 1 },
+			{ code: "import/no-cycle", file: "b.ts", line: 1 },
+		],
+	);
+	const wrappedImports = [
+		{ source: "('./b.ts')", additionalRules: [] },
+		{ source: "(`./b.ts`)", additionalRules: [] },
+		{ source: "('./b.ts' as const)", additionalRules: [] },
+		{
+			source: "(<string>'./b.ts')",
+			additionalRules: [
+				"typescript/consistent-type-assertions",
+				"typescript/no-unnecessary-type-assertion",
+			],
+		},
+		{
+			source: "('./b.ts'!)",
+			additionalRules: [
+				"typescript/no-non-null-assertion",
+				"typescript/no-unnecessary-type-assertion",
+			],
+		},
+	];
+	for (const example of wrappedImports) {
+		expectFindings(
+			{
+				files: {
+					"a.ts": `export async function a(): Promise<void> { await import(${example.source}); }`,
+					"b.ts": "import { a } from './a.ts'; export async function b(): Promise<void> { return a(); }",
+				},
+			},
+			[
+				{ code: "import/no-cycle", file: "a.ts", line: 1 },
+				{ code: "import/no-cycle", file: "b.ts", line: 1 },
+				...example.additionalRules.map((code) => ({ code, file: "a.ts", line: 1 })),
+			],
+		);
+	}
+	expectFindings(
+		{
+			files: {
+				"external.ts":
+					"import { foreign } from '@quality/cycle'; export function external(): number { return foreign(); }",
+				"node_modules/@quality/cycle/package.json": JSON.stringify({
+					name: "@quality/cycle",
+					version: "1.0.0",
+					type: "module",
+					exports: "./index.ts",
+				}),
+				"node_modules/@quality/cycle/index.ts":
+					"import { external } from '../../../external.ts'; export function foreign(): number { return external(); }",
+			},
+			paths: ["external.ts"],
+		},
+		[{ code: "import/no-cycle", file: "external.ts", line: 1 }],
 	);
 });
 

@@ -8,7 +8,8 @@ have equal weight.
 
 Use Node 24 and npm 12.2.0. Install the committed dependencies with `npm ci --ignore-scripts`, then
 prepare the corrected native quality engine before linting or opening the editor. The engine's
-pinned source, patch and reproducible build are documented separately.
+pinned sources, patches and reproducible builds are documented in
+[Corrected native checkers](quality-engine.md).
 
 | Command                  | Purpose                                                                                         |
 | ------------------------ | ----------------------------------------------------------------------------------------------- |
