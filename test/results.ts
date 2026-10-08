@@ -29,6 +29,7 @@ const display = Type.Union([
 		count: Type.Number(),
 		headerLength: Type.Optional(Type.Number()),
 		page: Type.Optional(page),
+		more: Type.Optional(Type.Boolean()),
 	}),
 	Type.Object({
 		kind: Type.Literal("note-read"),

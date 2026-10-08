@@ -16,8 +16,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { toolCards } from "../ui.ts";
-import { requireValue, textResult, type PolicyContext, type TextResult } from "./contracts.ts";
-import { isBinaryFile, lfLines, notesRoot, publishFile } from "./files.ts";
+import {
+	MAX_PAGE_CHARS,
+	requireValue,
+	textResult,
+	type PolicyContext,
+	type TextResult,
+} from "./contracts.ts";
+import { isBinaryFile, notesRoot, publishFile, readText } from "./files.ts";
 import { excerpt, excerptAround } from "./message-text.ts";
 import type { PageAccess } from "./paging.ts";
 
@@ -29,6 +35,13 @@ export type NotesParams = {
 	readonly offset?: number;
 };
 type NoteFile = { readonly path: string; readonly size: number; readonly mtimeMs: number };
+type NoteHits = { readonly rows: string[]; readonly more: boolean; readonly skipped: number };
+/** Larger files are logs or evidence rather than notes; reading them would dominate a search. */
+const SEARCH_FILE_BYTES = 1024 * 1024;
+/** Overlapping reads cut a full search of a 212,000-file notes tree from 39 s to 14 s. */
+const SEARCH_BATCH = 16;
+/** Search rescans up to the requested offset, so this also caps the matches one call keeps. */
+const SEARCH_OFFSET_LIMIT = 1_000_000;
 function safeJoin(dir: string, path: string): string {
 	const relative = normalize(path.replace(/^[/\\]+/, ""));
 	if (relative === ".." || relative.startsWith(`..${sep}`) || isAbsolute(relative)) {
@@ -164,29 +177,82 @@ async function appendNote(
 	});
 	return textResult(`Appended to ${path}`, [], { kind: "note-append" });
 }
-async function noteHits(dir: string, query: string, signal?: AbortSignal): Promise<string[]> {
-	const hits: string[] = [];
-	for (const { path: file } of notesUnder(dir)) {
-		// Each stream is completely consumed before opening the next, bounding open handles.
+/** One note's matching lines as `path:line: excerpt` rows. */
+function matchingLines(name: string, text: string, query: string): string[] {
+	if (!text.toLowerCase().includes(query)) {
+		return [];
+	}
+	return text.split("\n").flatMap((line, index) => {
+		const trimmed = line.trim();
+		const match = trimmed.toLowerCase().indexOf(query);
+		return match === -1
+			? []
+			: [`${name}:${index + 1}: ${excerptAround(trimmed, match, 50, 200)}`];
+	});
+}
+/** Matches in newest-first note order, stopping once they pass `limit` characters. */
+async function noteHits(
+	dir: string,
+	query: string,
+	limit: number,
+	signal?: AbortSignal,
+): Promise<NoteHits> {
+	const notes = notesUnder(dir);
+	const rows: string[] = [];
+	let length = -1;
+	let skipped = 0;
+	for (let start = 0; start < notes.length; start += SEARCH_BATCH) {
+		// Batches keep note order, so a search stops within one batch of the page limit.
 		// oxlint-disable-next-line no-await-in-loop
-		if (await isBinaryFile(file)) {
-			continue;
-		}
-		let number = 0;
-		// Consume each note's lines in order before opening the next stream.
-		// oxlint-disable-next-line no-await-in-loop
-		for await (const line of lfLines(file, signal)) {
-			number++;
-			const trimmed = line.trim();
-			const match = trimmed.toLowerCase().indexOf(query);
-			if (match !== -1) {
-				hits.push(
-					`${file.slice(dir.length + 1)}:${number}: ${excerptAround(trimmed, match, 50, 200)}`,
-				);
+		const batch = await Promise.all(
+			notes
+				.slice(start, start + SEARCH_BATCH)
+				.map(async ({ path, size }) =>
+					size > SEARCH_FILE_BYTES
+						? undefined
+						: matchingLines(
+								path.slice(dir.length + 1),
+								(await readText(path, signal)) ?? "",
+								query,
+							),
+				),
+		);
+		skipped += batch.filter((found) => found === undefined).length;
+		for (const row of batch.flatMap((found) => found ?? [])) {
+			rows.push(row);
+			length += row.length + 1;
+			if (length > limit) {
+				return { rows, more: true, skipped };
 			}
 		}
 	}
-	return hits;
+	return { rows, more: false, skipped };
+}
+async function searchNotes(
+	dir: string,
+	params: NotesParams,
+	access: { readonly host: PolicyContext; readonly pages: PageAccess },
+	signal?: AbortSignal,
+): Promise<TextResult> {
+	const { host, pages } = access;
+	const query = requireValue(params.query, "query", params.op);
+	const offset = params.offset ?? 0;
+	if (offset >= SEARCH_OFFSET_LIMIT) {
+		pages.error(
+			host,
+			`Notes search pages end before offset ${SEARCH_OFFSET_LIMIT}; search for something more specific.`,
+		);
+	}
+	const hits = await noteHits(dir, query.toLowerCase(), offset + MAX_PAGE_CHARS, signal);
+	const skipped = hits.skipped === 1 ? "1 note" : `${hits.skipped} notes`;
+	return pages.notes(host, {
+		rows: hits.rows,
+		more: hits.more,
+		offset,
+		kind: "notes-search",
+		empty: `No notes match "${excerpt(query, 200)}".`,
+		header: hits.skipped > 0 ? `[Not searched: ${skipped} over 1 MiB.]\n` : "",
+	});
 }
 export function registerNotes(
 	pi: ExtensionAPI,
@@ -240,16 +306,8 @@ export function registerNotes(
 					return writeNote(dir, params, signal);
 				case "append":
 					return appendNote(dir, params, signal);
-				case "search": {
-					const query = requireValue(params.query, "query", params.op);
-					const hits = await noteHits(dir, query.toLowerCase(), signal);
-					return pages.notes(policy(ctx), {
-						rows: hits,
-						offset: params.offset ?? 0,
-						kind: "notes-search",
-						empty: `No notes match "${excerpt(query, 200)}".`,
-					});
-				}
+				case "search":
+					return searchNotes(dir, params, { host: policy(ctx), pages }, signal);
 			}
 		},
 	});

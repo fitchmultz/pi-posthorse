@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -2694,7 +2695,13 @@ test("notes list and search page every result through the shared budget, includi
 					"every listing page identifies the shared directory",
 				);
 				assert.ok(text.length <= 1000, "headers and continuation fit the admitted page");
-				assert.equal(total, expected.length);
+				if (display.more === true) {
+					// Search stops reading once the page is decided, so its total is a lower bound.
+					assert.ok(op === "search" && end < total && total <= expected.length);
+					assert.match(text, /; more matches follow; continue with offset/);
+				} else {
+					assert.equal(total, expected.length);
+				}
 				let position = 0;
 				const count = expectedRows.filter((row) => {
 					const overlap = position < end && position + row.length > offset;
@@ -3251,6 +3258,78 @@ test("notes list newest first with sizes, read folders as listings, and search o
 			notes({ op: "read", path: "task/fixture.sqlite" }),
 			/binary file \(36B\); notes read returns text only/,
 		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// Evidence trees in .pi/notes once held tens of gigabytes. Search read every file and kept every
+// match before paging, so a broad query exhausted Pi's memory.
+test("notes search stops reading at the requested page, skips notes over 1 MiB and still pages every match", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-bounded-search-"));
+	const root = join(dir, ".pi", "notes");
+	const oldest = join(root, "oldest.md");
+	try {
+		mkdirSync(root, { recursive: true });
+		const at = (minutes: number) => new Date(Date.UTC(2026, 0, 1) + minutes * 60_000);
+		writeFileSync(join(root, "huge.log"), `needle in a log\n${"l".repeat(1024 * 1024)}`);
+		utimesSync(join(root, "huge.log"), at(1000), at(1000));
+		const rows = Array.from({ length: 300 }, (_, index) => {
+			const name = `note-${String(index).padStart(3, "0")}.md`;
+			const line = `needle ${index} ${"n".repeat(150)}`;
+			writeFileSync(join(root, name), `${line}\n`);
+			utimesSync(join(root, name), at(900 - index), at(900 - index));
+			return `${name}:1: ${line}`;
+		});
+		writeFileSync(oldest, "the needle in the oldest note");
+		utimesSync(oldest, at(0), at(0));
+		const expected = [...rows, "oldest.md:1: the needle in the oldest note"].join("\n");
+		const header = "[Not searched: 1 note over 1 MiB.]\n";
+		const { tools, handlers, context: base } = await setup();
+		const context = { ...base, cwd: dir };
+		const search = (query: string, offset: number) => {
+			requireValue(handlers.get("turn_start"))({}, context);
+			return run(tools, "notes", { op: "search", query, offset }, context);
+		};
+
+		// Root reads mode-000 files, so only an unprivileged run shows that a full scan fails here.
+		if (process.getuid?.() !== 0) {
+			chmodSync(oldest, 0o000);
+			await assert.rejects(
+				search("oldest", 0),
+				/EACCES/,
+				"a full scan reaches the oldest note",
+			);
+		}
+		const first = await search("needle", 0);
+		const display = first.details;
+		assert.ok(display?.kind === "notes-search" && display.page);
+		assert.equal(display.more, true);
+		const { end } = display.page;
+		assert.equal(
+			toolText(first),
+			`${header}${expected.slice(0, end)}\n[chars 0-${end}; more matches follow; continue with offset ${end}]`,
+		);
+		await assert.rejects(search("needle", 1_000_000), /search for something more specific/);
+		chmodSync(oldest, 0o644);
+
+		let offset = 0;
+		let recovered = "";
+		for (let page = 0; page < 100; page++) {
+			// Each page continues from the offset the previous page returned.
+			// oxlint-disable-next-line no-await-in-loop
+			const result = await search("needle", offset);
+			const text = toolText(result);
+			assert.ok(result.details?.kind === "notes-search" && result.details.page);
+			assert.ok(text.startsWith(header), "every page says which notes were not searched");
+			const { end: pageEnd, total } = result.details.page;
+			recovered += text.slice(header.length, header.length + pageEnd - offset);
+			if (result.details.more !== true && pageEnd === total) {
+				break;
+			}
+			offset = pageEnd;
+		}
+		assert.equal(recovered, expected, "paging recovers every match from every searched note");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

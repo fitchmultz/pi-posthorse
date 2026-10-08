@@ -28,6 +28,8 @@ export type PosthorseDisplay =
 			readonly count: number;
 			readonly headerLength?: number;
 			readonly page?: PageRange;
+			/** More matches follow; `page.total` counts only those found so far. */
+			readonly more?: boolean;
 	  }
 	| ({ readonly kind: "note-read"; readonly headerLength?: number } & PageRange)
 	| { readonly kind: "note-write" | "note-append" | "new-context" }
@@ -101,6 +103,15 @@ function isSearchDisplay(value: Readonly<Record<string, unknown>>): boolean {
 	);
 }
 
+function isNotesDisplay(value: Readonly<Record<string, unknown>>): boolean {
+	return (
+		typeof value.count === "number" &&
+		optionalNumbers(value, ["headerLength"]) &&
+		(value.page === undefined || isPage(value.page)) &&
+		(value.more === undefined || typeof value.more === "boolean")
+	);
+}
+
 function isDisplay(value: unknown): value is PosthorseDisplay {
 	if (!isRecord(value)) {
 		return false;
@@ -110,11 +121,7 @@ function isDisplay(value: unknown): value is PosthorseDisplay {
 			return isContextDisplay(value);
 		case "notes-list":
 		case "notes-search":
-			return (
-				typeof value.count === "number" &&
-				optionalNumbers(value, ["headerLength"]) &&
-				(value.page === undefined || isPage(value.page))
-			);
+			return isNotesDisplay(value);
 		case "note-read":
 			return isPage(value) && optionalNumbers(value, ["headerLength"]);
 		case "history-read":
@@ -201,14 +208,14 @@ function validSpan(span: HistorySpan, start: number, bodyLength: number): boolea
 
 const n = (value: number): string => value.toLocaleString("en-US");
 
-export function pageSummary(page: PageRange): string {
+export function pageSummary(page: PageRange, more = false): string {
 	if (page.total === 0) {
 		return "Empty note";
 	}
 	if (page.offset === 0 && page.end === page.total) {
 		return `${n(page.total)} chars · complete`;
 	}
-	return `Chars ${n(page.offset)}–${n(page.end)} of ${n(page.total)}${page.end < page.total ? `\nNext offset ${n(page.end)}` : " · final page"}`;
+	return `Chars ${n(page.offset)}–${n(page.end)} of ${n(page.total)}${more ? "+" : ""}${page.end < page.total ? `\nNext offset ${n(page.end)}` : " · final page"}`;
 }
 
 function contextSummary(display: Extract<PosthorseDisplay, { readonly kind: "context" }>): string {
