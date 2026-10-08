@@ -28,7 +28,7 @@ cargo build --locked --release -p oxlint --lib --features allocator
 
 The Cargo lockfile is checked before and after the build. Compiler/profile overrides are cleared;
 Rust's physical toolchain avoids inheriting an unrelated rustup override from fetched sources.
-The project-local cache key includes the pinned revision, patch and preparation-script SHA-256,
+The cache key includes the pinned revision, patch and preparation-script SHA-256,
 and native platform/architecture/libc binding. Its manifest records Rust/Cargo, native linker,
 Cargo lockfile and addon hashes. Cached addons are checksum-verified without requiring build tools.
 A checksum mismatch fails closed; use `--force` to rebuild.
@@ -162,10 +162,19 @@ Pinned inputs:
   `CGO_ENABLED=0`. `-modcacherw` keeps newly downloaded module-cache directories removable in
   disposable qualification environments; it does not permit manifest or checksum changes.
 
-The Go cache under `node_modules/.cache/pi-quality-engine` records source/submodule
-revisions, each patch SHA-256, platform/architecture, Go version, and executable SHA-256. Changed inputs
-or executable contents force a rebuild; a pristine installed package can be repatched from the
-verified cache. Build artifacts are neither maintained source nor part of the published extension.
+The Go cache key includes source/submodule revisions, each patch SHA-256, the preparation-script
+SHA-256 and platform/architecture. Its receipt records those inputs, Go version and executable
+SHA-256. Changed inputs require a new build; a checksum mismatch fails closed and requires `--force`.
+A pristine installed package can be repatched from the verified cache.
+
+Both output caches live under `pi-quality-engine` in `npm_config_cache` when npm supplies a cache
+directory, otherwise under the project's `node_modules/.cache`. Only compiled outputs and receipts
+are shared, never source trees, installed dependencies or Cargo/Go build directories. CI's strict
+quality job compiles and probes the corrections once, then uploads a tar archive preserving binary
+permissions. Both isolated host qualifications download those same-run outputs and independently
+verify their input identities and checksums before copying them into fresh platform dependencies.
+All compiler, checker, behavior, native-host and installed-consumer assertions still run for each
+host. Build artifacts are neither maintained source nor part of the published extension.
 
 ## Enforcement and removal
 
