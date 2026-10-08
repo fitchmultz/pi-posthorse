@@ -220,7 +220,7 @@ function setup(): void {
 	const args = process.argv.slice(2);
 	if (args.includes("--help") || args.includes("-h")) {
 		console.log(
-			"Usage: node scripts/setup-oxlint-engine.ts [--force]\nBuild the pinned native Oxlint import-cycle correction (Git, Rust >=1.97 and a native linker required).\nExample: npm ci --ignore-scripts && npm run quality:prepare\nThe verified project cache atomically installs the NAPI addon used by raw CLI and editor/LSP. Restart existing language servers after preparation. Use --force for a fresh build. Exit 1 on preparation failure.",
+			"Usage: node scripts/setup-oxlint-engine.ts [--force]\nBuild the pinned native Oxlint import-cycle correction (Git, Rust >=1.97 and a native linker required).\nExample: npm ci --ignore-scripts && npm run quality:prepare\nThe verified output cache atomically installs the NAPI addon used by raw CLI and editor/LSP. Restart existing language servers after preparation. Use --force for a fresh build. Exit 1 on preparation failure.",
 		);
 		return;
 	}
@@ -236,7 +236,11 @@ function setup(): void {
 	const fingerprint = createHash("sha256")
 		.update([revision, digest(patch), digest(import.meta.filename), binding].join("\n"))
 		.digest("hex");
-	const cache = join(root, "node_modules/.cache/pi-quality-engine/oxlint", fingerprint);
+	const cache = join(
+		process.env.npm_config_cache ?? join(root, "node_modules/.cache"),
+		"pi-quality-engine/oxlint",
+		fingerprint,
+	);
 	const addon = args.includes("--force")
 		? build(cache, target)
 		: (cachedAddon(cache) ?? build(cache, target));

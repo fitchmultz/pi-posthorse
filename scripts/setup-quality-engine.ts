@@ -20,7 +20,23 @@ const typescriptRevision = "2bd066d87f5bafd315be9f40889d0a60b9e58e0b";
 const patch = join(root, "patches/tsgolint-safe-call.patch");
 const readonlyPatch = join(root, "patches/tsgolint-readonly.patch");
 const readonlyArrayPatch = join(root, "patches/tsgolint-readonly-flatmap.patch");
-const cache = join(root, "node_modules/.cache/pi-quality-engine");
+const identity: EngineIdentity = {
+	revision,
+	typescriptRevision,
+	patchSha256: digest(patch),
+	readonlyPatchSha256: digest(readonlyPatch),
+	readonlyArrayPatchSha256: digest(readonlyArrayPatch),
+	platform: process.platform,
+	arch: process.arch,
+};
+const fingerprint = createHash("sha256")
+	.update(JSON.stringify({ ...identity, scriptSha256: digest(import.meta.filename) }))
+	.digest("hex");
+const cache = join(
+	process.env.npm_config_cache ?? join(root, "node_modules/.cache"),
+	"pi-quality-engine/tsgolint",
+	fingerprint,
+);
 const binary = join(cache, process.platform === "win32" ? "tsgolint.exe" : "tsgolint");
 const manifestPath = join(cache, "manifest.json");
 const installedBinary = join(
@@ -111,7 +127,7 @@ function prepareSources(source: string): void {
 	}
 }
 
-function cachedEngineMatches(identity: EngineIdentity): boolean {
+function cachedEngineMatches(): boolean {
 	if (!existsSync(manifestPath) || !existsSync(binary)) {
 		return false;
 	}
@@ -119,14 +135,21 @@ function cachedEngineMatches(identity: EngineIdentity): boolean {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
 		return false;
 	}
-	return (
-		Object.entries(identity).every(([key, expected]) => Reflect.get(value, key) === expected) &&
-		Reflect.get(value, "binarySha256") === digest(binary)
-	);
+	if (
+		!Object.entries(identity).every(([key, expected]) => Reflect.get(value, key) === expected)
+	) {
+		return false;
+	}
+	if (Reflect.get(value, "binarySha256") !== digest(binary)) {
+		throw new Error(
+			`Cached quality engine failed checksum verification: ${cache}. Use --force to rebuild.`,
+		);
+	}
+	return true;
 }
 
 /** Stage on the cache filesystem; a failed build leaves the last verified executable intact. */
-function buildEngine(identity: EngineIdentity): void {
+function buildEngine(): void {
 	const goVersion = run("go", ["version"], root);
 	mkdirSync(cache, { recursive: true });
 	const source = mkdtempSync(join(tmpdir(), "posthorse-quality-engine-"));
@@ -185,7 +208,7 @@ function setup(): void {
 	const args = process.argv.slice(2);
 	if (args.includes("--help") || args.includes("-h")) {
 		console.log(
-			"Usage: node scripts/setup-quality-engine.ts [--force]\nBuild the pinned declaration-corrected tsgolint (Git and Go >=1.26 required).\nExample: npm ci --ignore-scripts && npm run quality:prepare\nThe verified project cache atomically installs the backend used by raw Oxlint and the editor. Use --force for a fresh build. Exit 1 on preparation failure.",
+			"Usage: node scripts/setup-quality-engine.ts [--force]\nBuild the pinned declaration-corrected tsgolint (Git and Go >=1.26 required).\nExample: npm ci --ignore-scripts && npm run quality:prepare\nThe verified output cache atomically installs the backend used by raw Oxlint and the editor. Use --force for a fresh build. Exit 1 on preparation failure.",
 		);
 		return;
 	}
@@ -198,21 +221,12 @@ function setup(): void {
 	) {
 		throw new Error(`Unsupported build host: ${process.platform}/${process.arch}`);
 	}
-	const identity: EngineIdentity = {
-		revision,
-		typescriptRevision,
-		patchSha256: digest(patch),
-		readonlyPatchSha256: digest(readonlyPatch),
-		readonlyArrayPatchSha256: digest(readonlyArrayPatch),
-		platform: process.platform,
-		arch: process.arch,
-	};
-	if (!args.includes("--force") && cachedEngineMatches(identity)) {
+	if (!args.includes("--force") && cachedEngineMatches()) {
 		publishInstalledEngine();
 		console.log(`Corrected quality engine ready: ${binary}`);
 		return;
 	}
-	buildEngine(identity);
+	buildEngine();
 }
 
 try {
