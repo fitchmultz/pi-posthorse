@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.1 — 2026-10-08
 
 - Enforce strict type-aware Oxlint, Oxfmt, compiler diagnostics, suppression policy, and
   declaration-isolation probes through local acceptance and CI.

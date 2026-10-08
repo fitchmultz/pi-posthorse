@@ -1,6 +1,6 @@
 {
 	"name": "pi-posthorse",
-	"version": "0.8.0",
+	"version": "0.8.1",
 	"type": "module",
 	"description": "Posthorse: fresh context, same journey. No-summary context rollover for Pi, with sparse budget reminders, handoffs, notes, and history.",
 	"keywords": [
