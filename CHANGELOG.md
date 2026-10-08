@@ -12,6 +12,11 @@
   using it. Preserve native SDK handles through declaration-qualified allowances.
 - Retain the lifecycle suites and their behavioral assertions while replacing unsafe fixture
   contracts.
+- Keep notes search bounded when `.pi/notes` holds large evidence trees. Search stops reading once
+  the requested page is decided and then reports that more matches follow instead of a total. It
+  skips files over 1 MiB and says how many, reads 16 notes at a time, and pages end before offset
+  1,000,000. Before, it read every file and kept every match, and a broad query over a 44 GB
+  notes tree exhausted Pi's memory.
 
 ## 0.8.0 — 2026-10-01
 

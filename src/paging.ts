@@ -23,6 +23,8 @@ export type NotesPage = {
 	readonly kind: "notes-list" | "notes-search";
 	readonly empty: string;
 	readonly header?: string;
+	/** Rows stop before the last match, so their joined length is only a lower bound. */
+	readonly more?: boolean;
 };
 export type PageAccess = {
 	readonly size: (ctx: PolicyContext, request: PageRequest) => number;
@@ -94,11 +96,11 @@ export class PageReservations {
 		throw new Error(message);
 	}
 	notes(ctx: PolicyContext, page: NotesPage): TextResult {
-		const { rows, offset, kind, empty, header = "" } = page;
+		const { rows, offset, kind, empty, header = "", more } = page;
 		const text = rows.length > 0 ? rows.join("\n") : empty;
 		const chars = this.size(ctx, { offset }) - header.length;
 		const footer = (end: number) =>
-			`\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]`;
+			`\n[chars ${offset}-${end}${more === true ? "; more matches follow" : ` of ${text.length}`}; continue with offset ${end}]`;
 		if (chars <= footer(text.length).length) {
 			this.error(
 				ctx,
@@ -125,6 +127,7 @@ export class PageReservations {
 				headerLength: header.length,
 				count: range.starts.filter((start) => start < end).length,
 				page: { offset, end, total: text.length },
+				...(more === true ? { more } : {}),
 			},
 		);
 	}

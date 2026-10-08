@@ -363,6 +363,29 @@ test("paginated searches retain accurate counts, spans, identifiers and continua
 		assert.match(text(notes), /Next offset/);
 		notes.setExpanded(true);
 		assert.match(text(notes), new RegExp(`continue with offset ${details.page.end}`));
+
+		await execute(
+			"notes",
+			{
+				op: "write",
+				path: "more.md",
+				content: Array.from(
+					{ length: 300 },
+					(_, index) => `needle ${index} ${"m".repeat(150)}`,
+				).join("\n"),
+			},
+			ctx,
+		);
+		const partial = await execute("notes", { op: "search", query: "needle" }, ctx);
+		const found = fixtureDisplay(partial.details);
+		assert.ok(found.kind === "notes-search" && found.more === true && found.page);
+		const partialCard = await card("notes", { op: "search", query: "needle" });
+		partialCard.updateResult({ ...partial, isError: false });
+		assert.match(
+			text(partialCard),
+			new RegExp(`of ${found.page.total.toLocaleString("en-US")}\\+\\s+Next offset`),
+			"a search that stopped early must not show its count so far as the total",
+		);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

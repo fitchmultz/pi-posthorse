@@ -5,6 +5,7 @@ import {
 	constants,
 	lstat,
 	open,
+	readFile,
 	readlink,
 	realpath,
 	rename,
@@ -141,6 +142,11 @@ export async function isBinaryFile(path: string): Promise<boolean> {
 	} finally {
 		await file.close();
 	}
+}
+/** A whole file as UTF-8 text, or undefined when `isBinaryFile` would call it binary. */
+export async function readText(path: string, signal?: AbortSignal): Promise<string | undefined> {
+	const bytes = await readFile(path, { signal });
+	return bytes.subarray(0, 8_000).includes(0) ? undefined : bytes.toString("utf8");
 }
 function gitRoot(dir: string, marker: string): string {
 	let target = marker;

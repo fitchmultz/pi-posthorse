@@ -142,7 +142,7 @@ function resultSummary(
 		display.page !== undefined &&
 		(display.page.offset > 0 || display.page.end < display.page.total)
 	) {
-		return `${summary}\n${pageSummary(display.page)}`;
+		return `${summary}\n${pageSummary(display.page, display.more)}`;
 	}
 	return summary;
 }
