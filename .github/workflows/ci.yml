@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: 9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
+  PI_AUTOMATION_REF: e34d8127d7b4d44647003ae1ab0a568775e0864c # main
 
 jobs:
   quality:
@@ -72,9 +72,9 @@ jobs:
           overwrite: true
 
   resolve:
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@e34d8127d7b4d44647003ae1ab0a568775e0864c # main
     with:
-      automation-ref: 9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
+      automation-ref: e34d8127d7b4d44647003ae1ab0a568775e0864c # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
