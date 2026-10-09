@@ -19,9 +19,9 @@ jobs:
     permissions:
       contents: write
     if: vars.NPM_RELEASE_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.repository_owner == 'fitchmultz'
-    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@082c559dde8ea1f899c4403c77e7cd44b1af4407 # fix/npm12-qualification
+    uses: fitchmultz/.github/.github/workflows/npm-release-plan.yml@54c687228d840506555801b9db038373e697d901 # fix/npm12-qualification
     with:
-      automation-ref: 082c559dde8ea1f899c4403c77e7cd44b1af4407 # fix/npm12-qualification
+      automation-ref: 54c687228d840506555801b9db038373e697d901 # fix/npm12-qualification
 
   checks:
     needs: plan
@@ -37,9 +37,9 @@ jobs:
     permissions:
       contents: write
       id-token: write
-    uses: fitchmultz/.github/.github/workflows/npm-release.yml@082c559dde8ea1f899c4403c77e7cd44b1af4407 # fix/npm12-qualification
+    uses: fitchmultz/.github/.github/workflows/npm-release.yml@54c687228d840506555801b9db038373e697d901 # fix/npm12-qualification
     with:
-      automation-ref: 082c559dde8ea1f899c4403c77e7cd44b1af4407 # fix/npm12-qualification
+      automation-ref: 54c687228d840506555801b9db038373e697d901 # fix/npm12-qualification
       source-ref: ${{ needs.plan.outputs.source }}
       official-version: ${{ needs.plan.outputs.official-version }}
       fork-ref: ${{ needs.plan.outputs.fork-ref }}
