@@ -170,6 +170,7 @@ jobs:
         working-directory: extension
       - name: Qualify official Pi
         env:
+          GH_TOKEN: ${{ github.token }}
           version: ${{ needs.resolve.outputs.official-version }}
         run: |
           node automation/scripts/qualify.mjs \
