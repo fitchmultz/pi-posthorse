@@ -1,16 +1,29 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { findPackageJSON } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 const hostIndex = process.env.PI_HOST_INDEX
 	? pathToFileURL(process.env.PI_HOST_INDEX).href
 	: import.meta.resolve("@earendil-works/pi-coding-agent");
-const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } =
-	await import(hostIndex);
+const {
+	createAgentSession,
+	DefaultResourceLoader,
+	discoverAndLoadExtensions,
+	ModelRuntime,
+	SessionManager,
+	SettingsManager,
+} = await import(hostIndex);
 
 // Resolve the faux provider from the selected host's graph as well.
 const aiManifest = pathToFileURL(findPackageJSON("@earendil-works/pi-ai", hostIndex));
@@ -119,6 +132,148 @@ async function fixture(t, options = {}) {
 function reset(manager, handoff) {
 	return manager.appendCompaction(handoff, null, 100, { posthorse: 1 });
 }
+
+async function loadedHistory(t) {
+	t.diagnostic(`native history SDK: ${hostIndex}`);
+	const cwd = mkdtempSync(join(tmpdir(), "posthorse-history-"));
+	t.after(() => rmSync(cwd, { recursive: true, force: true }));
+	const { extensions, errors, runtime } = await discoverAndLoadExtensions(
+		[fileURLToPath(new URL("../index.ts", import.meta.url))],
+		cwd,
+		join(cwd, "agent"),
+	);
+	assert.deepEqual(errors, []);
+	assert.equal(extensions.length, 1);
+	const extension = extensions[0];
+	runtime.getAllTools = () => [...extension.tools.values()].map((tool) => tool.definition);
+	runtime.getActiveTools = () => runtime.getAllTools().map((tool) => tool.name);
+	const history = extension.tools.get("history").definition;
+	return {
+		cwd,
+		async call(sessionManager, params) {
+			// Isolate extension extraction from the host's separate usage-estimation cost.
+			const ctx = {
+				cwd,
+				sessionManager,
+				model: { id: "offline", provider: "faux", contextWindow: 400_000 },
+				getContextUsage: () => ({ tokens: 1_000, contextWindow: 400_000, percent: 0.25 }),
+				getSystemPrompt: () => "Offline history regression.",
+				isProjectTrusted: () => false,
+				hasUI: false,
+				mode: "print",
+			};
+			for (const handler of extension.handlers.get("turn_start") ?? []) {
+				handler({}, ctx);
+			}
+			return history.execute("history-regression", params, undefined, undefined, ctx);
+		},
+	};
+}
+
+function countedArchive(cwd) {
+	const manager = SessionManager.inMemory(cwd);
+	const ids = [];
+	let windowId;
+	for (let i = 0; i < 4_096; i++) {
+		if (i === 2_048) {
+			windowId = reset(manager, "Earlier boundary.");
+		}
+		ids.push(
+			manager.appendMessage({
+				role: "user",
+				content: `HIST_NEEDLE old:${i}.`,
+				timestamp: i,
+			}),
+		);
+	}
+	reset(manager, "Current boundary.");
+	manager.appendMessage({ role: "user", content: "HIST_NEEDLE visible.", timestamp: 5_000 });
+	for (let i = 0; i < 100; i++) {
+		manager.appendMessage({
+			role: "user",
+			content: "Current unrelated.",
+			timestamp: 5_001 + i,
+		});
+	}
+	const accessed = new Set();
+	for (const id of ids) {
+		const message = manager.getEntry(id).message;
+		const content = message.content;
+		Object.defineProperty(message, "content", {
+			get() {
+				accessed.add(id);
+				return content;
+			},
+		});
+	}
+	return { manager, ids, windowId, accessed };
+}
+
+test("native loaded history extracts only early page hits and lookahead from a large archive", async (t) => {
+	const h = await loadedHistory(t);
+	const { manager, ids, windowId, accessed } = countedArchive(h.cwd);
+	const first = await h.call(manager, { op: "search", query: "HIST_NEEDLE", limit: 10 });
+	const expected = (from) =>
+		Array.from({ length: 10 }, (_, offset) => {
+			const index = from - offset;
+			const id = ids[index];
+			return `${manager.getEntry(id).timestamp} [window ${windowId}] [${id}] [user] HIST_NEEDLE old:${index}.`;
+		});
+	assert.deepEqual(textOf(first).split("\n").slice(0, 10), expected(4_095));
+	assert.equal(first.details.skipped, 1);
+	assert.equal(first.details.more, true);
+	assert.ok(nextCursor(textOf(first)), "the full archive remains pageable");
+	assert.ok(accessed.size <= 11, `page plus one lookahead extracted ${accessed.size} records`);
+	t.diagnostic(`first-page archived content: ${accessed.size}/4096 entries extracted`);
+	const second = await h.call(manager, {
+		op: "search",
+		query: "HIST_NEEDLE",
+		limit: 10,
+		cursor: nextCursor(textOf(first)),
+	});
+	assert.deepEqual(textOf(second).split("\n").slice(0, 10), expected(4_085));
+	const oldest = await h.call(manager, { op: "search", query: "old:0." });
+	assert.match(textOf(oldest), new RegExp(`\\[window initial\\] \\[${ids[0]}\\]`));
+	assert.match(textOf(oldest), /\[user\] HIST_NEEDLE old:0\./);
+});
+
+test("native loaded history reads only the selected content and preserves abandoned-branch locators", async (t) => {
+	const h = await loadedHistory(t);
+	const { manager, ids, windowId, accessed } = countedArchive(h.cwd);
+	for (const [index, window] of [
+		[4_095, windowId],
+		[0, "initial"],
+	]) {
+		accessed.clear();
+		// Each independent read must finish before measuring the next selected entry.
+		// oxlint-disable-next-line no-await-in-loop
+		const result = await h.call(manager, { op: "read", id: ids[index] });
+		assert.ok(textOf(result).includes(`[window ${window}] [${ids[index]}]`));
+		assert.ok(textOf(result).endsWith(`[user] HIST_NEEDLE old:${index}.`));
+		assert.deepEqual([...accessed], [ids[index]], "unselected archive content stays untouched");
+		t.diagnostic(`known-ID archived content: ${accessed.size}/4096 entries extracted`);
+	}
+	const persisted = SessionManager.create(h.cwd, join(h.cwd, "sessions"));
+	const root = persisted.appendMessage({ role: "user", content: "Root.", timestamp: 1 });
+	const abandonedWindow = reset(persisted, "Abandoned boundary.");
+	const abandoned = persisted.appendMessage({
+		role: "user",
+		content: "ABANDONED_NEEDLE original.",
+		timestamp: 2,
+	});
+	persisted.branch(root);
+	persisted.appendMessage({ role: "user", content: "Chosen alternative.", timestamp: 3 });
+	reset(persisted, "Chosen boundary.");
+	const branch = await h.call(persisted, { op: "search", query: "ABANDONED_NEEDLE" });
+	assert.match(textOf(branch), /No history matches/);
+	const source = relative(persisted.getSessionDir(), persisted.getSessionFile());
+	const qualified = `${abandoned}@${createHash("sha256").update(source).digest("base64url").slice(0, 10)}`;
+	const read = await h.call(persisted, { op: "read", id: abandoned });
+	assert.ok(textOf(read).includes(`[window ${abandonedWindow}] [${qualified}]`));
+	assert.ok(textOf(read).endsWith("[user] ABANDONED_NEEDLE original."));
+	const all = await h.call(persisted, { op: "search", query: "ABANDONED_NEEDLE", all: true });
+	assert.ok(textOf(all).includes(`[window ${abandonedWindow}] [${qualified}]`));
+});
 
 test("official resume keeps legacy saved window data recoverable after a public reset", async (t) => {
 	let ownerId;

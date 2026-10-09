@@ -11,7 +11,7 @@ import {
 	type WindowedEntry,
 } from "./contracts.ts";
 import { lfLines } from "./files.ts";
-import { windowProjection } from "./history-entries.ts";
+import { toWindowedEntry, windowProjection } from "./history-entries.ts";
 import { shortKey } from "./message-text.ts";
 
 function execFileText(
@@ -151,7 +151,7 @@ export async function* sessionWindowEntries(
 		if (entry === undefined) {
 			continue;
 		}
-		const item = project(entry);
+		const item = toWindowedEntry(entry, project(entry));
 		if (item !== undefined) {
 			yield item;
 		}
