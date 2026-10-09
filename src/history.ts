@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { toolCards } from "../ui.ts";
 import { requireValue, type PolicyContext, type WindowedEntry } from "./contracts.ts";
-import { windowEntries } from "./history-entries.ts";
+import { toWindowedEntry, windowProjection } from "./history-entries.ts";
 import { historyReadPage, searchPage } from "./history-pages.ts";
 import { historyMatches, type HistorySource } from "./history-search.ts";
 import type { PageAccess } from "./paging.ts";
@@ -17,18 +17,26 @@ function entryReference(id: string): { readonly entryId: string; readonly fileKe
 		fileKey: separator < 0 ? undefined : id.slice(separator + 1),
 	};
 }
+function branchEntry(source: HistorySource, id: string): WindowedEntry | undefined {
+	const project = windowProjection();
+	for (const entry of source.branch()) {
+		const windowId = project(entry);
+		const item = entry.id === id ? toWindowedEntry(entry, windowId) : undefined;
+		if (item !== undefined) {
+			return item;
+		}
+	}
+	return undefined;
+}
 async function findEntry(
 	source: HistorySource,
 	id: string,
 	signal?: AbortSignal,
 ): Promise<LocatedEntry> {
 	const { entryId, fileKey } = entryReference(id);
-	if (fileKey === undefined) {
-		for (const item of windowEntries(source.branch())) {
-			if (item.entry.id === entryId) {
-				return { item, source: "" };
-			}
-		}
+	const current = fileKey === undefined ? branchEntry(source, entryId) : undefined;
+	if (current !== undefined) {
+		return { item: current, source: "" };
 	}
 	const candidates =
 		fileKey === undefined && /^[\w-]+$/.test(entryId)
@@ -42,10 +50,8 @@ async function findEntry(
 		fileKey,
 		candidates: candidates === undefined ? undefined : (candidate) => candidates.has(candidate),
 	})) {
-		for await (const item of sessionWindowEntries(file, signal)) {
-			if (item.entry.id === entryId) {
-				return { item, source: relative(source.dir, file) };
-			}
+		for await (const item of sessionWindowEntries(file, signal, entryId)) {
+			return { item, source: relative(source.dir, file) };
 		}
 	}
 	throw new Error(

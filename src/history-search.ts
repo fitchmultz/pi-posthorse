@@ -7,7 +7,7 @@ import {
 	type HistoryHit,
 	type ProjectedEntry,
 } from "./contracts.ts";
-import { historyHit, seenText, windowEntries } from "./history-entries.ts";
+import { historyHit, seenText, reverseWindowEntries } from "./history-entries.ts";
 import { shortKey } from "./message-text.ts";
 import {
 	filesContaining,
@@ -267,7 +267,7 @@ function branchMatches(
 	accumulator: SearchProgress,
 ): number {
 	let skipped = 0;
-	for (const item of [...windowEntries(source.branch())].reverse()) {
+	for (const item of reverseWindowEntries(source.branch())) {
 		const hit = historyHit(item, query);
 		if (hit === undefined) {
 			continue;

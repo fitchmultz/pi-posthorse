@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.2 — 2026-10-09
+
+- Extract history content lazily: newest-first branch searches stop normalization once a page and
+  lookahead are decided, and known-ID reads normalize only the selected entry, including journal
+  reads from other sessions or abandoned branches. Window
+  ancestry, original-before-recovery ranking, active-context exclusions, full archive searches,
+  abandoned branches, images and continuations remain available without an index or global cache.
+
 ## 0.8.1 — 2026-10-08
 
 - Enforce strict type-aware Oxlint, Oxfmt, compiler diagnostics, suppression policy, and

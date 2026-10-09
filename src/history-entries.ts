@@ -213,7 +213,8 @@ export function toWindowedEntry(
 		images: imagesOf(entryContent(entry)),
 	};
 }
-export function windowProjection(): (entry: EntryLike) => WindowedEntry | undefined {
+/** Window ancestry is metadata-only; extracting text/images is a separate operation. */
+export function windowProjection(): (entry: EntryLike) => string {
 	const windows = new Map<string, string>();
 	return (entry) => {
 		const inherited = windows.get(entry.parentId ?? "") ?? "initial";
@@ -221,13 +222,15 @@ export function windowProjection(): (entry: EntryLike) => WindowedEntry | undefi
 		if (entry.id !== undefined && entry.id !== "") {
 			windows.set(entry.id, windowId);
 		}
-		return toWindowedEntry(entry, windowId);
+		return windowId;
 	};
 }
-export function* windowEntries(entries: readonly EntryLike[]): Generator<WindowedEntry> {
-	const project = windowProjection();
-	for (const entry of entries) {
-		const item = project(entry);
+export function* reverseWindowEntries(entries: readonly EntryLike[]): Generator<WindowedEntry> {
+	// Preserve parent-relative window labels without normalizing the whole branch.
+	// ponytail: ancestry still scans metadata; a native window-aware iterator could remove that cost.
+	const windows = entries.map(windowProjection());
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const item = toWindowedEntry(entries[i], windows[i]);
 		if (item !== undefined) {
 			yield item;
 		}

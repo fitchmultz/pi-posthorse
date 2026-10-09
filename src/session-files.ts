@@ -11,7 +11,7 @@ import {
 	type WindowedEntry,
 } from "./contracts.ts";
 import { lfLines } from "./files.ts";
-import { windowProjection } from "./history-entries.ts";
+import { toWindowedEntry, windowProjection } from "./history-entries.ts";
 import { shortKey } from "./message-text.ts";
 
 function execFileText(
@@ -141,6 +141,7 @@ function parsedEntry(line: string): EntryLike | undefined {
 export async function* sessionWindowEntries(
 	file: string,
 	signal?: AbortSignal,
+	entryId?: string,
 ): AsyncGenerator<WindowedEntry> {
 	if (!existsSync(file)) {
 		return;
@@ -151,7 +152,11 @@ export async function* sessionWindowEntries(
 		if (entry === undefined) {
 			continue;
 		}
-		const item = project(entry);
+		const windowId = project(entry);
+		if (entryId !== undefined && entry.id !== entryId) {
+			continue;
+		}
+		const item = toWindowedEntry(entry, windowId);
 		if (item !== undefined) {
 			yield item;
 		}
