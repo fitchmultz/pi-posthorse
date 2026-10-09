@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: 54c687228d840506555801b9db038373e697d901 # fix/npm12-qualification
+  PI_AUTOMATION_REF: 54c687228d840506555801b9db038373e697d901 # main
 
 jobs:
   quality:
@@ -72,9 +72,9 @@ jobs:
           overwrite: true
 
   resolve:
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@54c687228d840506555801b9db038373e697d901 # fix/npm12-qualification
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@54c687228d840506555801b9db038373e697d901 # main
     with:
-      automation-ref: 54c687228d840506555801b9db038373e697d901 # fix/npm12-qualification
+      automation-ref: 54c687228d840506555801b9db038373e697d901 # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
