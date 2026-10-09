@@ -17,12 +17,12 @@ Required qualification targets: latest stable official Pi and latest maintained 
 
 ## Install
 
-Posthorse `0.8.1` requires Pi `>=1.0.0`. Update the host before installing this release; do not activate it on an older live fork.
+Posthorse `0.8.2` requires Pi `>=1.0.0`. Update the host before installing this release; do not activate it on an older live fork.
 
 ```bash
-pi install npm:pi-posthorse@0.8.1                        # from npm
-pi install git:github.com/fitchmultz/pi-posthorse@v0.8.1 # from Git
-pi -e npm:pi-posthorse@0.8.1                             # try it for one run without installing
+pi install npm:pi-posthorse@0.8.2                        # from npm
+pi install git:github.com/fitchmultz/pi-posthorse@v0.8.2 # from Git
+pi -e npm:pi-posthorse@0.8.2                             # try it for one run without installing
 ```
 
 Omit the version or tag to follow the latest release.
