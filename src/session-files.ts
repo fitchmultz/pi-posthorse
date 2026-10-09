@@ -141,6 +141,7 @@ function parsedEntry(line: string): EntryLike | undefined {
 export async function* sessionWindowEntries(
 	file: string,
 	signal?: AbortSignal,
+	entryId?: string,
 ): AsyncGenerator<WindowedEntry> {
 	if (!existsSync(file)) {
 		return;
@@ -151,7 +152,11 @@ export async function* sessionWindowEntries(
 		if (entry === undefined) {
 			continue;
 		}
-		const item = toWindowedEntry(entry, project(entry));
+		const windowId = project(entry);
+		if (entryId !== undefined && entry.id !== entryId) {
+			continue;
+		}
+		const item = toWindowedEntry(entry, windowId);
 		if (item !== undefined) {
 			yield item;
 		}

@@ -256,6 +256,18 @@ test("native loaded history reads only the selected content and preserves abando
 	const persisted = SessionManager.create(h.cwd, join(h.cwd, "sessions"));
 	const root = persisted.appendMessage({ role: "user", content: "Root.", timestamp: 1 });
 	const abandonedWindow = reset(persisted, "Abandoned boundary.");
+	for (let i = 0; i < 64; i++) {
+		const call = fauxToolCall("archive_probe", { archivePayload: "unselected", index: i });
+		persisted.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+		persisted.appendMessage({
+			role: "toolResult",
+			toolName: "archive_probe",
+			toolCallId: call.id,
+			content: [{ type: "text", text: "Saved result." }],
+			isError: false,
+			timestamp: 2,
+		});
+	}
 	const abandoned = persisted.appendMessage({
 		role: "user",
 		content: "ABANDONED_NEEDLE original.",
@@ -268,9 +280,25 @@ test("native loaded history reads only the selected content and preserves abando
 	assert.match(textOf(branch), /No history matches/);
 	const source = relative(persisted.getSessionDir(), persisted.getSessionFile());
 	const qualified = `${abandoned}@${createHash("sha256").update(source).digest("base64url").slice(0, 10)}`;
+	let unselectedArguments = 0;
+	const stringify = JSON.stringify;
+	const serialization = t.mock.method(JSON, "stringify", (value, replacer, space) => {
+		if (value?.archivePayload === "unselected") {
+			unselectedArguments++;
+		}
+		return stringify(value, replacer, space);
+	});
 	const read = await h.call(persisted, { op: "read", id: abandoned });
-	assert.ok(textOf(read).includes(`[window ${abandonedWindow}] [${qualified}]`));
-	assert.ok(textOf(read).endsWith("[user] ABANDONED_NEEDLE original."));
+	const qualifiedRead = await h.call(persisted, { op: "read", id: qualified });
+	serialization.mock.restore();
+	for (const result of [read, qualifiedRead]) {
+		assert.ok(textOf(result).includes(`[window ${abandonedWindow}] [${qualified}]`));
+		assert.ok(textOf(result).endsWith("[user] ABANDONED_NEEDLE original."));
+	}
+	assert.equal(unselectedArguments, 0, "archived ID reads must not extract unrelated arguments");
+	t.diagnostic(
+		`bare/qualified archived-ID unrelated argument serializations: ${unselectedArguments}`,
+	);
 	const all = await h.call(persisted, { op: "search", query: "ABANDONED_NEEDLE", all: true });
 	assert.ok(textOf(all).includes(`[window ${abandonedWindow}] [${qualified}]`));
 });

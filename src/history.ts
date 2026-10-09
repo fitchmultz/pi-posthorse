@@ -50,10 +50,8 @@ async function findEntry(
 		fileKey,
 		candidates: candidates === undefined ? undefined : (candidate) => candidates.has(candidate),
 	})) {
-		for await (const item of sessionWindowEntries(file, signal)) {
-			if (item.entry.id === entryId) {
-				return { item, source: relative(source.dir, file) };
-			}
+		for await (const item of sessionWindowEntries(file, signal, entryId)) {
+			return { item, source: relative(source.dir, file) };
 		}
 	}
 	throw new Error(
