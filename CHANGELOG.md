@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Own threshold rollover in fresh compaction windows without new projected turn-start input,
+  at completed turn end when known usage reaches the enabled, supported threshold.
+  Preserve explicit resets, final-answer settlement, and native overflow/truncated-response recovery.
+  Defer for earlier context-edit drafts and document the eager recovery record's later-editor contract.
+
 ## 0.8.2 — 2026-10-09
 
 - Extract history content lazily: newest-first branch searches stop normalization once a page and

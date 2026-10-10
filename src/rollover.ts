@@ -18,6 +18,7 @@ import {
 	REMINDER_TYPE,
 	type CompactionPolicy,
 	type PolicyContext,
+	type ProjectedEntry,
 	type ReminderFingerprint,
 } from "./contracts.ts";
 import { registerContextTools } from "./context-tools.ts";
@@ -225,6 +226,92 @@ function reportAutomaticFailure(ctx: ExtensionContext, error: unknown): void {
 		console.error(message);
 	}
 }
+function freshWindowWithoutInput(projected: readonly ProjectedEntry[]): boolean {
+	const boundary = projected.findIndex(
+		(entry) => entry.sourceEntry.type === "compaction" && entry.messages.length > 0,
+	);
+	if (boundary < 0) {
+		return false;
+	}
+	const turnStarts = new Set([
+		"user",
+		"custom",
+		"bashExecution",
+		"branchSummary",
+		"compactionSummary",
+	]);
+	return !projected
+		.slice(boundary + 1)
+		.some(
+			(entry) =>
+				entry.sourceEntry.type !== "compaction" &&
+				entry.messages.some((message) => turnStarts.has(message.role ?? "")),
+		);
+}
+function reachedThreshold(host: PolicyContext): boolean {
+	const usage = host.getContextUsage();
+	const budget = budgetFor(host);
+	return (
+		budget?.supported === true &&
+		budget.enabled &&
+		usage !== undefined &&
+		usage.tokens !== null &&
+		usage.tokens >= budget.rolloverAt
+	);
+}
+function fallbackTurnEligible(event: TurnEndEvent, ctx: ExtensionContext): boolean {
+	return (
+		event.outcome === "completed" &&
+		!(event.message.role === "assistant" && event.message.stopReason === "length") &&
+		ctx.signal?.aborted !== true &&
+		!event.entries.some((entry) => entry.type === "compaction" || entry.type === "context_edit")
+	);
+}
+function thresholdFallback(
+	pi: ExtensionAPI,
+	event: TurnEndEvent,
+	ctx: ExtensionContext,
+	capacity: { readonly host: PolicyContext; readonly toolTokens: () => number },
+): BoundaryResult | undefined {
+	if (!fallbackTurnEligible(event, ctx)) {
+		return undefined;
+	}
+	const { host, toolTokens } = capacity;
+	if (!reachedThreshold(host)) {
+		return undefined;
+	}
+	if (!freshWindowWithoutInput(event.context.contextEntries)) {
+		return undefined;
+	}
+	const projected = event.context.contextEntries;
+	const limit = freshPayloadChars(host, toolTokens(), event.context.pendingMessages);
+	const ownerQuestionRegistered = pi
+		.getAllTools()
+		.some((tool) => tool.name === "ask_question" && tool.namespace === undefined);
+	const summary = buildAutoHandoff(
+		ctx.sessionManager.getBranch(),
+		projected,
+		limit,
+		ownerQuestionRegistered,
+	);
+	if (limit < MIN_PAGE_CHARS || summary.length > limit) {
+		return undefined;
+	}
+	// ponytail: turn_end drafts are eager. Later projection editors must replace/remove this draft;
+	// upgrade to a host post-boundary hook if recovery must include later handler edits.
+	return {
+		entries: [
+			...event.entries,
+			{
+				type: "compaction",
+				summary,
+				firstKeptEntryId: null,
+				details: { posthorse: 1, reason: "threshold" },
+			},
+		],
+		continue: event.continue,
+	};
+}
 function registerAutomaticRollover(
 	pi: ExtensionAPI,
 	policy: SnapshotReader,
@@ -317,6 +404,13 @@ export function registerRollover(
 			return explicitReset(event, ctx, summary, () =>
 				freshPayloadChars(host, activeToolTokens(), event.context.pendingMessages),
 			);
+		}
+		const fallback = thresholdFallback(pi, event, ctx, {
+			host,
+			toolTokens: activeToolTokens,
+		});
+		if (fallback !== undefined) {
+			return fallback;
 		}
 		const available = reminderBudget(host);
 		if (available !== undefined) {
