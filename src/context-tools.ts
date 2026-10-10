@@ -94,7 +94,7 @@ export function registerContextTools(
 		label: "Context Remaining",
 		...toolCards("get_context_remaining"),
 		description:
-			"Estimate tokens left before Pi's automatic rollover and the configured context limit. Check before reporting remaining space or changing your work plan because of context limits. A checkpoint reminder already arrives before rollover; no routine checks are needed.",
+			"Estimate tokens left before Pi's automatic rollover and the configured context limit. Check before reporting remaining space or changing your work plan because of context limits. A checkpoint reminder may arrive before rollover on a working turn; no routine checks are needed.",
 		promptSnippet:
 			"verify remaining context before reporting a token count or changing plans because of context limits",
 		parameters: Type.Object({}),

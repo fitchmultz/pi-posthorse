@@ -84,7 +84,7 @@ function automaticGuidance(budget: Budget | undefined, enabled: boolean): string
 		budget === undefined
 			? ""
 			: ` The rollover line is ${budget.rolloverAt.toLocaleString("en-US")} tokens used under the available Pi settings.`;
-	return `Automatic rollover follows Pi's compaction setting.${line} At most one checkpoint reminder may arrive before the rollover line (${deadline}); when it does, stop normal work, ${CHECKPOINT_STEPS}.`;
+	return `Automatic rollover follows Pi's compaction setting.${line} At most one checkpoint reminder may arrive at the end of a working turn before the rollover line (${deadline}), never on a turn that ends the run; when it does, stop normal work, ${CHECKPOINT_STEPS}.`;
 }
 export function buildGuidance(ctx: PolicyContext): string {
 	const budget = budgetFor(ctx);

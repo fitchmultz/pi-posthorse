@@ -822,7 +822,7 @@ test("default file extension keeps guidance, reminders and explicit reset despit
 	h.faux.setResponses([
 		(ctx) => {
 			requests.push(ctx.messages);
-			return fauxAssistantMessage("First response in reminder band.");
+			return toolTurn(fauxToolCall("get_context_remaining", {}));
 		},
 		(ctx) => {
 			requests.push(ctx.messages);
