@@ -4,9 +4,13 @@
  * Pi owns persisted retain-none context boundaries. Posthorse owns reminder and
  * rollover policy, bounded recovery, durable notes, and history retrieval.
  */
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+	SettingsManager,
+	type ExtensionAPI,
+	type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { registerPosthorseMessages } from "./ui.ts";
-import { persistedPolicy, policySnapshot } from "./src/budget.ts";
+import { policySnapshot } from "./src/budget.ts";
 import type { CompactionPolicy, PolicyReader } from "./src/contracts.ts";
 import { registerHistory } from "./src/history.ts";
 import { safeJsonStringify } from "./src/message-text.ts";
@@ -32,13 +36,14 @@ function activeToolTokens(pi: ExtensionAPI): number {
 			0,
 		);
 }
-/** SDK hosts can inject live policy; CLI hosts use the persisted settings snapshot. */
-export function createPosthorse(
-	getPolicy: PolicyReader = persistedPolicy,
-): (pi: ExtensionAPI) => void {
+/** Use Pi's live effective settings by default; SDK hosts can inject a policy reader. */
+export function createPosthorse(getPolicy?: PolicyReader): (pi: ExtensionAPI) => void {
 	return (pi) => {
+		const readPolicy: PolicyReader =
+			getPolicy ??
+			((ctx) => SettingsManager.inMemory(pi.getSettings()).getCompactionSettings(ctx.model));
 		const policy = (ctx: ExtensionContext, livePolicy?: CompactionPolicy) =>
-			policySnapshot(ctx, getPolicy, livePolicy);
+			policySnapshot(ctx, readPolicy, livePolicy);
 		const toolTokens = () => activeToolTokens(pi);
 		const pages = new PageReservations(toolTokens);
 		registerPosthorseMessages(pi);

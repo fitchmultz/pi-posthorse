@@ -94,7 +94,7 @@ async function fixture(t, options = {}) {
 				pi.registerProvider(faux.provider);
 				options.extension?.(pi);
 			},
-			createPosthorse((ctx) => settingsManager.getCompactionSettings(ctx.model)),
+			createPosthorse(),
 		],
 	});
 	await resourceLoader.reload();
@@ -145,6 +145,7 @@ async function loadedHistory(t) {
 	assert.deepEqual(errors, []);
 	assert.equal(extensions.length, 1);
 	const extension = extensions[0];
+	runtime.getSettings = () => ({});
 	runtime.getAllTools = () => [...extension.tools.values()].map((tool) => tool.definition);
 	runtime.getActiveTools = () => runtime.getAllTools().map((tool) => tool.name);
 	const history = extension.tools.get("history").definition;

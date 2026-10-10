@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Read guidance, reminder and budget policy from Pi's live effective settings, preserving runtime
+  and per-model overrides, defaults and validation. Malformed settings files no longer break
+  continuing-session guidance or reminders. Manual file edits take effect when Pi refreshes its
+  live settings, matching Pi's own compaction; SDK policy injection remains available.
+
 ## 0.8.2 — 2026-10-09
 
 - Extract history content lazily: newest-first branch searches stop normalization once a page and
