@@ -1792,6 +1792,7 @@ for (const start of ["explicit", "automatic", "replaced owner", "omitted owner"]
 			const owner = h.sessionManager
 				.getBranch()
 				.find((entry) => entry.message?.role === "user");
+			assert.match(last, /Selected owner and coordination inputs \(chronological\):/);
 			assert.match(
 				last,
 				/owner input; carried from an earlier window, possibly already handled; not current progress/,

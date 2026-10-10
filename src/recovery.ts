@@ -401,15 +401,15 @@ export function buildAutoHandoff(
 			})),
 		);
 	}
-	const currentHeader =
-		records.length > 0
-			? "Current-window inputs (chronological):"
+	const inputHeader =
+		fixed.length > 0
+			? "Selected owner and coordination inputs (chronological):"
 			: "No selected current-window owner or visible coordination inputs were found.";
 	const batch = recoverableToolResults(projectedToolEntries(entries, projected));
 	const header = batchHeader(batch);
 	const minimum = [
 		PREAMBLE,
-		currentHeader,
+		inputHeader,
 		...fixed.map((record) => formatRecord(record, 0)),
 		header,
 		priorCheckpoint(priorWindow, 0),
@@ -427,7 +427,7 @@ export function buildAutoHandoff(
 		(history.skipped.length > 0 ? 1 : 0);
 	const fixedBudget = Math.max(
 		0,
-		maxChars - joined([PREAMBLE, currentHeader, plan.bare]).length - HANDOFF_OVERHEAD_RESERVE,
+		maxChars - joined([PREAMBLE, inputHeader, plan.bare]).length - HANDOFF_OVERHEAD_RESERVE,
 	);
 	const fixedLimit =
 		count > 0
@@ -439,7 +439,7 @@ export function buildAutoHandoff(
 	]);
 	const fixedParts = [
 		PREAMBLE,
-		currentHeader,
+		inputHeader,
 		...fixed.map((record) => formatRecord(record, fixedLimit)),
 	];
 	const renderedBatch = renderBatch(plan, fixedParts, prior, maxChars);
