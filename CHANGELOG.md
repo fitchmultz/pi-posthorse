@@ -6,6 +6,10 @@
   and per-model overrides, defaults and validation. Malformed settings files no longer break
   continuing-session guidance or reminders. Manual file edits take effect when Pi refreshes its
   live settings, matching Pi's own compaction; SDK policy injection remains available.
+- Roll over fresh compaction windows at completed turn end when known usage reaches the enabled,
+  supported threshold and no new projected turn-start input makes native preparation eligible.
+  Preserve explicit resets and final-answer settlement; leave native overflow recovery unchanged.
+  Document the eager recovery record's projection-editing extension ordering contract.
 
 ## 0.8.2 — 2026-10-09
 
