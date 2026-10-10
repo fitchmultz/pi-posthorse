@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- Roll over fresh compaction windows at completed turn end when known usage reaches the enabled,
-  supported threshold and no new projected turn-start input makes native preparation eligible.
-  Preserve explicit resets and final-answer settlement; leave native overflow recovery unchanged.
-  Document the eager recovery record's projection-editing extension ordering contract.
+- Own threshold rollover in fresh compaction windows without new projected turn-start input,
+  at completed turn end when known usage reaches the enabled, supported threshold.
+  Preserve explicit resets, final-answer settlement, and native overflow/truncated-response recovery.
+  Defer for earlier context-edit drafts and document the eager recovery record's later-editor contract.
 
 ## 0.8.2 — 2026-10-09
 

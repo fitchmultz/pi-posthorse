@@ -186,15 +186,18 @@ async function fixture(t, options = {}) {
 }
 
 function registerDump(pi, terminate = false, size = 600_000, image) {
+	let dumps = 0;
 	pi.registerTool({
 		name: "dump",
 		label: "Dump",
 		description: "Oversized local output",
 		parameters: { type: "object", properties: {} },
 		async execute() {
+			const chars =
+				typeof size === "number" ? size : size[Math.min(dumps++, size.length - 1)];
 			return {
 				content: [
-					{ type: "text", text: `DUMP_HEAD ${"x".repeat(size)} DUMP_TAIL` },
+					{ type: "text", text: `DUMP_HEAD ${"x".repeat(chars)} DUMP_TAIL` },
 					...(image ? [image] : []),
 				],
 				details: {},
@@ -1554,29 +1557,10 @@ for (const keepRecentTokens of [20_000, 1]) {
 	for (const start of ["automatic", "explicit"]) {
 		for (const size of [350_000, 450_000]) {
 			test(`fresh-window threshold protects the next request (${start}, ${size} chars, keepRecentTokens=${keepRecentTokens})`, async (t) => {
-				let dumps = 0;
 				const h = await fixture(t, {
 					keepRecentTokens,
 					extension(pi) {
-						pi.registerTool({
-							name: "dump",
-							label: "Dump",
-							description: "Local output",
-							parameters: { type: "object", properties: {} },
-							async execute() {
-								const chars =
-									start === "automatic" && dumps++ === 0 ? 600_000 : size;
-								return {
-									content: [
-										{
-											type: "text",
-											text: `DUMP_HEAD ${"x".repeat(chars)} DUMP_TAIL`,
-										},
-									],
-									details: {},
-								};
-							},
-						});
+						registerDump(pi, false, start === "automatic" ? [600_000, size] : size);
 					},
 				});
 				let third;
@@ -1696,6 +1680,72 @@ test("earlier turn-start drafts leave fresh-window compaction Pi-owned", async (
 	assert.equal(intercepted, 1, "the native automatic hook owns this eligible span");
 	assert.equal(boundaries(h).length, 2);
 	assert.match(boundaries(h)[1].summary, /NEW_TURN_START_DRAFT/);
+	assert.equal(h.faux.state.callCount, 3);
+});
+
+test("fresh-window truncated answers keep native omit-and-retry recovery", async (t) => {
+	const intercepted = [];
+	const h = await fixture(t, {
+		models: [{ id: "official-posthorse", contextWindow: 100_000, maxTokens: 30_000 }],
+		extension(pi) {
+			registerDump(pi, false, [40_000, 240_000]);
+			pi.on("session_before_compact", (event) => {
+				intercepted.push({ reason: event.reason, willRetry: event.willRetry });
+			});
+		},
+	});
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Continue." })),
+		toolTurn(fauxToolCall("dump", {})),
+		toolTurn(fauxToolCall("dump", {})),
+		fauxAssistantMessage("y".repeat(80_000), { stopReason: "length" }),
+		fauxAssistantMessage("RECOVERED"),
+	]);
+	await h.session.prompt("Inspect.");
+	assert.deepEqual(intercepted, [{ reason: "overflow", willRetry: true }]);
+	assert.equal(h.faux.state.callCount, 5);
+	const last = h.sessionManager
+		.getBranch()
+		.findLast((entry) => entry.message?.role === "assistant").message;
+	assert.equal(last.stopReason, "stop");
+	assert.equal(textOf(last), "RECOVERED");
+});
+
+test("earlier redaction drafts defer fallback and never copy unredacted evidence", async (t) => {
+	const h = await fixture(t, {
+		extension(pi) {
+			registerDump(pi, false, 350_000);
+			pi.on("turn_end", (event) => {
+				const index = event.toolResults.findIndex((result) => result.toolName === "dump");
+				return index < 0
+					? undefined
+					: {
+							entries: [
+								...event.entries,
+								{
+									type: "context_edit",
+									targetId: event.toolResultEntryIds[index],
+									replacement: { content: [{ type: "text", text: "REDACTED" }] },
+								},
+							],
+						};
+			});
+		},
+	});
+	let third;
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Continue." })),
+		toolTurn(fauxToolCall("dump", {})),
+		(ctx) => {
+			third = ctx.messages;
+			return fauxAssistantMessage("Done.");
+		},
+	]);
+	await h.session.prompt("Inspect.");
+	assert.equal(boundaries(h).length, 1, "the committed redaction shrinks usage below threshold");
+	assert.match(JSON.stringify(third), /REDACTED/);
+	assert.doesNotMatch(JSON.stringify(third), /DUMP_HEAD/);
+	assert.ok(boundaries(h).every((entry) => !entry.summary.includes("DUMP_HEAD")));
 	assert.equal(h.faux.state.callCount, 3);
 });
 
