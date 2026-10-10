@@ -1,5 +1,6 @@
 import {
 	AUTO_HANDOFF_PREFIX,
+	isRecord,
 	isReminderType,
 	type EntryLike,
 	type ProjectedEntry,
@@ -114,19 +115,13 @@ function priorCheckpoint(entry: EntryLike | undefined, limit: number): string | 
 	}
 	const id = entry.id?.slice(0, 120) ?? "unknown";
 	const header = `[older checkpoint; possibly stale | context-window entry ${id}]`;
-	return boundedBlock(
-		header,
-		handoff.startsWith(AUTO_HANDOFF_PREFIX)
-			? `Prior automatic recovery text is not nested here. Use history read with entry ${id} if needed.`
-			: handoff,
-		limit,
-	);
+	return boundedBlock(header, handoff, limit);
 }
 function projectedCurrent(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
+	current: readonly EntryLike[] = entries.slice(contextStart(entries).start),
 ): EntryLike[] {
-	const current = entries.slice(contextStart(entries).start);
 	const edits = contextEdits(entries);
 	const omittedIds = new Set(
 		projected
@@ -197,6 +192,72 @@ function anchors(records: readonly RecoveryRecord[]): {
 		fixed: records.filter((record) => selected.has(record)),
 		others: records.filter((record) => !selected.has(record)),
 	};
+}
+function automaticBoundary(entry: EntryLike | undefined): boolean {
+	if (
+		entry === undefined ||
+		windowHandoff(entry)?.trim().startsWith(AUTO_HANDOFF_PREFIX) !== true
+	) {
+		return false;
+	}
+	return (
+		entry.type === "context_window" ||
+		(isRecord(entry.details) &&
+			entry.details.posthorse === 1 &&
+			(entry.details.reason === "threshold" || entry.details.reason === "overflow"))
+	);
+}
+function recoveryAncestry(
+	entries: readonly EntryLike[],
+	projected: readonly ProjectedEntry[],
+	ownerQuestionRegistered: boolean,
+): {
+	readonly checkpoint?: EntryLike;
+	readonly carried: readonly RecoveryRecord[];
+	readonly skipped: readonly string[];
+} {
+	let prefix = entries;
+	let boundary = contextStart(prefix).boundary;
+	const skipped: string[] = [];
+	while (automaticBoundary(boundary) && boundary !== undefined) {
+		skipped.push(boundary.id?.slice(0, 120) ?? "unknown");
+		prefix = prefix.slice(0, prefix.indexOf(boundary));
+		const window = contextStart(prefix);
+		const restored = projectedCurrent(entries, projected, prefix.slice(window.start));
+		const historical = restored.map((sourceEntry) => ({
+			sourceEntry,
+			messages: sourceEntry.message === undefined ? [] : [sourceEntry.message],
+		}));
+		const owners = ownerRecords(restored, historical, ownerQuestionRegistered).filter(
+			(record) => record.kind === "owner",
+		);
+		if (owners.length > 0) {
+			return {
+				checkpoint: automaticBoundary(window.boundary) ? undefined : window.boundary,
+				carried: anchors(owners).fixed,
+				skipped,
+			};
+		}
+		boundary = window.boundary;
+	}
+	return { checkpoint: boundary, carried: [], skipped };
+}
+function skippedRecords(ids: readonly string[], limit: number): string | undefined {
+	if (ids.length === 0) {
+		return undefined;
+	}
+	let names = ids[0];
+	let count = 1;
+	while (count < ids.length) {
+		const next = `, ${ids[count]}`;
+		if (names.length + next.length > limit) {
+			break;
+		}
+		names += next;
+		count++;
+	}
+	const omitted = ids.length - count;
+	return `Earlier automatic records skipped (not nested; use history read): ${names}${omitted > 0 ? `; ${omitted} earlier record(s) not listed.` : ""}`;
 }
 function projectedToolEntries(
 	entries: readonly EntryLike[],
@@ -324,25 +385,35 @@ export function buildAutoHandoff(
 	maxChars: number,
 	ownerQuestionRegistered: boolean,
 ): string {
-	const priorWindow = contextStart(entries).boundary;
+	const history = recoveryAncestry(entries, projected, ownerQuestionRegistered);
+	const priorWindow = history.checkpoint;
 	const records = ownerRecords(
 		projectedCurrent(entries, projected),
 		projected,
 		ownerQuestionRegistered,
 	);
 	const { fixed, others } = anchors(records);
-	const currentHeader =
-		records.length > 0
-			? "Current-window inputs (chronological):"
+	if (!records.some((record) => record.kind === "owner")) {
+		fixed.unshift(
+			...history.carried.map((record) => ({
+				...record,
+				label: `${record.label}; carried from an earlier window, possibly already handled; not current progress`,
+			})),
+		);
+	}
+	const inputHeader =
+		fixed.length > 0
+			? "Selected owner and coordination inputs (chronological):"
 			: "No selected current-window owner or visible coordination inputs were found.";
 	const batch = recoverableToolResults(projectedToolEntries(entries, projected));
 	const header = batchHeader(batch);
 	const minimum = [
 		PREAMBLE,
-		currentHeader,
+		inputHeader,
 		...fixed.map((record) => formatRecord(record, 0)),
 		header,
 		priorCheckpoint(priorWindow, 0),
+		skippedRecords(history.skipped, 0),
 	];
 	const plan = planBatch(
 		batch,
@@ -350,19 +421,25 @@ export function buildAutoHandoff(
 		Math.max(0, maxChars - joined(minimum).length - HANDOFF_OVERHEAD_RESERVE),
 	);
 	const handoff = windowHandoff(priorWindow)?.trim();
-	const count = fixed.length + (handoff === undefined || handoff === "" ? 0 : 1);
+	const count =
+		fixed.length +
+		(handoff === undefined || handoff === "" ? 0 : 1) +
+		(history.skipped.length > 0 ? 1 : 0);
 	const fixedBudget = Math.max(
 		0,
-		maxChars - joined([PREAMBLE, currentHeader, plan.bare]).length - HANDOFF_OVERHEAD_RESERVE,
+		maxChars - joined([PREAMBLE, inputHeader, plan.bare]).length - HANDOFF_OVERHEAD_RESERVE,
 	);
 	const fixedLimit =
 		count > 0
 			? Math.min(MAX_RECOVERY_RECORD_CHARS, Math.floor(fixedBudget / count))
 			: MAX_RECOVERY_RECORD_CHARS;
-	const prior = priorCheckpoint(priorWindow, fixedLimit);
+	const prior = joined([
+		priorCheckpoint(priorWindow, fixedLimit),
+		skippedRecords(history.skipped, fixedLimit),
+	]);
 	const fixedParts = [
 		PREAMBLE,
-		currentHeader,
+		inputHeader,
 		...fixed.map((record) => formatRecord(record, fixedLimit)),
 	];
 	const renderedBatch = renderBatch(plan, fixedParts, prior, maxChars);

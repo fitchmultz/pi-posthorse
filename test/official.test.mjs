@@ -170,15 +170,18 @@ async function fixture(t, options = {}) {
 }
 
 function registerDump(pi, terminate = false, size = 600_000, image) {
+	let dumps = 0;
 	pi.registerTool({
 		name: "dump",
 		label: "Dump",
 		description: "Oversized local output",
 		parameters: { type: "object", properties: {} },
 		async execute() {
+			const chars =
+				typeof size === "number" ? size : size[Math.min(dumps++, size.length - 1)];
 			return {
 				content: [
-					{ type: "text", text: `DUMP_HEAD ${"x".repeat(size)} DUMP_TAIL` },
+					{ type: "text", text: `DUMP_HEAD ${"x".repeat(chars)} DUMP_TAIL` },
 					...(image ? [image] : []),
 				],
 				details: {},
@@ -622,7 +625,7 @@ test("oversized tool output rolls over without credentials and repeated resets d
 		assert.ok(JSON.stringify(request).length < 30_000);
 	}
 	assert.match(boundaries(h)[0].summary, /OWNER_APPROVAL/);
-	assert.match(boundaries(h)[1].summary, /Prior automatic recovery text is not nested/);
+	assert.match(boundaries(h)[1].summary, /Earlier automatic records skipped/);
 	assert.equal(
 		boundaries(h)[1].summary.split("Automatic context rollover recovery record.").length,
 		2,
@@ -1604,36 +1607,291 @@ for (const reason of ["overflow", "length"]) {
 }
 
 for (const keepRecentTokens of [20_000, 1]) {
-	test(`second large tool result obeys native after-reset eligibility (keepRecentTokens=${keepRecentTokens})`, async (t) => {
-		const h = await fixture(t, { keepRecentTokens, extension: registerDump });
-		let second, third;
-		h.faux.setResponses([
-			toolTurn(fauxToolCall("dump", {})),
-			(ctx) => {
-				second = ctx.messages;
-				return toolTurn(fauxToolCall("dump", {}));
+	for (const start of ["automatic", "explicit"]) {
+		for (const size of [350_000, 450_000]) {
+			test(`fresh-window threshold protects the next request (${start}, ${size} chars, keepRecentTokens=${keepRecentTokens})`, async (t) => {
+				const h = await fixture(t, {
+					keepRecentTokens,
+					extension(pi) {
+						registerDump(pi, false, start === "automatic" ? [600_000, size] : size);
+					},
+				});
+				let third;
+				h.faux.setResponses([
+					toolTurn(
+						start === "automatic"
+							? fauxToolCall("dump", {})
+							: fauxToolCall("new_context", {
+									handoff: "Continue inspecting the next output.",
+								}),
+					),
+					toolTurn(fauxToolCall("dump", {})),
+					(ctx) => {
+						third = ctx.messages;
+						return ctx.messages.some(
+							(message) =>
+								message.role === "toolResult" && textOf(message).length > size,
+						) && size === 450_000
+							? overflow()
+							: fauxAssistantMessage("Done.");
+					},
+				]);
+				await h.session.prompt("Inspect two outputs.");
+				assert.equal(third.filter((message) => message.role !== "system").length, 1);
+				assert.ok(!third.some((message) => message.role === "toolResult"));
+				assert.equal(boundaries(h).length, 2);
+				assert.equal(
+					boundaries(h)[0].details.reason,
+					start === "automatic" ? "threshold" : "explicit",
+				);
+				assert.equal(boundaries(h)[1].details.reason, "threshold");
+				assert.match(boundaries(h)[1].summary, /DUMP_HEAD/);
+				assert.match(boundaries(h)[1].summary, /DUMP_TAIL/);
+				assert.equal(h.faux.state.callCount, 3);
+				assert.equal(
+					h.sessionManager
+						.getBranch()
+						.findLast((entry) => entry.message?.role === "assistant").message
+						.stopReason,
+					"stop",
+				);
+			});
+		}
+	}
+}
+
+for (const unavailable of ["unknown usage", "disabled policy"]) {
+	test(`fresh-window fallback skips ${unavailable}`, async (t) => {
+		const h = await fixture(t, {
+			extension(pi) {
+				registerDump(pi, false, 350_000);
+				pi.on("turn_end", (event, ctx) => {
+					if (event.toolResults.some((result) => result.toolName === "dump")) {
+						if (unavailable === "unknown usage") {
+							t.mock.method(ctx, "getContextUsage", () => ({
+								tokens: null,
+								contextWindow: 100_000,
+								percent: null,
+							}));
+						} else {
+							h.settingsManager.applyOverrides({ compaction: { enabled: false } });
+						}
+					}
+				});
 			},
+		});
+		let third;
+		h.faux.setResponses([
+			toolTurn(fauxToolCall("new_context", { handoff: "Continue." })),
+			toolTurn(fauxToolCall("dump", {})),
 			(ctx) => {
 				third = ctx.messages;
 				return fauxAssistantMessage("Done.");
 			},
 		]);
-		await h.session.prompt("Inspect two outputs.");
-		assert.equal(second.filter((message) => message.role !== "system").length, 1);
+		await h.session.prompt("Inspect.");
 		assert.ok(
 			third.some(
-				(message) => message.role === "toolResult" && textOf(message).length > 600_000,
+				(message) => message.role === "toolResult" && textOf(message).length > 350_000,
 			),
-			"native preparation can decline the second operation without a new user span",
-		);
-		assert.equal(
-			boundaries(h).length,
-			2,
-			"the final response can trigger a later native operation",
 		);
 		assert.equal(h.faux.state.callCount, 3);
 	});
 }
+
+test("earlier turn-start drafts leave fresh-window compaction Pi-owned", async (t) => {
+	let intercepted = 0;
+	const h = await fixture(t, {
+		extension(pi) {
+			registerDump(pi, false, 350_000);
+			pi.on("session_before_compact", () => {
+				intercepted++;
+			});
+			pi.on("turn_end", (event) =>
+				event.toolResults.some((result) => result.toolName === "dump")
+					? {
+							entries: [
+								...event.entries,
+								{
+									type: "custom_message",
+									customType: "coordination",
+									content: "NEW_TURN_START_DRAFT",
+									display: true,
+								},
+							],
+						}
+					: undefined,
+			);
+		},
+	});
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Continue." })),
+		toolTurn(fauxToolCall("dump", {})),
+		fauxAssistantMessage("Done."),
+	]);
+	await h.session.prompt("Inspect.");
+	assert.equal(intercepted, 1, "the native automatic hook owns this eligible span");
+	assert.equal(boundaries(h).length, 2);
+	assert.match(boundaries(h)[1].summary, /NEW_TURN_START_DRAFT/);
+	assert.equal(h.faux.state.callCount, 3);
+});
+
+for (const start of ["explicit", "automatic", "replaced owner", "omitted owner"]) {
+	test(`automatic chains preserve durable intent (${start})`, async (t) => {
+		let editId;
+		const h = await fixture(t, {
+			extension(pi) {
+				registerDump(pi, false, start === "explicit" ? 350_000 : [600_000, 350_000]);
+				pi.on("turn_end", (event) => {
+					if (
+						(start === "replaced owner" || start === "omitted owner") &&
+						boundaries(h).length === 1 &&
+						event.toolResults.some((result) => result.toolName === "dump")
+					) {
+						const owner = h.sessionManager
+							.getBranch()
+							.find((entry) => entry.message?.role === "user");
+						editId = h.sessionManager.appendContextEdit(
+							owner.id,
+							start === "omitted owner"
+								? null
+								: { content: "REPLACED_OWNER_INTENT: no bash." },
+						);
+					}
+				});
+			},
+		});
+		h.faux.setResponses([
+			toolTurn(
+				start === "explicit"
+					? fauxToolCall("new_context", {
+							handoff: "EXPLICIT_APPROVED_HANDOFF: continue without bash.",
+						})
+					: fauxToolCall("dump", {}),
+			),
+			toolTurn(fauxToolCall("dump", {})),
+			...(start === "explicit" ? [toolTurn(fauxToolCall("dump", {}))] : []),
+			fauxAssistantMessage("Done."),
+		]);
+		await h.session.prompt("ORIGINAL_OWNER_INTENT: inspect without bash.");
+		const records = boundaries(h);
+		const last = records.at(-1).summary;
+		assert.equal(records.length, start === "explicit" ? 3 : 2);
+		assert.equal(h.faux.state.callCount, start === "explicit" ? 4 : 3);
+		assert.ok(last.length <= 20_000);
+		assert.match(last, /Earlier automatic records skipped/);
+		assert.ok(last.includes(records.at(-2).id));
+		assert.doesNotMatch(last, /Prior automatic recovery text is not nested/);
+		if (start === "explicit") {
+			assert.match(last, /EXPLICIT_APPROVED_HANDOFF: continue without bash/);
+			assert.ok(last.includes(records[0].id));
+			assert.doesNotMatch(last, /ORIGINAL_OWNER_INTENT/);
+		} else if (start === "omitted owner") {
+			assert.doesNotMatch(last, /ORIGINAL_OWNER_INTENT|carried from an earlier window/);
+		} else {
+			const owner = h.sessionManager
+				.getBranch()
+				.find((entry) => entry.message?.role === "user");
+			assert.match(last, /Selected owner and coordination inputs \(chronological\):/);
+			assert.match(
+				last,
+				/owner input; carried from an earlier window, possibly already handled; not current progress/,
+			);
+			assert.ok(last.includes(owner.timestamp));
+			if (start === "replaced owner") {
+				assert.match(last, /REPLACED_OWNER_INTENT: no bash/);
+				assert.doesNotMatch(last, /ORIGINAL_OWNER_INTENT/);
+				assert.ok(last.includes(`entry ${editId}`));
+			} else {
+				assert.match(last, /ORIGINAL_OWNER_INTENT: inspect without bash/);
+				assert.ok(last.includes(`entry ${owner.id}`));
+			}
+		}
+		const firstDump = h.sessionManager
+			.getBranch()
+			.find((entry) => entry.message?.toolName === "dump");
+		assert.ok(!last.includes(firstDump.id), "older automatic tool evidence is never nested");
+	});
+}
+
+test("fresh-window truncated answers keep native omit-and-retry recovery", async (t) => {
+	const intercepted = [];
+	const h = await fixture(t, {
+		models: [{ id: "official-posthorse", contextWindow: 100_000, maxTokens: 30_000 }],
+		extension(pi) {
+			registerDump(pi, false, [40_000, 240_000]);
+			pi.on("session_before_compact", (event) => {
+				intercepted.push({ reason: event.reason, willRetry: event.willRetry });
+			});
+		},
+	});
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Continue." })),
+		toolTurn(fauxToolCall("dump", {})),
+		toolTurn(fauxToolCall("dump", {})),
+		fauxAssistantMessage("y".repeat(80_000), { stopReason: "length" }),
+		fauxAssistantMessage("RECOVERED"),
+	]);
+	await h.session.prompt("Inspect.");
+	assert.deepEqual(intercepted, [{ reason: "overflow", willRetry: true }]);
+	assert.equal(h.faux.state.callCount, 5);
+	const last = h.sessionManager
+		.getBranch()
+		.findLast((entry) => entry.message?.role === "assistant").message;
+	assert.equal(last.stopReason, "stop");
+	assert.equal(textOf(last), "RECOVERED");
+});
+
+test("earlier redaction drafts defer fallback and never copy unredacted evidence", async (t) => {
+	const h = await fixture(t, {
+		extension(pi) {
+			registerDump(pi, false, 350_000);
+			pi.on("turn_end", (event) => {
+				const index = event.toolResults.findIndex((result) => result.toolName === "dump");
+				return index < 0
+					? undefined
+					: {
+							entries: [
+								...event.entries,
+								{
+									type: "context_edit",
+									targetId: event.toolResultEntryIds[index],
+									replacement: { content: [{ type: "text", text: "REDACTED" }] },
+								},
+							],
+						};
+			});
+		},
+	});
+	let third;
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Continue." })),
+		toolTurn(fauxToolCall("dump", {})),
+		(ctx) => {
+			third = ctx.messages;
+			return fauxAssistantMessage("Done.");
+		},
+	]);
+	await h.session.prompt("Inspect.");
+	assert.equal(boundaries(h).length, 1, "the committed redaction shrinks usage below threshold");
+	assert.match(JSON.stringify(third), /REDACTED/);
+	assert.doesNotMatch(JSON.stringify(third), /DUMP_HEAD/);
+	assert.ok(boundaries(h).every((entry) => !entry.summary.includes("DUMP_HEAD")));
+	assert.equal(h.faux.state.callCount, 3);
+});
+
+test("fresh-window threshold after a final answer does not request another response", async (t) => {
+	const h = await fixture(t);
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Finish in the next window." })),
+		fauxAssistantMessage("x".repeat(350_000)),
+		fauxAssistantMessage("MUST_NOT_RUN"),
+	]);
+	await h.session.prompt("Finish.");
+	assert.equal(h.faux.state.callCount, 2);
+	assert.equal(boundaries(h).length, 2);
+	assert.equal(boundaries(h)[1].details.reason, "threshold");
+});
 
 test("note publication rejects directory-only symlink targets and traversal through a file", async (t) => {
 	const h = await fixture(t);

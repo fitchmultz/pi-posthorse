@@ -637,13 +637,17 @@ for (const outcome of ["answer", "cancelled", "error"]) {
 				});
 			},
 		});
-		let nextRequest;
+		let nextRequest, chainedRequest;
 		h.faux.setResponses([
 			fauxAssistantMessage([fauxToolCall("ask_question", {}), fauxToolCall("dump", {})], {
 				stopReason: "toolUse",
 			}),
 			(ctx) => {
 				nextRequest = JSON.stringify(ctx.messages);
+				return fauxAssistantMessage([fauxToolCall("dump", {})], { stopReason: "toolUse" });
+			},
+			(ctx) => {
+				chainedRequest = JSON.stringify(ctx.messages);
 				return fauxAssistantMessage("Done.");
 			},
 		]);
@@ -651,13 +655,27 @@ for (const outcome of ["answer", "cancelled", "error"]) {
 		const boundary = h.sessionManager
 			.getBranch()
 			.filter((entry) => entry.type === "compaction" && entry.details?.posthorse === 1);
-		assert.equal(boundary.length, 1);
+		assert.equal(boundary.length, 2);
 		for (const text of [boundary[0].summary, nextRequest]) {
 			if (outcome === "error") {
 				assert.doesNotMatch(text, /owner answer via ask_question/);
 				assert.match(text, /OWNER_QUESTION_FAILURE/);
 			} else {
 				assert.match(text, /owner answer via ask_question/);
+				assert.match(
+					text,
+					outcome === "cancelled"
+						? /Question cancelled by owner/
+						: /OWNER_APPROVED_INSPECTION/,
+				);
+			}
+		}
+		for (const text of [boundary[1].summary, chainedRequest]) {
+			assert.match(text, /carried from an earlier window/);
+			if (outcome === "error") {
+				assert.doesNotMatch(text, /owner answer via ask_question|OWNER_QUESTION_FAILURE/);
+			} else {
+				assert.match(text, /owner answer via ask_question; carried from an earlier window/);
 				assert.match(
 					text,
 					outcome === "cancelled"
