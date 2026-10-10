@@ -1095,10 +1095,127 @@ for (const [enabled, reads] of [
 	});
 }
 
+for (const [continuation, stopReason] of [
+	["none", "stop"],
+	["none", "length"],
+	["steer", "stop"],
+	["followUp", "stop"],
+	["boundary", "stop"],
+]) {
+	test(`public answer in the reminder band preserves native settlement (continuation=${continuation}, stopReason=${stopReason})`, async (t) => {
+		const h = await fixture(t, {
+			extension(pi) {
+				if (continuation === "steer" || continuation === "followUp") {
+					pi.on("turn_end", (event) => {
+						if (textOf(event.message) === "Final report.") {
+							pi.sendUserMessage("Continue the requested work.", {
+								deliverAs: continuation,
+							});
+						}
+					});
+				}
+				if (continuation === "boundary") {
+					pi.on("turn_end", (event) => {
+						if (textOf(event.message) === "Final report.") {
+							return {
+								entries: [
+									...event.entries,
+									{
+										type: "custom_message",
+										customType: "continue-work",
+										content: "Continue the requested work.",
+										display: false,
+									},
+								],
+								continue: true,
+							};
+						}
+						return;
+					});
+				}
+			},
+		});
+		const requests = [];
+		h.faux.setResponses([
+			(ctx) => {
+				requests.push(ctx.messages);
+				return fauxAssistantMessage("Final report.", { stopReason });
+			},
+			(ctx) => {
+				requests.push(ctx.messages);
+				return fauxAssistantMessage("Continued report.");
+			},
+			(ctx) => {
+				requests.push(ctx.messages);
+				return fauxAssistantMessage("Checkpoint received.");
+			},
+		]);
+		await h.session.prompt("p".repeat(305_000));
+		const reminders = () =>
+			h.sessionManager
+				.getBranch()
+				.filter(
+					(entry) =>
+						entry.type === "custom_message" &&
+						entry.customType === "posthorse-reminder",
+				);
+		if (continuation !== "none") {
+			assert.equal(reminders().length, 1);
+			assert.match(JSON.stringify(requests.slice(1)), /Checkpoint now:/);
+			assert.equal(
+				h.session.messages.findLast((message) => message.role === "assistant").stopReason,
+				"stop",
+			);
+			return;
+		}
+		assert.equal(reminders().length, 0);
+		if (stopReason === "length") {
+			assert.equal(requests.length, 2, "native truncation recovery still retries once");
+			assert.equal(
+				textOf(h.session.messages.findLast((message) => message.role === "assistant")),
+				"Continued report.",
+			);
+			return;
+		}
+		assert.equal(requests.length, 1, "a checkpoint must not wake a finished agent");
+		assert.equal(
+			textOf(h.session.messages.findLast((message) => message.role === "assistant")),
+			"Final report.",
+		);
+		const usage = h.session.getContextUsage();
+		assert.ok(
+			usage.tokens >= 75_255 && usage.tokens < 83_617,
+			"the final answer is inside the reminder band",
+		);
+		h.faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
+				stopReason: "toolUse",
+			}),
+			(ctx) => {
+				requests.push(ctx.messages);
+				return fauxAssistantMessage("Working turn completed.");
+			},
+		]);
+		await h.session.prompt("Continue working.");
+		assert.equal(reminders().length, 1, "a skipped final answer does not consume the reminder");
+		assert.match(JSON.stringify(requests.at(-1)), /Checkpoint now:/);
+		h.faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage("Another working turn completed."),
+		]);
+		await h.session.prompt("Continue working again.");
+		assert.equal(reminders().length, 1, "the reminder is still once per window");
+	});
+}
+
 test("public enabled-to-disabled policy removes the active reminder but keeps its journal entry", async (t) => {
 	const h = await fixture(t);
 	h.faux.setResponses([
-		fauxAssistantMessage("First response in reminder band"),
+		fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
+			stopReason: "toolUse",
+		}),
 		fauxAssistantMessage("Checkpoint reminder received"),
 	]);
 	await h.session.prompt("p".repeat(305_000));
@@ -1151,7 +1268,9 @@ test("public checkpoint reminder reaches the model after Pi compacts inside a ro
 	});
 	let input;
 	h.faux.setResponses([
-		fauxAssistantMessage("First response in reminder band"),
+		fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
+			stopReason: "toolUse",
+		}),
 		(ctx) => {
 			input = JSON.stringify(ctx.messages);
 			return fauxAssistantMessage("Checkpoint reminder received");

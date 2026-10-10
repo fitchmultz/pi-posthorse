@@ -105,6 +105,18 @@ function explicitReset(
 		continue: true,
 	};
 }
+function endsRun(
+	event: TurnEndEvent,
+	ctx: { readonly hasPendingMessages?: () => boolean },
+): boolean {
+	return (
+		event.message.role === "assistant" &&
+		!event.message.content.some((part) => part.type === "toolCall") &&
+		!event.continue &&
+		event.context.pendingMessages.length === 0 &&
+		ctx.hasPendingMessages?.() !== true
+	);
+}
 function reminderBudget(
 	host: PolicyContext,
 ): { readonly budget: Budget; readonly tokens: number } | undefined {
@@ -127,7 +139,15 @@ function reminderBudget(
 function sendReminder(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
-	available: { readonly budget: Budget; readonly tokens: number },
+	available: {
+		readonly budget: Budget;
+		readonly tokens: number;
+		readonly pendingMessages: readonly {
+			readonly role: string;
+			readonly customType?: string;
+			readonly details?: unknown;
+		}[];
+	},
 	reminders: ReminderLookup,
 ): void {
 	const { budget, tokens } = available;
@@ -137,7 +157,15 @@ function sendReminder(
 		contextWindow: budget.contextWindow,
 		reserveTokens: budget.reserveTokens,
 	};
-	if (hasReminder(state.reminders, fingerprint)) {
+	if (
+		hasReminder(state.reminders, fingerprint) ||
+		available.pendingMessages.some(
+			(message) =>
+				message.role === "custom" &&
+				isReminderType(message.customType) &&
+				reminderMatches(message.details, fingerprint),
+		)
+	) {
 		return;
 	}
 	pi.sendMessage(
@@ -412,9 +440,17 @@ export function registerRollover(
 		if (fallback !== undefined) {
 			return fallback;
 		}
+		if (endsRun(event, ctx)) {
+			return;
+		}
 		const available = reminderBudget(host);
 		if (available !== undefined) {
-			sendReminder(pi, ctx, available, reminders);
+			sendReminder(
+				pi,
+				ctx,
+				{ ...available, pendingMessages: event.context.pendingMessages },
+				reminders,
+			);
 		}
 		return;
 	});

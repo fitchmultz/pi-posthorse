@@ -70,6 +70,7 @@ type TestContext = {
 		| undefined;
 	getCompactionSettings: () => { readonly enabled: boolean; readonly reserveTokens: number };
 	getSystemPrompt: () => string;
+	hasPendingMessages?: () => boolean;
 };
 
 /** Fixture branches put nothing in the model's active context unless a test projects entries. */
@@ -251,8 +252,13 @@ function turnEnd(
 ) {
 	requireValue(handlers.get("turn_end"))(
 		{
-			message: { role: "assistant", stopReason: toolResults.length > 0 ? "toolUse" : "stop" },
+			message: {
+				role: "assistant",
+				stopReason: toolResults.length > 0 ? "toolUse" : "stop",
+				content: [],
+			},
 			toolResults,
+			continue: true,
 			entries: [],
 			context: { pendingMessages: [] },
 		},
@@ -665,6 +671,45 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("reminders respect live pending messages and tool calls even with a stop reason", async () => {
+	await Promise.all(
+		[undefined, false, true].map(async (pending) => {
+			const { handlers, messages, context } = await setup();
+			const host = {
+				...usageContext(context, 100_000, 80_000),
+				hasPendingMessages: pending === undefined ? undefined : () => pending,
+			};
+			const event = {
+				message: { role: "assistant", stopReason: "stop", content: [] },
+				toolResults: [],
+				entries: [],
+				continue: false,
+				context: { pendingMessages: [] },
+			};
+			requireValue(handlers.get("turn_end"))(event, host);
+			assert.equal(messages.length, pending === true ? 1 : 0);
+		}),
+	);
+	const { handlers, messages, context } = await setup();
+	requireValue(handlers.get("turn_end"))(
+		{
+			message: {
+				role: "assistant",
+				stopReason: "stop",
+				content: [
+					{ type: "toolCall", id: "id", name: "get_context_remaining", arguments: {} },
+				],
+			},
+			toolResults: [],
+			entries: [],
+			continue: false,
+			context: { pendingMessages: [] },
+		},
+		usageContext(context, 100_000, 80_000),
+	);
+	assert.equal(messages.length, 1, "tool calls make a stop turn a working turn");
 });
 
 test("a large reserve does not send checkpoint reminders in a fresh window", async () => {
