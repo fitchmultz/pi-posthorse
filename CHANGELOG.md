@@ -6,6 +6,12 @@
   and per-model overrides, defaults and validation. Malformed settings files no longer break
   continuing-session guidance or reminders. Manual file edits take effect when Pi refreshes its
   live settings, matching Pi's own compaction; SDK policy injection remains available.
+- Own threshold rollover in fresh compaction windows without new projected turn-start input,
+  at completed turn end when known usage reaches the enabled, supported threshold.
+  Preserve explicit resets, final-answer settlement, and native overflow/truncated-response recovery.
+  Defer for earlier context-edit drafts and document the eager recovery record's later-editor contract.
+  Carry edited owner anchors and the newest reachable explicit/native checkpoint through automatic
+  rollover chains, with bounded history pointers instead of nested automatic tool evidence.
 
 ## 0.8.2 — 2026-10-09
 

@@ -22,6 +22,7 @@ import test from "node:test";
 import { createEditTool, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fixturePolicy, loadFixture, requireValue, record, stringValue } from "./harness.ts";
 import { createPosthorse } from "../index.ts";
+import { buildAutoHandoff } from "../src/recovery.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 import { Type, type TSchema } from "typebox";
 import { Check } from "typebox/value";
@@ -363,9 +364,73 @@ test("new_context requests a turn-boundary reset and automatic rollover builds a
 			handoff: "Automatic context rollover recovery record.\nSECRET NESTED TEXT",
 		},
 	]);
-	assert.match(nonRecursive, /Prior automatic recovery text is not nested/);
-	assert.match(nonRecursive, /entry prior-auto/);
+	assert.match(nonRecursive, /Earlier automatic records skipped/);
+	assert.match(nonRecursive, /prior-auto/);
 	assert.doesNotMatch(nonRecursive, /SECRET NESTED TEXT/);
+});
+
+test("a minimum-budget automatic record keeps a complete history pointer without nested evidence", () => {
+	const boundary = {
+		type: "compaction",
+		id: "deadbeef",
+		firstKeptEntryId: null,
+		details: { posthorse: 1, reason: "threshold" },
+		summary: "Automatic context rollover recovery record.\nOLD_EVIDENCE",
+	};
+	const branches = [
+		[boundary],
+		Array.from({ length: 100 }, (_unused, index) => ({ ...boundary, id: `record-${index}` })),
+	];
+	for (const [index, entries] of branches.entries()) {
+		const handoff = buildAutoHandoff(entries, [], 1_000, false);
+		assert.ok(handoff.length <= 1_000);
+		assert.match(
+			handoff,
+			index === 0 ? /use history read.*deadbeef/ : /use history read.*record-99/,
+		);
+		assert.doesNotMatch(handoff, /OLD_EVIDENCE/);
+		if (index === 1) {
+			assert.match(handoff, /99 earlier record\(s\) not listed/);
+		}
+	}
+});
+
+test("automatic ancestry stops at the nearest owner window without resurrecting superseded intent", async () => {
+	const { handlers, context } = await setup();
+	const automatic = (id: string) => ({
+		type: "compaction",
+		id,
+		firstKeptEntryId: null,
+		details: { posthorse: 1, reason: "threshold" },
+		summary: "Automatic context rollover recovery record.\nSECRET_NESTED_TOOL_EVIDENCE",
+	});
+	const branch = [
+		{
+			type: "message",
+			id: "superseded",
+			message: { role: "user", content: "SUPERSEDED_OWNER_INTENT" },
+		},
+		automatic("auto-1"),
+		{
+			type: "message",
+			id: "nearest-owner",
+			timestamp: "2026-10-10T16:40:00Z",
+			message: {
+				role: "user",
+				content: `CURRENT_OWNER_START ${"x".repeat(15_000)} CURRENT_OWNER_TAIL`,
+			},
+		},
+		automatic("auto-2"),
+		automatic("auto-3"),
+	];
+	const handoff = automaticHandoff(handlers, context, branch);
+	assert.ok(handoff.length <= 20_000);
+	assert.match(handoff, /CURRENT_OWNER_START/);
+	assert.match(handoff, /CURRENT_OWNER_TAIL/);
+	assert.match(handoff, /owner input; carried from an earlier window/);
+	assert.match(handoff, /2026-10-10T16:40:00Z \| entry nearest-owner/);
+	assert.match(handoff, /auto-3, auto-2/);
+	assert.doesNotMatch(handoff, /SUPERSEDED_OWNER_INTENT|SECRET_NESTED_TOOL_EVIDENCE|auto-1/);
 });
 
 test("automatic recovery keeps owner anchors and visible coordination without stale transcript guesses", async () => {
