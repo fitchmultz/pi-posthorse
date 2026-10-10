@@ -363,9 +363,47 @@ test("new_context requests a turn-boundary reset and automatic rollover builds a
 			handoff: "Automatic context rollover recovery record.\nSECRET NESTED TEXT",
 		},
 	]);
-	assert.match(nonRecursive, /Prior automatic recovery text is not nested/);
-	assert.match(nonRecursive, /entry prior-auto/);
+	assert.match(nonRecursive, /Earlier automatic records skipped/);
+	assert.match(nonRecursive, /prior-auto/);
 	assert.doesNotMatch(nonRecursive, /SECRET NESTED TEXT/);
+});
+
+test("automatic ancestry stops at the nearest owner window without resurrecting superseded intent", async () => {
+	const { handlers, context } = await setup();
+	const automatic = (id: string) => ({
+		type: "compaction",
+		id,
+		firstKeptEntryId: null,
+		details: { posthorse: 1, reason: "threshold" },
+		summary: "Automatic context rollover recovery record.\nSECRET_NESTED_TOOL_EVIDENCE",
+	});
+	const branch = [
+		{
+			type: "message",
+			id: "superseded",
+			message: { role: "user", content: "SUPERSEDED_OWNER_INTENT" },
+		},
+		automatic("auto-1"),
+		{
+			type: "message",
+			id: "nearest-owner",
+			timestamp: "2026-10-10T16:40:00Z",
+			message: {
+				role: "user",
+				content: `CURRENT_OWNER_START ${"x".repeat(15_000)} CURRENT_OWNER_TAIL`,
+			},
+		},
+		automatic("auto-2"),
+		automatic("auto-3"),
+	];
+	const handoff = automaticHandoff(handlers, context, branch);
+	assert.ok(handoff.length <= 20_000);
+	assert.match(handoff, /CURRENT_OWNER_START/);
+	assert.match(handoff, /CURRENT_OWNER_TAIL/);
+	assert.match(handoff, /owner input; carried from an earlier window/);
+	assert.match(handoff, /2026-10-10T16:40:00Z \| entry nearest-owner/);
+	assert.match(handoff, /auto-3, auto-2/);
+	assert.doesNotMatch(handoff, /SUPERSEDED_OWNER_INTENT|SECRET_NESTED_TOOL_EVIDENCE|auto-1/);
 });
 
 test("automatic recovery keeps owner anchors and visible coordination without stale transcript guesses", async () => {

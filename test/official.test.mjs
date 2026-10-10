@@ -625,7 +625,7 @@ test("oversized tool output rolls over without credentials and repeated resets d
 		assert.ok(JSON.stringify(request).length < 30_000);
 	}
 	assert.match(boundaries(h)[0].summary, /OWNER_APPROVAL/);
-	assert.match(boundaries(h)[1].summary, /Prior automatic recovery text is not nested/);
+	assert.match(boundaries(h)[1].summary, /Earlier automatic records skipped/);
 	assert.equal(
 		boundaries(h)[1].summary.split("Automatic context rollover recovery record.").length,
 		2,
@@ -1735,6 +1735,83 @@ test("earlier turn-start drafts leave fresh-window compaction Pi-owned", async (
 	assert.match(boundaries(h)[1].summary, /NEW_TURN_START_DRAFT/);
 	assert.equal(h.faux.state.callCount, 3);
 });
+
+for (const start of ["explicit", "automatic", "replaced owner", "omitted owner"]) {
+	test(`automatic chains preserve durable intent (${start})`, async (t) => {
+		let editId;
+		const h = await fixture(t, {
+			extension(pi) {
+				registerDump(pi, false, start === "explicit" ? 350_000 : [600_000, 350_000]);
+				pi.on("turn_end", (event) => {
+					if (
+						(start === "replaced owner" || start === "omitted owner") &&
+						boundaries(h).length === 1 &&
+						event.toolResults.some((result) => result.toolName === "dump")
+					) {
+						const owner = h.sessionManager
+							.getBranch()
+							.find((entry) => entry.message?.role === "user");
+						editId = h.sessionManager.appendContextEdit(
+							owner.id,
+							start === "omitted owner"
+								? null
+								: { content: "REPLACED_OWNER_INTENT: no bash." },
+						);
+					}
+				});
+			},
+		});
+		h.faux.setResponses([
+			toolTurn(
+				start === "explicit"
+					? fauxToolCall("new_context", {
+							handoff: "EXPLICIT_APPROVED_HANDOFF: continue without bash.",
+						})
+					: fauxToolCall("dump", {}),
+			),
+			toolTurn(fauxToolCall("dump", {})),
+			...(start === "explicit" ? [toolTurn(fauxToolCall("dump", {}))] : []),
+			fauxAssistantMessage("Done."),
+		]);
+		await h.session.prompt("ORIGINAL_OWNER_INTENT: inspect without bash.");
+		const records = boundaries(h);
+		const last = records.at(-1).summary;
+		assert.equal(records.length, start === "explicit" ? 3 : 2);
+		assert.equal(h.faux.state.callCount, start === "explicit" ? 4 : 3);
+		assert.ok(last.length <= 20_000);
+		assert.match(last, /Earlier automatic records skipped/);
+		assert.ok(last.includes(records.at(-2).id));
+		assert.doesNotMatch(last, /Prior automatic recovery text is not nested/);
+		if (start === "explicit") {
+			assert.match(last, /EXPLICIT_APPROVED_HANDOFF: continue without bash/);
+			assert.ok(last.includes(records[0].id));
+			assert.doesNotMatch(last, /ORIGINAL_OWNER_INTENT/);
+		} else if (start === "omitted owner") {
+			assert.doesNotMatch(last, /ORIGINAL_OWNER_INTENT|carried from an earlier window/);
+		} else {
+			const owner = h.sessionManager
+				.getBranch()
+				.find((entry) => entry.message?.role === "user");
+			assert.match(
+				last,
+				/owner input; carried from an earlier window, possibly already handled; not current progress/,
+			);
+			assert.ok(last.includes(owner.timestamp));
+			if (start === "replaced owner") {
+				assert.match(last, /REPLACED_OWNER_INTENT: no bash/);
+				assert.doesNotMatch(last, /ORIGINAL_OWNER_INTENT/);
+				assert.ok(last.includes(`entry ${editId}`));
+			} else {
+				assert.match(last, /ORIGINAL_OWNER_INTENT: inspect without bash/);
+				assert.ok(last.includes(`entry ${owner.id}`));
+			}
+		}
+		const firstDump = h.sessionManager
+			.getBranch()
+			.find((entry) => entry.message?.toolName === "dump");
+		assert.ok(!last.includes(firstDump.id), "older automatic tool evidence is never nested");
+	});
+}
 
 test("fresh-window truncated answers keep native omit-and-retry recovery", async (t) => {
 	const intercepted = [];

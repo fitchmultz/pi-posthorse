@@ -10,6 +10,8 @@
   at completed turn end when known usage reaches the enabled, supported threshold.
   Preserve explicit resets, final-answer settlement, and native overflow/truncated-response recovery.
   Defer for earlier context-edit drafts and document the eager recovery record's later-editor contract.
+  Carry edited owner anchors and the newest reachable explicit/native checkpoint through automatic
+  rollover chains, with bounded history pointers instead of nested automatic tool evidence.
 
 ## 0.8.2 — 2026-10-09
 
