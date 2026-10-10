@@ -259,17 +259,21 @@ function reachedThreshold(host: PolicyContext): boolean {
 		usage.tokens >= budget.rolloverAt
 	);
 }
+function fallbackTurnEligible(event: TurnEndEvent, ctx: ExtensionContext): boolean {
+	return (
+		event.outcome === "completed" &&
+		!(event.message.role === "assistant" && event.message.stopReason === "length") &&
+		ctx.signal?.aborted !== true &&
+		!event.entries.some((entry) => entry.type === "compaction" || entry.type === "context_edit")
+	);
+}
 function thresholdFallback(
 	pi: ExtensionAPI,
 	event: TurnEndEvent,
 	ctx: ExtensionContext,
 	capacity: { readonly host: PolicyContext; readonly toolTokens: () => number },
 ): BoundaryResult | undefined {
-	if (
-		event.outcome !== "completed" ||
-		ctx.signal?.aborted === true ||
-		event.entries.some((entry) => entry.type === "compaction")
-	) {
+	if (!fallbackTurnEligible(event, ctx)) {
 		return undefined;
 	}
 	const { host, toolTokens } = capacity;
@@ -279,7 +283,7 @@ function thresholdFallback(
 	if (!freshWindowWithoutInput(event.context.contextEntries)) {
 		return undefined;
 	}
-	const projected = ctx.sessionManager.buildSessionProjection().entries;
+	const projected = event.context.contextEntries;
 	const limit = freshPayloadChars(host, toolTokens(), event.context.pendingMessages);
 	const ownerQuestionRegistered = pi
 		.getAllTools()
@@ -293,7 +297,7 @@ function thresholdFallback(
 	if (limit < MIN_PAGE_CHARS || summary.length > limit) {
 		return undefined;
 	}
-	// ponytail: turn_end drafts are eager. Projection editors must run before Posthorse;
+	// ponytail: turn_end drafts are eager. Later projection editors must replace/remove this draft;
 	// upgrade to a host post-boundary hook if recovery must include later handler edits.
 	return {
 		entries: [
