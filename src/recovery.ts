@@ -243,9 +243,21 @@ function recoveryAncestry(
 	return { checkpoint: boundary, carried: [], skipped };
 }
 function skippedRecords(ids: readonly string[], limit: number): string | undefined {
-	return ids.length === 0
-		? undefined
-		: `Earlier automatic records skipped (not nested; use history read): ${excerpt(ids.join(", "), limit)}`;
+	if (ids.length === 0) {
+		return undefined;
+	}
+	let names = ids[0];
+	let count = 1;
+	while (count < ids.length) {
+		const next = `, ${ids[count]}`;
+		if (names.length + next.length > limit) {
+			break;
+		}
+		names += next;
+		count++;
+	}
+	const omitted = ids.length - count;
+	return `Earlier automatic records skipped (not nested; use history read): ${names}${omitted > 0 ? `; ${omitted} earlier record(s) not listed.` : ""}`;
 }
 function projectedToolEntries(
 	entries: readonly EntryLike[],

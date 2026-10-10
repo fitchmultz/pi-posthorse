@@ -22,6 +22,7 @@ import test from "node:test";
 import { createEditTool, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fixturePolicy, loadFixture, requireValue, record, stringValue } from "./harness.ts";
 import { createPosthorse } from "../index.ts";
+import { buildAutoHandoff } from "../src/recovery.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 import { Type, type TSchema } from "typebox";
 import { Check } from "typebox/value";
@@ -366,6 +367,32 @@ test("new_context requests a turn-boundary reset and automatic rollover builds a
 	assert.match(nonRecursive, /Earlier automatic records skipped/);
 	assert.match(nonRecursive, /prior-auto/);
 	assert.doesNotMatch(nonRecursive, /SECRET NESTED TEXT/);
+});
+
+test("a minimum-budget automatic record keeps a complete history pointer without nested evidence", () => {
+	const boundary = {
+		type: "compaction",
+		id: "deadbeef",
+		firstKeptEntryId: null,
+		details: { posthorse: 1, reason: "threshold" },
+		summary: "Automatic context rollover recovery record.\nOLD_EVIDENCE",
+	};
+	const branches = [
+		[boundary],
+		Array.from({ length: 100 }, (_unused, index) => ({ ...boundary, id: `record-${index}` })),
+	];
+	for (const [index, entries] of branches.entries()) {
+		const handoff = buildAutoHandoff(entries, [], 1_000, false);
+		assert.ok(handoff.length <= 1_000);
+		assert.match(
+			handoff,
+			index === 0 ? /use history read.*deadbeef/ : /use history read.*record-99/,
+		);
+		assert.doesNotMatch(handoff, /OLD_EVIDENCE/);
+		if (index === 1) {
+			assert.match(handoff, /99 earlier record\(s\) not listed/);
+		}
+	}
 });
 
 test("automatic ancestry stops at the nearest owner window without resurrecting superseded intent", async () => {
