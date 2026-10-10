@@ -35,7 +35,7 @@ The extension contains no direct provider client, network request, cache warmer 
 
 ### Host boundaries matter
 
-Both hosts use the public compaction hook, but eligibility is not identical. The maintained fork can reach it during preflight and for tiny/after-reset overflow cases. Official Pi must first prepare a summarizable span; oversized initial input or a second large result can miss the hook. Posthorse does not own physical payload clamping. See README **Official Pi and the fork** for the exact limits rather than treating a rollover policy as a provider-request-size guarantee.
+Both hosts use the public compaction hook with the same native eligibility: Pi must first prepare a summarizable span. Tiny overflow/truncated responses or a second large result without a new user turn can miss the hook; oversized initial input can reach the provider before recovery. Posthorse does not own physical payload clamping. See README **Official Pi and the fork** for the exact limits rather than treating a rollover policy as a provider-request-size guarantee.
 
 ## Arithmetic: plausible amplification, not attribution
 

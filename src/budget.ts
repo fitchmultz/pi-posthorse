@@ -1,9 +1,4 @@
-import {
-	estimateTokens,
-	getAgentDir,
-	SettingsManager,
-	type ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import { estimateTokens, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	ESTIMATED_IMAGE_CHARS,
 	MAX_HANDOFF_CHARS,
@@ -18,8 +13,6 @@ import {
 import { imagesOf, textOf } from "./message-text.ts";
 
 const MIN_USABLE_TOKENS = Math.ceil(MAX_HANDOFF_CHARS / 4) * 2;
-export const SNAPSHOT_NOTE =
-	"Reminder and budget policy uses available settings (a persisted CLI snapshot by default); Pi's live settings control automatic compaction.";
 export const CHECKPOINT_STEPS =
 	"update the task's current-state note (goal, progress, decisions, next steps) with available file-editing tools at its absolute path; use notes write only for creation, substantial restructuring, or when editing tools are unavailable. If the note is already current, leave it unchanged. Then call new_context";
 export type Budget = {
@@ -30,18 +23,6 @@ export type Budget = {
 	readonly rolloverAt: number;
 	readonly supported: boolean;
 };
-export function persistedPolicy(ctx: ExtensionContext): CompactionPolicy {
-	const settings = SettingsManager.create(ctx.cwd, getAgentDir(), {
-		projectTrusted: ctx.isProjectTrusted(),
-	});
-	const errors = settings.drainErrors();
-	if (errors.length > 0) {
-		throw new Error(
-			`Posthorse could not read persisted Pi settings: ${errors.map((error) => error.error.message).join("; ")}`,
-		);
-	}
-	return settings.getCompactionSettings(ctx.model);
-}
 /** A synchronous evaluation owns one snapshot; never carry it across an await. */
 export function policySnapshot(
 	ctx: ExtensionContext,

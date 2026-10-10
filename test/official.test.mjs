@@ -55,8 +55,8 @@ const toolResult = (h, name) =>
 				entry.message.toolName === name,
 		)?.message;
 
-function installPersistedPolicy(t, agentDir, options) {
-	if (!options.persistedPolicy) {
+function installFileSettings(t, agentDir, options) {
+	if (!options.fileExtension) {
 		return;
 	}
 	const previous = process.env.PI_CODING_AGENT_DIR;
@@ -86,7 +86,7 @@ async function fixture(t, options = {}) {
 		agentDir = join(temp, "agent");
 	mkdirSync(cwd);
 	mkdirSync(agentDir);
-	installPersistedPolicy(t, agentDir, options);
+	installFileSettings(t, agentDir, options);
 	const faux = fauxProvider({
 		models: options.models ?? [
 			{
@@ -134,7 +134,7 @@ async function fixture(t, options = {}) {
 		noThemes: true,
 		noContextFiles: true,
 		systemPromptOverride: () => "OFFICIAL_SYSTEM_POLICY",
-		additionalExtensionPaths: options.persistedPolicy
+		additionalExtensionPaths: options.fileExtension
 			? [fileURLToPath(new URL("../index.ts", import.meta.url))]
 			: [],
 		extensionFactories: [
@@ -142,14 +142,7 @@ async function fixture(t, options = {}) {
 				pi.registerProvider(faux.provider);
 				options.extension?.(pi);
 			},
-			...(options.persistedPolicy
-				? []
-				: [
-						createPosthorse(
-							options.getPolicy ??
-								((ctx) => settingsManager.getCompactionSettings(ctx.model)),
-						),
-					]),
+			...(options.fileExtension ? [] : [createPosthorse(options.getPolicy)]),
 			...(options.afterExtension ? [options.afterExtension] : []),
 		],
 	});
@@ -831,19 +824,85 @@ test("note publication retains symlinks/modes, serializes write+append, and prop
 	);
 });
 
-test("the default file extension loads on official Pi and reads persisted settings", async (t) => {
-	const h = await fixture(t, { persistedPolicy: true, enabled: false });
-	let request;
+test("default file extension keeps guidance, reminders and explicit reset despite malformed disk settings", async (t) => {
+	const h = await fixture(t, { fileExtension: true });
+	writeFileSync(join(h.agentDir, "settings.json"), "{malformed");
+	const requests = [];
 	h.faux.setResponses([
 		(ctx) => {
-			request = ctx.messages;
-			return toolTurn(fauxToolCall("new_context", { handoff: "Persisted settings test." }));
+			requests.push(ctx.messages);
+			return fauxAssistantMessage("First response in reminder band.");
 		},
+		(ctx) => {
+			requests.push(ctx.messages);
+			return fauxAssistantMessage("Checkpoint received.");
+		},
+	]);
+	await h.session.prompt("p".repeat(305_000));
+	assert.equal(requests.length, 2);
+	for (const request of requests) {
+		assert.match(getCurrentSystemPrompt(request), /Context self-management \(Posthorse\)/);
+	}
+	assert.match(JSON.stringify(requests[1]), /Checkpoint now:/);
+	assert.equal(
+		h.sessionManager
+			.getBranch()
+			.filter(
+				(entry) =>
+					entry.type === "custom_message" && entry.customType === "posthorse-reminder",
+			).length,
+		1,
+	);
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Live settings test." })),
 		fauxAssistantMessage("Fresh."),
 	]);
 	await h.session.prompt("Start fresh.");
-	assert.match(getCurrentSystemPrompt(request), /Pi compaction is disabled/);
 	assert.equal(boundaries(h).length, 1);
+});
+
+test("default policy follows runtime and per-model overrides for guidance, budget and reminders", async (t) => {
+	const h = await fixture(t, { fileExtension: true, enabled: false });
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("get_context_remaining", {})),
+		fauxAssistantMessage("Disabled."),
+	]);
+	await h.session.prompt("Read the disabled budget.");
+	assert.match(textOf(toolResult(h, "get_context_remaining")), /Automatic rollover is disabled/);
+	h.settingsManager.applyOverrides({
+		compaction: {
+			enabled: true,
+			reserveTokens: 1_000,
+			modelOverrides: { "faux/official-posthorse": { reserveTokens: 32_000 } },
+		},
+	});
+	const requests = [];
+	h.faux.setResponses([
+		(ctx) => {
+			requests.push(ctx.messages);
+			return toolTurn(fauxToolCall("get_context_remaining", {}));
+		},
+		(ctx) => {
+			requests.push(ctx.messages);
+			return fauxAssistantMessage("Checkpoint received.");
+		},
+	]);
+	await h.session.prompt("p".repeat(240_000));
+	for (const request of requests) {
+		assert.match(getCurrentSystemPrompt(request), /rollover line is 68,001 tokens/);
+	}
+	assert.match(textOf(toolResult(h, "get_context_remaining")), /line at 68,001/);
+	assert.match(JSON.stringify(requests), /Checkpoint now:/);
+	assert.equal(
+		h.sessionManager
+			.getBranch()
+			.filter(
+				(entry) =>
+					entry.type === "custom_message" && entry.customType === "posthorse-reminder",
+			).length,
+		1,
+	);
+	assert.equal(boundaries(h).length, 0);
 });
 
 test("queued input arrives unchanged after native automatic rollover", async (t) => {
@@ -1481,7 +1540,6 @@ test("automatic recovery uses event settings even when proactive settings disagr
 		textOf(toolResult(h, "get_context_remaining")),
 		/disabled in the available settings/,
 	);
-	assert.match(textOf(toolResult(h, "get_context_remaining")), /persisted CLI snapshot/);
 });
 
 test("unexpected recovery-builder failure cancels instead of falling through to a summarizer", async (t) => {

@@ -1,13 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { toolCards, type PosthorseDisplay } from "../ui.ts";
-import {
-	budgetFor,
-	freshPayloadChars,
-	SNAPSHOT_NOTE,
-	unsupportedMessage,
-	type Budget,
-} from "./budget.ts";
+import { budgetFor, freshPayloadChars, unsupportedMessage, type Budget } from "./budget.ts";
 import {
 	EMPTY_HANDOFF,
 	MAX_HANDOFF_CHARS,
@@ -38,7 +32,7 @@ function contextReport(host: PolicyContext): TextResult {
 		rollover,
 		rolloverAt: budget?.rolloverAt,
 	};
-	const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate. ${SNAPSHOT_NOTE}`;
+	const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate.`;
 	if (budget?.enabled !== true) {
 		return textResult(
 			`Automatic rollover is disabled in the available settings (Pi compaction.enabled=false). ${configured}`,
