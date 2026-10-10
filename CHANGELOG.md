@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Roll over fresh compaction windows at completed turn end when known usage reaches the enabled,
+  supported threshold and no new projected turn-start input makes native preparation eligible.
+  Preserve explicit resets and final-answer settlement; leave native overflow recovery unchanged.
+  Document the eager recovery record's projection-editing extension ordering contract.
+
 ## 0.8.2 — 2026-10-09
 
 - Extract history content lazily: newest-first branch searches stop normalization once a page and

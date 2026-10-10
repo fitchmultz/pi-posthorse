@@ -1551,36 +1551,166 @@ for (const reason of ["overflow", "length"]) {
 }
 
 for (const keepRecentTokens of [20_000, 1]) {
-	test(`second large tool result obeys native after-reset eligibility (keepRecentTokens=${keepRecentTokens})`, async (t) => {
-		const h = await fixture(t, { keepRecentTokens, extension: registerDump });
-		let second, third;
-		h.faux.setResponses([
-			toolTurn(fauxToolCall("dump", {})),
-			(ctx) => {
-				second = ctx.messages;
-				return toolTurn(fauxToolCall("dump", {}));
+	for (const start of ["automatic", "explicit"]) {
+		for (const size of [350_000, 450_000]) {
+			test(`fresh-window threshold protects the next request (${start}, ${size} chars, keepRecentTokens=${keepRecentTokens})`, async (t) => {
+				let dumps = 0;
+				const h = await fixture(t, {
+					keepRecentTokens,
+					extension(pi) {
+						pi.registerTool({
+							name: "dump",
+							label: "Dump",
+							description: "Local output",
+							parameters: { type: "object", properties: {} },
+							async execute() {
+								const chars =
+									start === "automatic" && dumps++ === 0 ? 600_000 : size;
+								return {
+									content: [
+										{
+											type: "text",
+											text: `DUMP_HEAD ${"x".repeat(chars)} DUMP_TAIL`,
+										},
+									],
+									details: {},
+								};
+							},
+						});
+					},
+				});
+				let third;
+				h.faux.setResponses([
+					toolTurn(
+						start === "automatic"
+							? fauxToolCall("dump", {})
+							: fauxToolCall("new_context", {
+									handoff: "Continue inspecting the next output.",
+								}),
+					),
+					toolTurn(fauxToolCall("dump", {})),
+					(ctx) => {
+						third = ctx.messages;
+						return ctx.messages.some(
+							(message) =>
+								message.role === "toolResult" && textOf(message).length > size,
+						) && size === 450_000
+							? overflow()
+							: fauxAssistantMessage("Done.");
+					},
+				]);
+				await h.session.prompt("Inspect two outputs.");
+				assert.equal(third.filter((message) => message.role !== "system").length, 1);
+				assert.ok(!third.some((message) => message.role === "toolResult"));
+				assert.equal(boundaries(h).length, 2);
+				assert.equal(
+					boundaries(h)[0].details.reason,
+					start === "automatic" ? "threshold" : "explicit",
+				);
+				assert.equal(boundaries(h)[1].details.reason, "threshold");
+				assert.match(boundaries(h)[1].summary, /DUMP_HEAD/);
+				assert.match(boundaries(h)[1].summary, /DUMP_TAIL/);
+				assert.equal(h.faux.state.callCount, 3);
+				assert.equal(
+					h.sessionManager
+						.getBranch()
+						.findLast((entry) => entry.message?.role === "assistant").message
+						.stopReason,
+					"stop",
+				);
+			});
+		}
+	}
+}
+
+for (const unavailable of ["unknown usage", "disabled policy"]) {
+	test(`fresh-window fallback skips ${unavailable}`, async (t) => {
+		const h = await fixture(t, {
+			extension(pi) {
+				registerDump(pi, false, 350_000);
+				pi.on("turn_end", (event, ctx) => {
+					if (event.toolResults.some((result) => result.toolName === "dump")) {
+						if (unavailable === "unknown usage") {
+							t.mock.method(ctx, "getContextUsage", () => ({
+								tokens: null,
+								contextWindow: 100_000,
+								percent: null,
+							}));
+						} else {
+							h.settingsManager.applyOverrides({ compaction: { enabled: false } });
+						}
+					}
+				});
 			},
+		});
+		let third;
+		h.faux.setResponses([
+			toolTurn(fauxToolCall("new_context", { handoff: "Continue." })),
+			toolTurn(fauxToolCall("dump", {})),
 			(ctx) => {
 				third = ctx.messages;
 				return fauxAssistantMessage("Done.");
 			},
 		]);
-		await h.session.prompt("Inspect two outputs.");
-		assert.equal(second.filter((message) => message.role !== "system").length, 1);
+		await h.session.prompt("Inspect.");
 		assert.ok(
 			third.some(
-				(message) => message.role === "toolResult" && textOf(message).length > 600_000,
+				(message) => message.role === "toolResult" && textOf(message).length > 350_000,
 			),
-			"native preparation can decline the second operation without a new user span",
-		);
-		assert.equal(
-			boundaries(h).length,
-			2,
-			"the final response can trigger a later native operation",
 		);
 		assert.equal(h.faux.state.callCount, 3);
 	});
 }
+
+test("earlier turn-start drafts leave fresh-window compaction Pi-owned", async (t) => {
+	let intercepted = 0;
+	const h = await fixture(t, {
+		extension(pi) {
+			registerDump(pi, false, 350_000);
+			pi.on("session_before_compact", () => {
+				intercepted++;
+			});
+			pi.on("turn_end", (event) =>
+				event.toolResults.some((result) => result.toolName === "dump")
+					? {
+							entries: [
+								...event.entries,
+								{
+									type: "custom_message",
+									customType: "coordination",
+									content: "NEW_TURN_START_DRAFT",
+									display: true,
+								},
+							],
+						}
+					: undefined,
+			);
+		},
+	});
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Continue." })),
+		toolTurn(fauxToolCall("dump", {})),
+		fauxAssistantMessage("Done."),
+	]);
+	await h.session.prompt("Inspect.");
+	assert.equal(intercepted, 1, "the native automatic hook owns this eligible span");
+	assert.equal(boundaries(h).length, 2);
+	assert.match(boundaries(h)[1].summary, /NEW_TURN_START_DRAFT/);
+	assert.equal(h.faux.state.callCount, 3);
+});
+
+test("fresh-window threshold after a final answer does not request another response", async (t) => {
+	const h = await fixture(t);
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Finish in the next window." })),
+		fauxAssistantMessage("x".repeat(350_000)),
+		fauxAssistantMessage("MUST_NOT_RUN"),
+	]);
+	await h.session.prompt("Finish.");
+	assert.equal(h.faux.state.callCount, 2);
+	assert.equal(boundaries(h).length, 2);
+	assert.equal(boundaries(h)[1].details.reason, "threshold");
+});
 
 test("note publication rejects directory-only symlink targets and traversal through a file", async (t) => {
 	const h = await fixture(t);
