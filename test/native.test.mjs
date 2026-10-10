@@ -1077,8 +1077,14 @@ for (const [enabled, reads] of [
 	});
 }
 
-for (const continuation of ["none", "steer", "followUp", "boundary"]) {
-	test(`public final answer in the reminder band preserves the result (continuation=${continuation})`, async (t) => {
+for (const [continuation, stopReason] of [
+	["none", "stop"],
+	["none", "length"],
+	["steer", "stop"],
+	["followUp", "stop"],
+	["boundary", "stop"],
+]) {
+	test(`public answer in the reminder band preserves native settlement (continuation=${continuation}, stopReason=${stopReason})`, async (t) => {
 		const h = await fixture(t, {
 			extension(pi) {
 				if (continuation === "steer" || continuation === "followUp") {
@@ -1115,7 +1121,7 @@ for (const continuation of ["none", "steer", "followUp", "boundary"]) {
 		h.faux.setResponses([
 			(ctx) => {
 				requests.push(ctx.messages);
-				return fauxAssistantMessage("Final report.");
+				return fauxAssistantMessage("Final report.", { stopReason });
 			},
 			(ctx) => {
 				requests.push(ctx.messages);
@@ -1145,6 +1151,14 @@ for (const continuation of ["none", "steer", "followUp", "boundary"]) {
 			return;
 		}
 		assert.equal(reminders().length, 0);
+		if (stopReason === "length") {
+			assert.equal(requests.length, 2, "native truncation recovery still retries once");
+			assert.equal(
+				textOf(h.session.messages.findLast((message) => message.role === "assistant")),
+				"Continued report.",
+			);
+			return;
+		}
 		assert.equal(requests.length, 1, "a checkpoint must not wake a finished agent");
 		assert.equal(
 			textOf(h.session.messages.findLast((message) => message.role === "assistant")),

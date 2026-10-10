@@ -3,8 +3,9 @@
 ## Unreleased
 
 - Skip checkpoint reminders on turns that end the run, preserving final answers without waking
-  finished agents. Working turns and queued continuations still receive one reminder per window,
-  including when a previous reminder is still queued for delivery.
+  finished agents; truncated answers keep Pi's native recovery without a reminder. Working turns
+  and queued continuations still receive one reminder per window, including when a previous
+  reminder is still queued for delivery.
 
 - Read guidance, reminder and budget policy from Pi's live effective settings, preserving runtime
   and per-model overrides, defaults and validation. Malformed settings files no longer break

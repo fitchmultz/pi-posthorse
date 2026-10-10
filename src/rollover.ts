@@ -110,7 +110,6 @@ function endsRun(
 ): boolean {
 	return (
 		event.message.role === "assistant" &&
-		event.message.stopReason === "stop" &&
 		!event.message.content.some((part) => part.type === "toolCall") &&
 		!event.continue &&
 		event.context.pendingMessages.length === 0 &&
