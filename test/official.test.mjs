@@ -55,7 +55,7 @@ const toolResult = (h, name) =>
 				entry.message.toolName === name,
 		)?.message;
 
-function installFileSettings(t, agentDir, options) {
+function isolateAgentDir(t, agentDir, options) {
 	if (!options.fileExtension) {
 		return;
 	}
@@ -68,15 +68,6 @@ function installFileSettings(t, agentDir, options) {
 			process.env.PI_CODING_AGENT_DIR = previous;
 		}
 	});
-	writeFileSync(
-		join(agentDir, "settings.json"),
-		JSON.stringify({
-			compaction: {
-				enabled: options.enabled ?? true,
-				reserveTokens: options.reserveTokens ?? 16_384,
-			},
-		}),
-	);
 }
 
 async function fixture(t, options = {}) {
@@ -86,7 +77,7 @@ async function fixture(t, options = {}) {
 		agentDir = join(temp, "agent");
 	mkdirSync(cwd);
 	mkdirSync(agentDir);
-	installFileSettings(t, agentDir, options);
+	isolateAgentDir(t, agentDir, options);
 	const faux = fauxProvider({
 		models: options.models ?? [
 			{
@@ -863,6 +854,10 @@ test("default file extension keeps guidance, reminders and explicit reset despit
 
 test("default policy follows runtime and per-model overrides for guidance, budget and reminders", async (t) => {
 	const h = await fixture(t, { fileExtension: true, enabled: false });
+	writeFileSync(
+		join(h.agentDir, "settings.json"),
+		JSON.stringify({ compaction: { enabled: true, reserveTokens: 90_000 } }),
+	);
 	h.faux.setResponses([
 		toolTurn(fauxToolCall("get_context_remaining", {})),
 		fauxAssistantMessage("Disabled."),

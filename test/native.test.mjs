@@ -94,7 +94,7 @@ async function fixture(t, options = {}) {
 				pi.registerProvider(faux.provider);
 				options.extension?.(pi);
 			},
-			createPosthorse((ctx) => settingsManager.getCompactionSettings(ctx.model)),
+			createPosthorse(),
 		],
 	});
 	await resourceLoader.reload();
