@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 — 2026-10-10
 
 - Skip checkpoint reminders on turns that end the run, preserving final answers without waking
   finished agents; truncated answers keep Pi's native recovery without a reminder. Working turns
