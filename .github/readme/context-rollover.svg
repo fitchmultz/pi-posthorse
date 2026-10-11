@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="610" viewBox="0 0 1600 610" role="img" aria-labelledby="title desc">
-  <title id="title">Posthorse: fresh context, same journey</title>
+  <title id="title">Posthorse: continue a task in fresh context</title>
   <desc id="desc">The current Pi conversation rolls into a fresh context window through an explicit request or automatic rollover. Task notes and the complete session transcript remain available through the notes and history tools.</desc>
   <defs>
     <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
@@ -46,8 +46,8 @@
   <rect width="1600" height="610" fill="url(#blueBloom)"/>
   <rect width="1600" height="610" fill="url(#dotGrid)"/>
   <g class="sans">
-    <text x="64" y="76" font-size="48" font-weight="700" letter-spacing="-1" fill="#F8FAFC">Fresh context. Same journey.</text>
-    <text x="64" y="120" font-size="26" fill="#91A0B8">Keep a long Pi task moving across context windows.</text>
+    <text x="64" y="76" font-size="48" font-weight="700" letter-spacing="-1" fill="#F8FAFC">Continue a task in fresh context.</text>
+    <text x="64" y="120" font-size="26" fill="#91A0B8">Posthorse keeps notes and session history available after rollover.</text>
   </g>
 
   <!-- Rollover edges express order; persistent resources below are a shared support zone. -->
@@ -63,7 +63,7 @@
       <text x="82" y="56" class="mono chip" fill="#93C5FD">WORK</text>
       <text x="28" y="112" class="title">Current conversation</text>
       <text x="28" y="155" class="copy">Work in Pi's active window.</text>
-      <text x="28" y="188" class="copy">Save task state as you go.</text>
+      <text x="28" y="188" class="copy">Save task state in notes.</text>
     </g>
 
     <g transform="translate(562 172)">

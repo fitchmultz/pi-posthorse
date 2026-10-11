@@ -62,6 +62,17 @@ The fresh-window threshold fallback builds its recovery record from the boundary
 
 ## Tools
 
+These examples show model-callable tools:
+
+```js
+notes({
+  op: "write",
+  path: "task.md",
+  content: "Goal: fix sign-in. Next: run the regression test.",
+});
+history({ op: "search", query: "sign-in", all: true });
+```
+
 - `new_context({ handoff? })`
 - `get_context_remaining()`
 - `notes({ op, ... })`: `list`, `read`, and `search` are paged; continue with the returned character `offset`. `list` shows the absolute shared notes directory, then relative note names newest first with size and modification time (UTC), and takes an optional folder `path`; `read` of a folder returns its listing. File reads show the absolute file path before the content. Offsets refer to note content or listing rows, excluding path headers. `search` covers text notes, skipping binary files (a NUL byte in the first 8,000 bytes, as Git decides), and its excerpts center on the match. It also skips files over 1 MiB and says how many it skipped. Search stops reading once the requested page is decided, so a broad query reports that more matches follow instead of a total; its pages end before offset 1,000,000. `write` replaces content (empty content clears); `append` adds one newline-terminated record.

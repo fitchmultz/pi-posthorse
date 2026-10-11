@@ -1,87 +1,68 @@
 # Posthorse
 
-Posthorse gives long [Pi](https://github.com/earendil-works/pi) coding sessions a fresh context window while keeping earlier conversation recoverable. Use it to continue larger tasks with handoffs, durable notes, and searchable history, without a model-generated summary at each rollover.
+Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks and keeps earlier conversation recoverable. Each rollover uses a handoff or recovery record without a model-generated summary.
 
-![A Pi conversation rolls into a fresh context window, while task notes and the complete session transcript remain recoverable.](.github/readme/context-rollover.png)
+![A Pi conversation rolls into a fresh context window. Task notes and the complete session transcript remain available.](.github/readme/context-rollover.png)
 
-_Fresh context, same journey: handoffs carry the next step; notes and history keep the rest within reach._
+_Task notes and session history remain available after rollover._
 
 ## Install and start
 
-Requires **Node 24.12.0 or later** and **Pi 1.0.0 or later**, on official Pi or the [maintained fork](https://github.com/fitchmultz/pi). Update an older host before installing.
+Use Node 24.12.0 or later and Pi 1.0.0 or later. Posthorse supports official Pi and [fitchmultz/pi](https://github.com/fitchmultz/pi).
+
+Update an older Pi installation before you install Posthorse. Run these commands:
 
 ```bash
 pi install npm:pi-posthorse
 pi
 ```
 
-Restart an already-running Pi session after installing. For a single run without adding the package to your settings:
+Restart Pi after installation or an update. To try Posthorse for one session, run `pi -e npm:pi-posthorse`.
 
-```bash
-pi -e npm:pi-posthorse
-```
+Give Pi your task. For example:
 
-Start your task normally. Posthorse gives the model context guidance and adds four tools for managing longer sessions. See [how rollover works](#how-it-works) or the [tool examples](#tools) below.
+> Save task state in a note. Start a fresh context window with the next steps.
 
-## How it works
+## How rollover works
 
-1. **Work in your current window.** The model gets guidance about Pi's context capacity and rollover settings.
-2. **Save the next step.** With compaction enabled, one best-effort checkpoint reminder may ask the model to update its task note and request a fresh window. Large turns can reach rollover before that reminder.
-3. **Continue in fresh context.** An explicit request carries your handoff. Automatic rollover builds a bounded recovery record from session inputs and tool evidence. Earlier conversation leaves active model context and remains in Pi's complete session history.
+Posthorse can remind the model to save task state before rollover. Large turns can reach rollover before this reminder. The reminder does not wake an agent after its final answer.
 
-Automatic recovery records preserve inputs and evidence. The fresh model still needs to restore task notes and verify live state before continuing. A reminder never wakes a finished agent or replaces its final answer.
+Automatic rollover creates a recovery record from session inputs and tool results. The model must restore notes and check live state before it continues. Manual `/compact` uses Pi's normal summarization.
 
-[Detailed rollover and recovery behavior →](docs/reference.md#how-it-works)
+See [rollover and recovery details](docs/reference.md#how-it-works).
 
 ## Tools
 
-These are model-callable tools. You can ask Pi to use them in plain language, for example:
+These tools are available to the model:
 
-> Save where we are in a task note, then start a fresh context window with the next steps.
+| Tool                        | Use                                                                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new_context({ handoff? })` | Request a fresh window after every foreground tool succeeds. Aborted turns and failed tools prevent the reset.                               |
+| `get_context_remaining()`   | Estimate tokens left until rollover and the configured context limit. Usage can be unknown before a model response.                          |
+| `notes({ op, ... })`        | List, read, search, write, or append task notes.                                                                                             |
+| `history({ op, ... })`      | Search earlier conversation and read entries, including images. `all: true` includes this project's other sessions and nested subagent runs. |
 
-| Tool                        | What it does                                                                                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `new_context({ handoff? })` | Requests a fresh window after the current foreground tool batch succeeds.                                                                              |
-| `get_context_remaining()`   | Estimates tokens left until rollover and the configured context limit. Usage may be unknown before a model response.                                   |
-| `notes({ op, ... })`        | Lists, reads, searches, writes, or appends plaintext task notes shared across linked Git worktrees.                                                    |
-| `history({ op, ... })`      | Searches earlier conversation and reads entries, including stored images. `all: true` includes this project's other sessions and nested subagent runs. |
+Expand a tool card with Ctrl+O. In fullscreen mode, click a tool card to expand it. A `new_context` card shows a request. Pi's `Compacted from … tokens` card confirms the rollover.
 
-For example, the model can create a note and search earlier decisions:
+See [tool examples and paging details](docs/reference.md#tools).
 
-```js
-notes({
-  op: "write",
-  path: "task.md",
-  content: "Goal: fix sign-in. Next: run the regression test.",
-});
-history({ op: "search", query: "sign-in", all: true });
-```
+## Settings and limits
 
-Read a history hit using the exact entry ID returned by search. Notes and history are paged; follow the returned continuation fields to retrieve more.
+Posthorse uses Pi's effective `compaction` settings. It has no separate settings.
 
-Tool cards expand with **Ctrl+O** by default, or by clicking in fullscreen mode. A `new_context` card shows a request; Pi's **Compacted from … tokens** card confirms a committed rollover.
+| Pi setting                 | Effect                                                                                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `compaction.enabled`       | Set to `false` to disable reminders and automatic rollover. `new_context` remains available.                                                                       |
+| `compaction.reserveTokens` | Automatic Posthorse rollover needs at least 10,000 tokens after this reserve. Smaller budgets use Pi's own compaction. Lower the reserve or choose a larger model. |
 
-[Full tool and paging reference →](docs/reference.md#tools)
+Two Posthorse copies can register the same tools and compete for rollover. Keep one copy loaded. Check installed sources with `pi list`.
 
-## Settings
+Multiple compaction-policy extensions can make rollover depend on load order. Enable only one.
 
-Posthorse follows Pi's effective `compaction` settings, including per-model overrides and project trust. You do not need separate Posthorse settings.
+Oversized input and some overflow or truncated responses can reach the provider before automatic recovery. Save task state in notes. Background work outside the foreground tool batch continues across rollover.
 
-- Disable `compaction.enabled` to turn off checkpoint reminders and automatic rollover. `new_context` remains available.
-- Automatic Posthorse rollover needs at least **10,000 usable tokens** after `compaction.reserveTokens`. Smaller budgets use Pi's own compaction; lower the reserve or choose a larger-context model.
-- Keep one Posthorse copy loaded and only one automatic compaction-policy extension enabled. Use `pi list` to check installed sources.
-
-Handoffs and returned pages have model-aware size limits. Save fuller state in notes when a handoff is too large.
-
-[Settings, limits, and extension ordering →](docs/reference.md#settings)
-
-## Official Pi and the fork
-
-Both hosts get the same tools, guidance, reminders, and recovery records. Posthorse uses public compaction APIs and does not call a summary model for its rollover. Manual **`/compact`** keeps Pi's normal summarization.
-
-Failed sibling tools or an aborted turn prevent an explicit reset. Background work owned outside the foreground batch continues across it. Automatic recovery depends on Pi reaching its compaction hook; oversized initial input and some overflow or truncated responses can reach the provider before recovery.
-
-Legacy fork window markers remain readable in history, but opening those old sessions on official Pi can reintroduce earlier context. Check the [host and legacy-session details](docs/reference.md#official-pi-and-the-fork) before migrating sessions.
+See [size limits and extension order](docs/reference.md#settings).
+Check the [legacy-session details](docs/reference.md#official-pi-and-the-fork) before you move old fork sessions to official Pi.
 
 ## Update or remove
 
@@ -90,22 +71,22 @@ pi update npm:pi-posthorse
 pi remove npm:pi-posthorse
 ```
 
-Restart Pi after an update. Removing Posthorse leaves your notes and Pi session history in place. For Git installs, pinned versions, and duplicate-source cleanup, see [installation reference](docs/reference.md#install).
+Removal leaves notes and Pi session history in place. See [Git sources and pinned versions](docs/reference.md#install) for other installation options.
 
 ## Data and privacy
 
-- Posthorse makes no network requests itself.
-- Notes are plaintext under `.pi/notes/` and survive package removal. In conventional Git layouts they live at the main checkout; linked worktrees share them. Add `.pi/notes/` to `.gitignore` if they should stay private.
-- History can return user messages, assistant text and thinking, tool arguments and results, handoffs, errors, and images. Returned content enters the context of your currently selected model and provider.
-- `history` with `all: true` searches project-matching session files and their nested subagent sessions in the active Pi session directory. Unrelated projects are excluded. Direct shell entries Pi marked `excludeFromContext` return a placeholder.
+Posthorse makes no network requests. Notes are plaintext files under `.pi/notes/`; linked Git worktrees share them. Add `.pi/notes/` to `.gitignore` if the notes must stay private.
 
-For cached-token cost diagnosis and a safe comparison with stock compaction, see the [cached-token investigation](ARTIFACTS/investigation-report.md). It does not establish the cause of a production bill or a measured cost improvement.
+History can include user messages, assistant thinking, tool arguments, errors, and images. Content you retrieve enters the context of your selected model and provider.
 
-[Storage locations and write guarantees →](docs/reference.md#tools)
+See [storage and privacy details](docs/reference.md#data-and-privacy).
+For cost diagnosis, see the [cached-token investigation](ARTIFACTS/investigation-report.md).
+It does not establish the cause of a production bill or a measured cost improvement.
 
-## Develop
+## Development
 
-See [development and host qualification](docs/development.md) for setup, tests, and release procedures, and [code quality](docs/quality.md) for the enforced checks.
+See [development and host qualification](docs/development.md) for setup, tests, and releases.
+See [code quality](docs/quality.md) for the required checks.
 
 ## License
 
