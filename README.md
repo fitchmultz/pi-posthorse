@@ -71,7 +71,7 @@ pi update npm:pi-posthorse
 pi remove npm:pi-posthorse
 ```
 
-Removal leaves notes and Pi session history in place. See [Git sources and pinned versions](docs/reference.md#install) for other installation options.
+Removal leaves notes and Pi session history in place. See the [installation reference](docs/reference.md#install) for Git sources.
 
 ## Data and privacy
 

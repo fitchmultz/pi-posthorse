@@ -5,17 +5,15 @@ For a quick start, see the [README](../README.md).
 
 ## Install
 
-Posthorse `0.9.0` requires Pi `>=1.0.0`. Update the host before installing this release; do not activate it on an older live fork.
+Posthorse requires Pi `>=1.0.0`. Update an older host before you install Posthorse.
 
 ```bash
-pi install npm:pi-posthorse@0.9.0                        # from npm
-pi install git:github.com/fitchmultz/pi-posthorse@v0.9.0 # from Git
-pi -e npm:pi-posthorse@0.9.0                             # try it for one run without installing
+pi install npm:pi-posthorse                        # from npm
+pi install git:github.com/fitchmultz/pi-posthorse    # from Git
+pi -e npm:pi-posthorse                             # try it for one run without installing
 ```
 
-Omit the npm version to follow the latest published package. Omit the Git ref to follow the repository's default branch.
-
-Update an unpinned install with `pi update npm:pi-posthorse` or `pi update --extensions`. Move a pinned install with `pi install npm:pi-posthorse@<new version>` or `pi install git:github.com/fitchmultz/pi-posthorse@<new tag>`. Uninstall with `pi remove` followed by the source you installed. Removing the package leaves `.pi/notes` and Pi's session history in place.
+Update Posthorse with `pi update npm:pi-posthorse` or `pi update --extensions`. Uninstall with `pi remove` followed by the source you installed. Removing the package leaves `.pi/notes` and Pi's session history in place.
 
 Restart Pi after installing or updating Posthorse to load the new extension code.
 
