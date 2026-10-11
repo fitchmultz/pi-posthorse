@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="610" viewBox="0 0 1600 610" role="img" aria-labelledby="title desc">
+  <title id="title">Posthorse: fresh context, same journey</title>
+  <desc id="desc">The current Pi conversation rolls into a fresh context window through an explicit request or automatic rollover. Task notes and the complete session transcript remain available through the notes and history tools.</desc>
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#060A12"/>
+      <stop offset="0.52" stop-color="#0B1120"/>
+      <stop offset="1" stop-color="#080C16"/>
+    </linearGradient>
+    <radialGradient id="blueBloom" cx="0.18" cy="0.18" r="0.8">
+      <stop stop-color="#2563EB" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#2563EB" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#172238" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#0E1525" stop-opacity="0.98"/>
+    </linearGradient>
+    <linearGradient id="focus" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#172554" stop-opacity="0.82"/>
+      <stop offset="1" stop-color="#312E81" stop-opacity="0.58"/>
+    </linearGradient>
+    <pattern id="dotGrid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.2" fill="#94A3B8" fill-opacity="0.08"/>
+    </pattern>
+    <filter id="shadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#02040A" flood-opacity="0.4"/>
+    </filter>
+    <marker id="arrowBlue" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1 1 11 6 1 11Z" fill="#60A5FA"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M1 1 11 6 1 11Z" fill="#6EE7B7"/>
+    </marker>
+    <style>
+      .sans { font-family: Inter, ui-sans-serif, Arial, sans-serif; }
+      .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+      .title { font-size: 32px; font-weight: 650; fill: #F8FAFC; }
+      .copy { font-size: 24px; fill: #B4C2D8; }
+      .chip { font-size: 21px; font-weight: 600; }
+      .connector { fill: none; stroke-width: 4; stroke-linecap: round; }
+    </style>
+  </defs>
+
+  <!-- Solid canvas and restrained depth from the fleet design tokens. -->
+  <rect width="1600" height="610" fill="url(#canvas)"/>
+  <rect width="1600" height="610" fill="url(#blueBloom)"/>
+  <rect width="1600" height="610" fill="url(#dotGrid)"/>
+  <g class="sans">
+    <text x="64" y="76" font-size="48" font-weight="700" letter-spacing="-1" fill="#F8FAFC">Fresh context. Same journey.</text>
+    <text x="64" y="120" font-size="26" fill="#91A0B8">Keep a long Pi task moving across context windows.</text>
+  </g>
+
+  <!-- Rollover edges express order; persistent resources below are a shared support zone. -->
+  <path d="M468 280H562" class="connector" stroke="#60A5FA" marker-end="url(#arrowBlue)"/>
+  <path d="M1038 280H1132" class="connector" stroke="#6EE7B7" marker-end="url(#arrowGreen)"/>
+
+  <g class="sans" filter="url(#shadow)">
+    <g transform="translate(64 172)">
+      <rect width="404" height="214" rx="24" fill="url(#glass)" stroke="#2A3851"/>
+      <rect width="5" height="214" rx="2.5" fill="#60A5FA"/>
+      <circle cx="48" cy="48" r="22" fill="#60A5FA" fill-opacity="0.13"/>
+      <path d="M37 40H59V53H47L40 59V53H37Z" fill="none" stroke="#93C5FD" stroke-width="2.5" stroke-linejoin="round"/>
+      <text x="82" y="56" class="mono chip" fill="#93C5FD">WORK</text>
+      <text x="28" y="112" class="title">Current conversation</text>
+      <text x="28" y="155" class="copy">Work in Pi's active window.</text>
+      <text x="28" y="188" class="copy">Save task state as you go.</text>
+    </g>
+
+    <g transform="translate(562 172)">
+      <rect width="476" height="214" rx="28" fill="url(#focus)" stroke="#6D7DFF" stroke-opacity="0.62"/>
+      <rect x="28" y="24" width="218" height="42" rx="21" fill="#111A2A" stroke="#51426F"/>
+      <text x="137" y="52" text-anchor="middle" class="mono chip" fill="#D8B4FE">POSTHORSE</text>
+      <text x="28" y="112" class="title">Context rollover</text>
+      <text x="28" y="155" class="copy">Explicit request or automatic.</text>
+      <text x="28" y="188" class="copy">Handoff or recovery record.</text>
+    </g>
+
+    <g transform="translate(1132 172)">
+      <rect width="404" height="214" rx="24" fill="url(#glass)" stroke="#2A4C46"/>
+      <rect width="5" height="214" rx="2.5" fill="#6EE7B7"/>
+      <circle cx="48" cy="48" r="22" fill="#6EE7B7" fill-opacity="0.12"/>
+      <path d="M37 49L45 57L60 39" fill="none" stroke="#6EE7B7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="82" y="56" class="mono chip" fill="#6EE7B7">CONTINUE</text>
+      <text x="28" y="112" class="title">Fresh context</text>
+      <text x="28" y="155" class="copy">Restore notes and next steps.</text>
+      <text x="28" y="188" class="copy">Recover details when needed.</text>
+    </g>
+  </g>
+
+  <!-- These remain available across the rollover; placement does not imply execution order. -->
+  <g class="sans">
+    <text x="64" y="436" font-size="24" font-weight="600" fill="#CBD5E1">Still available across the rollover</text>
+    <g transform="translate(64 460)">
+      <rect width="710" height="100" rx="20" fill="#0D1423" stroke="#243148"/>
+      <path d="M29 27H57V71H29ZM36 38H50M36 49H50M36 60H45" fill="none" stroke="#A78BFA" stroke-width="2.5" stroke-linejoin="round"/>
+      <text x="82" y="43" font-size="28" font-weight="600" fill="#F8FAFC">Task notes</text>
+      <text x="82" y="77" class="copy">Plaintext state shared across linked worktrees.</text>
+      <rect x="564" y="18" width="118" height="34" rx="17" fill="#17152A" stroke="#51426F"/>
+      <text x="623" y="43" text-anchor="middle" class="mono chip" fill="#D8B4FE">notes</text>
+    </g>
+    <g transform="translate(800 460)">
+      <rect width="736" height="100" rx="20" fill="#0D1423" stroke="#243148"/>
+      <path d="M29 34H58M29 49H58M29 64H58" fill="none" stroke="#60A5FA" stroke-width="3" stroke-linecap="round"/>
+      <text x="82" y="43" font-size="28" font-weight="600" fill="#F8FAFC">Complete session transcript</text>
+      <text x="82" y="77" class="copy">Earlier messages, tool results, and images.</text>
+      <rect x="566" y="18" width="142" height="34" rx="17" fill="#111E35" stroke="#38517A"/>
+      <text x="637" y="43" text-anchor="middle" class="mono chip" fill="#93C5FD">history</text>
+    </g>
+  </g>
+</svg>
