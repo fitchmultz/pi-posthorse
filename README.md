@@ -4,8 +4,6 @@ Posthorse starts fresh context windows for long [Pi](https://github.com/earendil
 
 ![A Pi conversation rolls into a fresh context window. Task notes and the complete session transcript remain available.](.github/readme/context-rollover.png)
 
-_Task notes and session history remain available after rollover._
-
 ## Install and start
 
 Use Node 24.12.0 or later and Pi 1.0.0 or later. Posthorse supports official Pi and [fitchmultz/pi](https://github.com/fitchmultz/pi).
