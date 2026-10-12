@@ -33,8 +33,8 @@ const registration = {
 	].join("\n"),
 };
 
-await test("node:test safe calls retain declaration identity, aliases and nearby Promise ownership", () => {
-	const findings = lintFixture({ files: registration, paths: ["calls.ts"] });
+await test("node:test safe calls retain declaration identity, aliases and nearby Promise ownership", async () => {
+	const findings = await lintFixture({ files: registration, paths: ["calls.ts"] });
 	assert.deepEqual(findings, [
 		{ code: "eslint/no-shadow", file: "calls.ts", line: 11 },
 		...[8, 9, 10, 11, 13, 15].map((line) => ({
@@ -45,12 +45,12 @@ await test("node:test safe calls retain declaration identity, aliases and nearby
 	]);
 });
 
-await test("wrong-package configuration removes the real registration allowance", () => {
+await test("wrong-package configuration removes the real registration allowance", async () => {
 	assert.ok(objectValue(policy.rules));
 	const configured = policy.rules["typescript/no-floating-promises"];
 	assert.ok(Array.isArray(configured) && objectValue(configured[1]));
 	const options = configured[1];
-	const findings = lintFixture({
+	const findings = await lintFixture({
 		files: registration,
 		paths: ["calls.ts"],
 		rules: {
@@ -86,7 +86,7 @@ const codingAgent = [
 ];
 const tui = ["Component", "TUI"];
 
-await test("native Pi, TUI and compiler input allowances exclude local and unrelated package names", () => {
+await test("native Pi, TUI and compiler input allowances exclude local and unrelated package names", async () => {
 	const sdk = [...codingAgent, ...tui, "Node", "ReadonlySessionManager"];
 	const imports = `import type { ${codingAgent.map((name) => `${name} as Native${name}`).join(", ")} } from '@earendil-works/pi-coding-agent';\nimport type { ${tui.map((name) => `${name} as Native${name}`).join(", ")} } from '@earendil-works/pi-tui';\nimport type { Node as NativeNode } from 'typescript/unstable/ast';\ntype NativeReadonlySessionManager = NativeExtensionContext['sessionManager'];\n`;
 	const accepted = sdk
@@ -102,7 +102,7 @@ await test("native Pi, TUI and compiler input allowances exclude local and unrel
 		)
 		.join("\n");
 	const files = { "origins.ts": imports + accepted + "\n" + rejected + "\n" };
-	expectFindings(
+	await expectFindings(
 		{ files },
 		sdk.map((_name, index) => ({
 			code: "typescript/prefer-readonly-parameter-types",

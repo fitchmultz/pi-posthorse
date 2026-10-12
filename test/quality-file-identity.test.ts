@@ -46,8 +46,8 @@ function fileRule(path: string): Readonly<Record<string, unknown>> {
 	};
 }
 
-await test("file-qualified safe calls use real declarations, not spelling or callable-type laundering", () => {
-	expectFindings({ files, paths: ["calls.ts"], rules: fileRule("./approved.ts") }, [
+await test("file-qualified safe calls use real declarations, not spelling or callable-type laundering", async () => {
+	await expectFindings({ files, paths: ["calls.ts"], rules: fileRule("./approved.ts") }, [
 		{ code: "eslint/no-shadow", file: "calls.ts", line: 11 },
 		...[8, 9, 10, 11, 13, 15].map((line) => ({
 			code: "typescript/no-floating-promises",
@@ -57,8 +57,8 @@ await test("file-qualified safe calls use real declarations, not spelling or cal
 	]);
 });
 
-await test("changing to another existing declaration file removes the original exemption", () => {
-	expectFindings({ files, paths: ["calls.ts"], rules: fileRule("./foreign.ts") }, [
+await test("changing to another existing declaration file removes the original exemption", async () => {
+	await expectFindings({ files, paths: ["calls.ts"], rules: fileRule("./foreign.ts") }, [
 		{ code: "eslint/no-shadow", file: "calls.ts", line: 11 },
 		...[5, 6, 8, 10, 11, 13, 15].map((line) => ({
 			code: "typescript/no-floating-promises",
