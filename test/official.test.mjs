@@ -1135,16 +1135,15 @@ test("late queued input defers an explicit handoff that no longer fits", async (
 	);
 });
 
-test("resumed over-budget context rolls over before before_agent_start without a summary request", async (t) => {
-	let beforeAgent = false,
-		nativeBeforePrompt = false,
-		summaryRequests = 0,
-		nextRequest;
-	const h = await fixture(t, {
-		seed(manager, model) {
+for (const trigger of ["user", "custom"]) {
+	test(`resumed over-budget ${trigger} run respects native preflight without a summary request`, async (t) => {
+		let api, modernStart;
+		const trace = [];
+		const persisted = "persisted ".repeat(70_000);
+		const seed = (manager, model) => {
 			manager.appendMessage({
 				role: "user",
-				content: "persisted ".repeat(70_000),
+				content: persisted,
 				timestamp: Date.now(),
 			});
 			manager.appendMessage({
@@ -1161,42 +1160,88 @@ test("resumed over-budget context rolls over before before_agent_start without a
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 				},
 			});
-		},
-		extension(pi) {
-			pi.on("before_agent_start", () => {
-				beforeAgent = true;
-			});
-			pi.on("session_before_compact", () => {
-				nativeBeforePrompt = !beforeAgent;
-			});
-		},
-	});
-	h.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
-	h.faux.setResponses(
-		Array.from({ length: 5 }, () => (ctx) => {
-			if (!beforeAgent) {
-				summaryRequests++;
-				return fauxAssistantMessage("NATIVE_PREPROMPT_SUMMARY");
+		};
+		const h = await fixture(t, {
+			seed: trigger === "user" ? seed : undefined,
+			extension(pi) {
+				api = pi;
+				pi.on("before_agent_start", (event) => {
+					modernStart = "messageType" in event;
+					trace.push(`${event.messageType ?? "user"}_start`);
+				});
+				pi.on("session_before_compact", () => {
+					trace.push("compact");
+				});
+			},
+		});
+		if (trigger === "custom") {
+			h.faux.setResponses([fauxAssistantMessage("Host contract identified.")]);
+			await h.session.prompt("Identify the user-start contract.");
+			seed(h.sessionManager, h.faux.getModel());
+			h.session.refreshContext();
+			trace.length = 0;
+		}
+		h.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
+		const requests = [];
+		h.faux.setResponses(
+			Array.from({ length: 5 }, () => (ctx) => {
+				trace.push("request");
+				requests.push(structuredClone(ctx.messages));
+				return fauxAssistantMessage("New run completed.");
+			}),
+		);
+		const input =
+			trigger === "user"
+				? `NEW_OWNER_AFTER_PREFLIGHT ${"q".repeat(100_000)}`
+				: "NEW_CUSTOM_AFTER_PREFLIGHT: background work completed.";
+		if (trigger === "user") {
+			await h.session.prompt(input);
+		} else {
+			api.sendMessage(
+				{ customType: "background-completion", content: input, display: true },
+				{ triggerTurn: true },
+			);
+			await h.session.waitForIdle();
+		}
+		const preflight = trigger === "user" || modernStart;
+		assert.deepEqual(
+			trace,
+			preflight ? ["compact", `${trigger}_start`, "request"] : ["request", "compact"],
+		);
+		assert.equal(
+			requests.length,
+			1,
+			"the only provider request delivers the input, not a summary",
+		);
+		assert.equal(h.faux.state.callCount, trigger === "user" ? 1 : 2);
+		assert.equal(boundaries(h).length, 1);
+		const boundary = boundaries(h)[0];
+		assert.ok(boundary.summary.length <= 20_000);
+		assert.equal(boundary.usage, undefined, "no summary-model usage");
+		assert.match(boundary.summary, /persisted/);
+		if (preflight) {
+			assert.ok(!boundary.summary.includes(input));
+		} else {
+			assert.ok(boundary.summary.includes(input), "official recovery follows delivery");
+		}
+		assert.equal(
+			requests[0].filter((message) => textOf(message) === persisted).length,
+			preflight ? 0 : 1,
+		);
+		assert.equal(requests[0].filter((message) => textOf(message) === input).length, 1);
+		if (trigger === "custom") {
+			if (preflight) {
+				assert.ok(JSON.stringify(requests[0]).length < 30_000);
 			}
-			nextRequest = ctx.messages;
-			return fauxAssistantMessage("New prompt completed.");
-		}),
-	);
-	const input = `NEW_OWNER_AFTER_PREFLIGHT ${"q".repeat(100_000)}`;
-	await h.session.prompt(input);
-	assert.equal(nativeBeforePrompt, true);
-	assert.equal(summaryRequests, 0);
-	assert.equal(h.faux.state.callCount, 1);
-	assert.equal(boundaries(h).length, 1);
-	assert.match(boundaries(h)[0].summary, /persisted/);
-	assert.doesNotMatch(boundaries(h)[0].summary, /NATIVE_PREPROMPT_SUMMARY/);
-	assert.doesNotMatch(boundaries(h)[0].summary, /NEW_OWNER_AFTER_PREFLIGHT/);
-	assert.equal(
-		nextRequest.filter((message) => textOf(message) === input).length,
-		1,
-		"newly submitted input survives unchanged, separate from the recovery record",
-	);
-});
+			assert.equal(
+				h.sessionManager
+					.getBranch()
+					.filter((entry) => entry.customType === "background-completion").length,
+				1,
+			);
+		}
+	});
+}
 
 test("same-boundary replacement and custom-message references recover committed text and images", async (t) => {
 	const image = {

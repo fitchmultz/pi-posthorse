@@ -41,6 +41,10 @@ function registerGuidance(pi: ExtensionAPI, policy: SnapshotReader): void {
 	pi.on("before_agent_start", (event) => {
 		promptOptions = event.systemPromptOptions;
 	});
+	pi.on("agent_settled", () => {
+		// Older hosts skip the start hook for custom runs; do not reuse a settled run's options.
+		promptOptions = undefined;
+	});
 	pi.on("context_with_system", (event, ctx) => {
 		const guidance = buildGuidance(policy(ctx));
 		const system =
