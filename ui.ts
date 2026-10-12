@@ -1,6 +1,12 @@
 import type { ExtensionAPI, MessageRenderer } from "@earendil-works/pi-coding-agent";
-import { Box, MouseRegion, truncateToWidth, type Component } from "@earendil-works/pi-tui";
-import { clean, hint, textBlock, textOf } from "./src/ui/text.ts";
+import {
+	Box,
+	MouseRegion,
+	truncateToWidth,
+	type Component,
+	type Text,
+} from "@earendil-works/pi-tui";
+import { clean, hint, leadingRows, textBlock, textOf } from "./src/ui/text.ts";
 
 export type { PosthorseDisplay } from "./src/ui/display.ts";
 export { toolCards } from "./src/ui/cards.ts";
@@ -27,12 +33,13 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 		const preview = window
 			? raw.slice(handoffAt < 0 ? raw.length : handoffAt + handoffLabel.length)
 			: raw;
-		const fullText = textBlock(raw, theme);
-		const previewText = textBlock(preview, theme);
+		const previewRows = window ? 2 : 3;
+		const previewText = leadingRows(preview, theme, "toolOutput", previewRows);
+		let fullText: Text | undefined;
 		const historyText = textBlock("Earlier conversation remains in history.", theme, "muted");
 		const content: Component = {
 			invalidate() {
-				// Message layout is recomputed for the supplied width without cached rows.
+				// Pi calls the renderer again on invalidation, so cached rows never outlive a theme.
 			},
 			render(width) {
 				const padding = Math.min(
@@ -46,10 +53,10 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 					inner,
 				);
 				const body = view.expanded
-					? fullText.render(inner)
+					? (fullText ??= textBlock(raw, theme)).render(inner)
 					: [
 							...(window ? historyText.render(inner).slice(0, 2) : []),
-							...previewText.render(inner).slice(0, window ? 2 : 3),
+							...previewText(inner).slice(0, previewRows),
 							hint(theme, inner),
 						];
 				const box = new Box(padding, 1, (line) => theme.bg("customMessageBg", line));
