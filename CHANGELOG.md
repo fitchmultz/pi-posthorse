@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.2 — 2026-10-12
+
+- Search all-session history faster with the same results. Ripgrep prefilters the newest session
+  files first and older ones only when needed, queries with quotes, brackets, colons or label
+  words keep a prefilter, and lines that cannot match skip JSON parsing. On real archives, common
+  searches take 0.6–3.5 s instead of 1.8–9.5 s at 18.5 GB, and a query with a colon takes 0.13 s
+  instead of 5.8 s at 1.7 GB. See [performance](docs/performance.md).
+- Fix all-session search skipping session files whose matching text has a dotted capital I (`İ`)
+  or an unpaired surrogate when ripgrep is available.
+- Wrap only the rows collapsed tool cards and reminders show. Resizing or re-theming long note and
+  history results costs 0.1–0.2 ms per card instead of up to 2.4 ms, with identical previews.
+- Run independent lint probes and test files concurrently (local `npm run verify` 33 s → 13 s).
+  CI caches the verified native checkers and qualifies both hosts in parallel, so warm
+  pull-request checks take about 2 minutes instead of 17–19.
+
 ## 0.9.1 — 2026-10-12
 
 - Discard forced-prompt options when a run settles so idle custom wakeups on official Pi do not
