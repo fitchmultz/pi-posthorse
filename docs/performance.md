@@ -14,6 +14,7 @@ These were measured and left alone, because Posthorse's share is already small.
 | Automatic handoff, compaction hook | 0.5 ms, 5.4 ms on a 112 MB session                                       |
 | Current-branch `history` search    | 6–9 ms; 43–46 ms when a query matches nothing in a 112 MB session        |
 | Current-branch `history read`      | 0.6–1.1 ms                                                               |
+| `notes` operations                 | 0.2–0.8 ms; across 500 notes (14 MB), list 2 ms and search 3–16 ms       |
 
 ## All-session history search
 
