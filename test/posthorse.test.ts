@@ -3987,7 +3987,7 @@ test("all-session history cursors fit the declared limit for nested session file
 	}
 });
 
-test("all-session search finds the same entries without ripgrep, and queries raw JSONL cannot show skip its prefilter", async () => {
+test("all-session search finds the same entries with or without ripgrep, including text raw JSONL cannot show", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-prefilter-"));
 	try {
 		const archive = (name: string, content: string) =>
@@ -4003,6 +4003,8 @@ test("all-session search finds the same entries without ripgrep, and queries raw
 		archive("quoted", 'say "needle" twice');
 		archive("plain", "a plain needle");
 		archive("other", "nothing here");
+		archive("dotted", "İSTANBUL");
+		archive("lone", "half \ud83d moon");
 		writeArchive(
 			join(dir, "bare.jsonl"),
 			JSON.stringify({ type: "context_window", id: "bare", parentId: null }),
@@ -4020,10 +4022,11 @@ test("all-session search finds the same entries without ripgrep, and queries raw
 			]
 				.map((match) => match[1])
 				.sort();
-		// Session JSONL stores quotes escaped, and "No handoff" exists only in the rendered entry,
-		// so a raw-text prefilter would drop both files.
-		const queries = ["needle", '"needle"', "No handoff"];
-		const expected = [["plain", "quoted"], ["quoted"], ["bare"]];
+		// Session JSONL stores quotes and lone surrogates escaped, "No handoff" exists only in the
+		// rendered entry, and İ lowercases to two characters, so a plain raw-text prefilter would
+		// drop these files.
+		const queries = ["needle", '"needle"', "No handoff", "İstanbul", "half \ud83d"];
+		const expected = [["plain", "quoted"], ["quoted"], ["bare"], ["dotted"], ["lone"]];
 		assert.deepEqual(await Promise.all(queries.map(hits)), expected);
 		const { PATH, PI_CODING_AGENT_DIR } = process.env;
 		Object.assign(process.env, { PATH: "", PI_CODING_AGENT_DIR: dir });
@@ -4069,7 +4072,7 @@ test("all-session search still finds text that exists only in normalized entries
 		const image = (mimeType?: string) => ({
 			type: "image",
 			data: "AA==",
-			...(mimeType !== undefined && mimeType !== "" ? { mimeType } : {}),
+			...(mimeType === undefined ? {} : { mimeType }),
 		});
 		// One entry per flattenEntry branch, so every label it adds is exercised. Ids, headers, and paths carry
 		// no label words or digits, so a query can only reach an entry's file through the entry itself.
@@ -4083,6 +4086,7 @@ test("all-session search still finds text that exists only in normalized entries
 						{ type: "text", text: "two shots" },
 						image("image/png"),
 						image("image/jpeg"),
+						image(""),
 						image(),
 					],
 				},
@@ -4142,6 +4146,7 @@ test("all-session search still finds text that exists only in normalized entries
 			},
 			{ type: "context_window", id: "fresh" },
 			{ type: "context_window", id: "handed", handoff: "carry on" },
+			{ type: "custom_message", id: "plain", content: "hush" },
 			{
 				type: "context_edit",
 				id: "trim",
@@ -4149,12 +4154,13 @@ test("all-session search still finds text that exists only in normalized entries
 				replacement: { content: "trimmed" },
 			},
 		];
-		for (const entry of entries) {
+		for (const { type, id, ...fields } of entries) {
 			writeFileSync(
-				join(dir, `${entry.id}.jsonl`),
+				join(dir, `${id}.jsonl`),
 				[
 					{ type: "session", id: "s", cwd: "/" },
-					{ ...entry, parentId: null, timestamp: "t" },
+					// Pi's key order, which lets scans skip lines without parsing them.
+					{ type, id, parentId: null, timestamp: "t", ...fields },
 				]
 					.map((line) => JSON.stringify(line))
 					.join("\n"),

@@ -194,6 +194,53 @@ test("native cards cap actual wrapped rows and expose complete legacy text by cl
 	assert.match(text(component), / END/);
 });
 
+test("collapsed previews show exactly the first rows of the expanded text", async () => {
+	const renderer = (await setup()).messages.get("posthorse-reminder");
+	const bodies = [
+		`START ${"👩🏽‍💻".repeat(800)} END`,
+		"👨‍👩‍👧‍👦 ".repeat(500),
+		`${"e".padEnd(31, "\u0301")} `.repeat(200),
+		`界 👩🏽‍💻 é ${"長".repeat(3000)}`,
+		"x".repeat(6000),
+		`one\ntwo\nthree\n${"four ".repeat(1500)}`,
+		"a\tb ".repeat(1500),
+		"one\ntwo\nthree",
+	];
+	const note = await card("notes", { op: "read", path: "a.md" });
+	for (const body of bodies) {
+		note.updateResult(result(body));
+		const reminder = new CustomMessageComponent(
+			{
+				role: "custom",
+				customType: "posthorse-reminder",
+				display: true,
+				timestamp: 0,
+				content: body,
+			},
+			renderer,
+			undefined,
+			0,
+		);
+		for (const [component, alwaysHints] of [
+			[note, false],
+			[reminder, true],
+		] as const) {
+			for (const width of [24, 40, 80, 196]) {
+				component.setExpanded(true);
+				const expanded = lines(component, width);
+				component.setExpanded(false);
+				const collapsed = lines(component, width);
+				const start = collapsed.findIndex((row) => row.includes("▸")) + 1;
+				const hinted = collapsed.at(-2)?.includes("…") === true;
+				const full = expanded.slice(start, -1);
+				const label = `${body.slice(0, 12)} at ${width} columns`;
+				assert.deepEqual(collapsed.slice(start, hinted ? -2 : -1), full.slice(0, 3), label);
+				assert.equal(hinted, alwaysHints || full.length > 3, label);
+			}
+		}
+	}
+});
+
 test("notes show page range and next offset even when the preview fills the compact card", async () => {
 	const cwd = mkdtempSync(`${tmpdir()}/posthorse-render-`);
 	try {

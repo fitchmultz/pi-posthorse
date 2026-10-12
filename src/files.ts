@@ -112,25 +112,31 @@ export async function publishFile(
 		throw error;
 	}
 }
-/** Split on LF only; Unicode line separators are valid inside JSONL strings and notes. */
-export async function* lfLines(file: string, signal?: AbortSignal): AsyncGenerator<string> {
-	const stream = createReadStream(file, { encoding: "utf8", signal });
-	let pending: string[] = [];
+/** Raw LF-delimited lines; UTF-8 never encodes LF inside another character. */
+export async function* lfLines(
+	file: string,
+	signal?: AbortSignal,
+	highWaterMark = 64 * 1024,
+): AsyncGenerator<Buffer> {
+	const stream = createReadStream(file, { signal, highWaterMark });
+	let pending: Buffer[] = [];
 	for await (const chunk of stream) {
-		if (typeof chunk !== "string") {
-			throw new Error("Expected a UTF-8 text stream.");
+		if (!Buffer.isBuffer(chunk)) {
+			throw new Error("Expected a byte stream.");
 		}
-		const lines = chunk.split("\n");
-		pending.push(lines[0] ?? "");
-		if (lines.length > 1) {
-			yield pending.join("");
-			yield* lines.slice(1, -1);
-			pending = [lines.at(-1) ?? ""];
+		let start = 0;
+		for (let end = chunk.indexOf(10); end !== -1; end = chunk.indexOf(10, start)) {
+			const line = chunk.subarray(start, end);
+			yield pending.length === 0 ? line : Buffer.concat([...pending, line]);
+			pending = [];
+			start = end + 1;
+		}
+		if (start < chunk.length) {
+			pending.push(chunk.subarray(start));
 		}
 	}
-	const last = pending.join("");
-	if (last !== "") {
-		yield last;
+	if (pending.length > 0) {
+		yield Buffer.concat(pending);
 	}
 }
 /** Git's heuristic: a NUL in the first 8,000 bytes marks binary content. */

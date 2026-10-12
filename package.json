@@ -1,6 +1,6 @@
 {
 	"name": "pi-posthorse",
-	"version": "0.9.1",
+	"version": "0.9.2",
 	"type": "module",
 	"description": "Posthorse: fresh context, same journey. No-summary context rollover for Pi, with sparse budget reminders, handoffs, notes, and history.",
 	"keywords": [
@@ -32,7 +32,7 @@
 	},
 	"scripts": {
 		"check": "tsc",
-		"quality:prepare": "node scripts/setup-oxlint-engine.ts && node scripts/setup-quality-engine.ts",
+		"quality:prepare": "node scripts/quality-prepare.ts",
 		"quality:policy": "node scripts/quality-policy.ts",
 		"quality:probes": "npm run quality:prepare && node --test test/quality*.test.ts",
 		"lint": "npm run quality:prepare && npm run quality:policy && oxlint --deny-warnings .",
@@ -42,9 +42,9 @@
 		"format:check": "oxfmt --check .",
 		"build": "npm pack --dry-run",
 		"verify": "npm run lint && npm run format:check && npm run check:compat && npm run build",
-		"check:compat": "npm run check && npm test && npm run test:native",
+		"check:compat": "npm run check && npm test",
 		"test:native": "node --import ./test/pi-loader.ts --test test/host.test.mjs",
-		"test": "npm run quality:prepare && node --import ./test/pi-loader.ts --test test/*.test.ts",
+		"test": "npm run quality:prepare && node --import ./test/pi-loader.ts --test test/*.test.ts test/host.test.mjs",
 		"prepublishOnly": "npm run verify"
 	},
 	"peerDependencies": {

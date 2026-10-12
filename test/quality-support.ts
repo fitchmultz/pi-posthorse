@@ -1,17 +1,25 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { objectValue, readObject } from "../scripts/quality-policy.ts";
 
 export const repository = resolve(import.meta.dirname, "..");
 export const policy = readObject(join(repository, ".oxlintrc.json"));
+/** Independent CLI probes are process-bound; run about one per core. */
+export const probeConcurrency = availableParallelism();
 
 export interface Finding {
 	readonly code: string;
 	readonly file: string;
 	readonly line: number;
+}
+export interface CliResult {
+	readonly status: number | null;
+	readonly signal: NodeJS.Signals | null;
+	readonly stdout: string;
+	readonly stderr: string;
 }
 export interface FixtureOptions {
 	readonly files: Readonly<Record<string, string>>;
@@ -114,7 +122,26 @@ function finding(value: unknown): Finding {
 	};
 }
 
-export function lintFixture(options: FixtureOptions): readonly Finding[] {
+/** Run a CLI without blocking other probes; spawn failures reject. */
+export function runCli(command: string, args: readonly string[], cwd: string): Promise<CliResult> {
+	return new Promise((resolveResult, reject) => {
+		const child = spawn(command, args, { cwd, timeout: 30_000 });
+		let stdout = "";
+		let stderr = "";
+		child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+			stdout += chunk;
+		});
+		child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+		child.on("error", reject);
+		child.on("close", (status, signal) => {
+			resolveResult({ status, signal, stdout, stderr });
+		});
+	});
+}
+
+export async function lintFixture(options: FixtureOptions): Promise<readonly Finding[]> {
 	const project = fixture(options);
 	try {
 		const paths =
@@ -122,12 +149,11 @@ export function lintFixture(options: FixtureOptions): readonly Finding[] {
 			Object.keys(options.files).filter(
 				(file) => /\.[cm]?[jt]sx?$/u.test(file) && !file.startsWith("node_modules/"),
 			);
-		const result = spawnSync(
+		const result = await runCli(
 			join(repository, "node_modules/.bin/oxlint"),
 			["--threads=2", "--format=json", ...paths],
-			{ cwd: project.root, encoding: "utf8", timeout: 30_000 },
+			project.root,
 		);
-		assert.equal(result.error, undefined, "CLI must run successfully");
 		assert.equal(result.signal, null, "CLI must not crash or timeout");
 		assert.equal(result.stderr, "", "unexpected engine/configuration warnings");
 		const output: unknown = JSON.parse(result.stdout);
@@ -148,8 +174,11 @@ export function lintFixture(options: FixtureOptions): readonly Finding[] {
 	}
 }
 
-export function expectFindings(options: FixtureOptions, expected: readonly Finding[]): void {
-	const actual = lintFixture(options);
+export async function expectFindings(
+	options: FixtureOptions,
+	expected: readonly Finding[],
+): Promise<void> {
+	const actual = await lintFixture(options);
 	const sort = (items: readonly Finding[]) =>
 		items.map((item) => `${item.file}:${item.line}:${item.code}`).toSorted();
 	assert.deepEqual(sort(actual), sort(expected));

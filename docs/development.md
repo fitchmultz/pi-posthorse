@@ -14,7 +14,7 @@ npm run check:compat                   # typecheck, unit tests, and the real-SDK
 Oxlint owns code quality; Oxfmt owns formatting. See [Code quality](quality.md) for coverage,
 exception governance, editor setup, and the enforced acceptance workflow.
 
-`npm run check` type-checks the extension, renderers, and tests against the official npm declarations. `npm test` covers reminder policy, notes/history behavior, failed note replacement, and real native card components, including width and expansion.
+`npm run check` type-checks the extension, renderers, and tests against the official npm declarations. `npm test` covers reminder policy, notes/history behavior, failed note replacement, real native card components (including width and expansion), the native lint probes, and the `test:native` suites, running files and independent lint probes in parallel. [Performance](performance.md) records measured baselines.
 
 Development dependency policy: update TypeBox alongside the Pi cohort to match the host's version, not independently. Official 1.0 uses 1.3.27. The earlier 0.99.2 startup investigation is historical, not a current support target or a claim about 1.0 performance. Qualify later releases against their actual packaged SDK/CLI and companion graph; resolve companions relative to coding-agent because its shrinkwrap nests dependencies. Revisit the TypeBox pin when the host changes its dependency.
 

@@ -10,8 +10,9 @@ import {
 import { historyHit, seenText, reverseWindowEntries } from "./history-entries.ts";
 import { shortKey } from "./message-text.ts";
 import {
-	filesContaining,
+	needleLines,
 	prefilterNeedles,
+	type RawLine,
 	scopedSessionFiles,
 	sessionWindowEntries,
 } from "./session-files.ts";
@@ -192,13 +193,14 @@ async function scanArchive(
 		readonly source: string;
 		readonly query: string;
 		readonly signal?: AbortSignal;
+		readonly wanted?: (bytes: RawLine) => boolean;
 		readonly inContext: (entry: EntryLike) => boolean;
 	},
 	accumulator: SearchProgress,
 ): Promise<{ readonly groups: readonly (readonly HistoryHit[])[]; readonly skipped: number }> {
 	const collector = archiveCollector(accumulator);
 	let skipped = 0;
-	for await (const item of sessionWindowEntries(file, options.signal)) {
+	for await (const item of sessionWindowEntries(file, options.signal, options.wanted)) {
 		const hit = historyHit(item, options.query, options.source);
 		if (hit === undefined) {
 			continue;
@@ -221,10 +223,7 @@ async function archivedMatches(
 	accumulator: SearchProgress,
 ): Promise<number> {
 	const needles = prefilterNeedles(search.query);
-	const candidates =
-		needles === undefined
-			? undefined
-			: await filesContaining(source.dir, needles, search.signal);
+	const wanted = needles === undefined ? undefined : needleLines(needles);
 	const current =
 		source.currentFile === undefined || source.currentFile === ""
 			? undefined
@@ -235,7 +234,7 @@ async function archivedMatches(
 		cwd: source.cwd,
 		currentFile: source.currentFile,
 		signal: search.signal,
-		candidates: candidates === undefined ? undefined : (candidate) => candidates.has(candidate),
+		needles,
 	})) {
 		const inCurrent = resolve(file) === current;
 		const recent = await scanArchive(
@@ -244,6 +243,7 @@ async function archivedMatches(
 				source: relative(source.dir, file),
 				query: search.query,
 				signal: search.signal,
+				wanted,
 				inContext: (entry) => inCurrent && search.inContext(entry),
 			},
 			accumulator,
