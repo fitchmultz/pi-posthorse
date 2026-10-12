@@ -1,8 +1,9 @@
 # Corrected native checkers
 
-The locked npm CLI and editor use two native backends. `quality:prepare` builds the pinned Oxlint
-NAPI correction first, then the corrected type-aware Go checker. Each standalone preparation
-command fails on incompatible dependencies, source/patch/build errors or failed checksum checks.
+The locked npm CLI and editor use two native backends. `quality:prepare` prepares the pinned Oxlint
+NAPI correction and the corrected type-aware Go checker concurrently, failing if either fails. Each
+standalone preparation command fails on incompatible dependencies, source/patch/build errors or
+failed checksum checks.
 
 ## Native import cycles
 
@@ -169,12 +170,18 @@ A pristine installed package can be repatched from the verified cache.
 
 Both output caches live under `pi-quality-engine` in `npm_config_cache` when npm supplies a cache
 directory, otherwise under the project's `node_modules/.cache`. Only compiled outputs and receipts
-are shared, never source trees, installed dependencies or Cargo/Go build directories. CI's strict
-quality job compiles and probes the corrections once, then uploads a tar archive preserving binary
-permissions. Both isolated host qualifications download those same-run outputs and independently
-verify their input identities and checksums before copying them into fresh platform dependencies.
-All compiler, checker, behavior, native-host and installed-consumer assertions still run for each
-host. Build artifacts are neither maintained source nor part of the published extension.
+are shared, never source trees, installed dependencies or Cargo/Go build directories.
+
+CI keeps each engine's output directory in the GitHub Actions cache. Its exact key covers the
+engine's patches, preparation script (with its pinned revisions), runner OS/architecture and pinned
+compiler version, so changing any of them builds again; there are no partial-match restores. The
+strict quality job saves a missing entry right after preparation. Pull requests can restore entries
+saved by their own earlier runs or by `main`, which refreshes them whenever these inputs change.
+The strict quality job and both isolated host qualifications run in parallel. Each restores the
+entries and independently verifies input identities and checksums before copying outputs into fresh
+platform dependencies. A miss compiles inside that job, so only build time changes. All compiler,
+checker, behavior, native-host and installed-consumer assertions still run for each host. Build
+artifacts are neither maintained source nor part of the published extension.
 
 ## Enforcement and removal
 
