@@ -95,6 +95,7 @@ async function fixture(t, options = {}) {
 				options.extension?.(pi);
 			},
 			createPosthorse(),
+			...(options.afterExtension ? [options.afterExtension] : []),
 		],
 	});
 	await resourceLoader.reload();
@@ -932,6 +933,98 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 				"run-only forced policy must not replace the saved structured prompt",
 			);
 		}
+	});
+}
+
+for (const mode of ["unforced", "forced", "forced-user-to-custom"]) {
+	test(`idle custom wakeup gets current request-local guidance (${mode})`, async (t) => {
+		let api, modernStart, projected;
+		let forcePrompt = mode === "forced-user-to-custom";
+		const starts = [];
+		const h = await fixture(t, {
+			customPrompt: "CUSTOM_RUN_POLICY",
+			extension(pi) {
+				api = pi;
+				pi.on("before_agent_start", (event, ctx) => {
+					modernStart = "messageType" in event;
+					starts.push({
+						messageType: event.messageType ?? "user",
+						message: event.message,
+						hasPrompt: "prompt" in event,
+						idle: ctx.isIdle(),
+						options: event.systemPromptOptions,
+					});
+					if (forcePrompt) {
+						return { systemPrompt: "OPAQUE_FORCED_POLICY" };
+					}
+				});
+			},
+			afterExtension(pi) {
+				pi.on("context_with_system", (event) => {
+					projected = structuredClone(event.messages);
+				});
+			},
+		});
+		h.faux.setResponses([fauxAssistantMessage("First run completed.")]);
+		await h.session.prompt("Initial owner request.");
+		assert.equal(starts.length, 1);
+		const previousOptions = starts[0].options;
+		forcePrompt = mode === "forced";
+		h.settingsManager.applyOverrides({ compaction: { reserveTokens: 32_000 } });
+		let request;
+		h.faux.setResponses([
+			(ctx) => {
+				request = structuredClone(ctx.messages);
+				return fauxAssistantMessage("Custom run completed.");
+			},
+		]);
+		const content = "BACKGROUND_COMPLETION: inspect current state.";
+		api.sendMessage(
+			{ customType: "background-completion", content, display: true },
+			{ triggerTurn: true },
+		);
+		await h.session.waitForIdle();
+		assert.equal(h.faux.state.callCount, 2);
+		assert.equal(starts.length, modernStart ? 2 : 1);
+		if (modernStart) {
+			assert.equal(starts[1].messageType, "custom");
+			assert.equal(starts[1].hasPrompt, false);
+			assert.equal(starts[1].idle, false);
+			assert.equal(textOf(starts[1].message), content);
+			assert.notEqual(starts[1].options, previousOptions);
+		}
+		const forced = modernStart && forcePrompt;
+		const local = projected.filter((message) => message.customType === "posthorse-guidance");
+		assert.equal(local.length, forced ? 1 : 0);
+		const prompt = getCurrentSystemPrompt(request);
+		const guidance = forced ? textOf(local[0]) : prompt;
+		assert.match(guidance, /Configured context capacity: 100,000 tokens/);
+		assert.match(guidance, /rollover line is 68,001 tokens used/);
+		assert.doesNotMatch(guidance, /83,617/);
+		assert.equal(
+			[prompt, ...request.filter((message) => message.role !== "system").map(textOf)]
+				.join("\n")
+				.split("## Context self-management (Posthorse)").length - 1,
+			1,
+		);
+		if (forced) {
+			assert.equal(prompt, "OPAQUE_FORCED_POLICY");
+			assert.equal(local[0].display, false);
+		} else {
+			assert.match(prompt, /CUSTOM_RUN_POLICY/);
+			assert.doesNotMatch(prompt, /OPAQUE_FORCED_POLICY/);
+			assert.equal(
+				request.filter((message) => typeof message.sections?.posthorse === "string").length,
+				1,
+			);
+		}
+		assert.equal(request.filter((message) => textOf(message) === content).length, 1);
+		const saved = h.sessionManager.getBranch();
+		assert.equal(
+			saved.filter((entry) => entry.customType === "background-completion").length,
+			1,
+		);
+		assert.equal(saved.filter((entry) => entry.customType === "posthorse-guidance").length, 0);
 	});
 }
 

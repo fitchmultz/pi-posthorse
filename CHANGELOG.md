@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 — 2026-10-12
+
+- Discard forced-prompt options when a run settles so idle custom wakeups on official Pi do not
+  reuse the previous user run's guidance-delivery mode.
+- Qualify idle custom wakeups, forced/unforced prompt transitions, and over-budget recovery on
+  both host contracts. Newer hosts compact before custom runs; official 1.1.0 can send oversized
+  history first and recover afterward, without a Posthorse summary-model request.
+
 ## 0.9.0 — 2026-10-10
 
 - Skip checkpoint reminders on turns that end the run, preserving final answers without waking
