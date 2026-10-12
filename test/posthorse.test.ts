@@ -3283,6 +3283,65 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 	}
 });
 
+test("notes for Pi package checkouts move to the agent directory and survive pi update", async () => {
+	// An unresolved temporary path also covers a symlinked agent directory on macOS.
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-package-notes-"));
+	const agentDir = join(dir, "agent");
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const git = (cwd: string, ...args: readonly string[]) =>
+			execFileSync("git", args, { cwd, stdio: "ignore" });
+		const checkout = join(agentDir, "git", "github.com", "acme", "tool");
+		const legacy = join(checkout, ".pi", "notes");
+		mkdirSync(join(checkout, "src"), { recursive: true });
+		git(checkout, "init", "-q");
+		mkdirSync(join(legacy, "task"), { recursive: true });
+		writeFileSync(join(legacy, "task", "state.md"), "Saved before the move.");
+		const { tools, context } = await setup();
+		const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
+			run(tools, "notes", params, { ...context, cwd });
+		const moved = join(agentDir, "notes", "github.com", "acme", "tool");
+
+		const listing = toolText(await notes(join(checkout, "src"), { op: "list" }));
+		assert.ok(listing.startsWith(`Notes directory: ${moved}\ntask/state.md  `), listing);
+		await notes(checkout, { op: "append", path: "task/state.md", content: "Appended after." });
+		assert.equal(
+			readFileSync(join(legacy, "task", "state.md"), "utf8"),
+			"Saved before the move.\nAppended after.\n",
+			"sessions running an earlier Posthorse still reach the notes through the old path",
+		);
+		// pi update resets a git package to its new commit and deletes everything Git does not track.
+		git(checkout, "clean", "-fdx", "-q");
+		assert.equal(existsSync(join(checkout, ".pi")), false);
+		assert.equal(
+			toolText(await notes(checkout, { op: "read", path: "task/state.md" })),
+			`File: ${join(moved, "task", "state.md")}\nSaved before the move.\nAppended after.\n`,
+		);
+
+		// Project-scoped packages install under the project's .pi/git, and paths can nest groups.
+		const project = join(dir, "project", ".pi", "git", "gitlab.com", "group", "sub", "pkg");
+		mkdirSync(project, { recursive: true });
+		git(project, "init", "-q");
+		await notes(project, { op: "write", path: "state.md", content: "Project package." });
+		assert.equal(
+			readFileSync(
+				join(agentDir, "notes", "gitlab.com", "group", "sub", "pkg", "state.md"),
+				"utf8",
+			),
+			"Project package.",
+		);
+		assert.equal(existsSync(join(project, ".pi")), false);
+	} finally {
+		if (previous === undefined) {
+			delete process.env.PI_CODING_AGENT_DIR;
+		} else {
+			process.env.PI_CODING_AGENT_DIR = previous;
+		}
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("notes list and search follow aliases while skipping cycles and missing targets", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-cycles-"));
 	try {
