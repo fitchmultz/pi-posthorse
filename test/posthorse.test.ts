@@ -3283,6 +3283,78 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 	}
 });
 
+test("notes for Pi package checkouts move to the agent directory and survive pi update", async () => {
+	// An unresolved temporary path also covers a symlinked agent directory on macOS.
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-package-notes-"));
+	const agentDir = join(dir, "agent");
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const git = (cwd: string, ...args: readonly string[]) =>
+			execFileSync("git", args, { cwd, stdio: "ignore" });
+		const owner = join(agentDir, "git", "github.com", "acme");
+		const checkout = join(owner, "tool");
+		const legacy = join(checkout, ".pi", "notes");
+		mkdirSync(join(checkout, "src"), { recursive: true });
+		git(checkout, "init", "-q");
+		mkdirSync(join(legacy, "task"), { recursive: true });
+		writeFileSync(join(legacy, "task", "state.md"), "Saved before the move.");
+		const { tools, context } = await setup();
+		const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
+			run(tools, "notes", params, { ...context, cwd });
+		const moved = join(agentDir, "notes", "github.com", "acme", "tool");
+
+		const listing = toolText(await notes(join(checkout, "src"), { op: "list" }));
+		assert.ok(listing.startsWith(`Notes directory: ${moved}\ntask/state.md  `), listing);
+		await notes(checkout, { op: "append", path: "task/state.md", content: "Appended after." });
+		assert.equal(
+			readFileSync(join(legacy, "task", "state.md"), "utf8"),
+			"Saved before the move.\nAppended after.\n",
+			"sessions running an earlier Posthorse still reach the notes through the old path",
+		);
+		// pi update resets a git package to its new commit and deletes everything Git does not track.
+		git(checkout, "clean", "-fdx", "-q");
+		assert.equal(existsSync(join(checkout, ".pi")), false);
+		assert.equal(
+			toolText(await notes(checkout, { op: "read", path: "task/state.md" })),
+			`File: ${join(moved, "task", "state.md")}\nSaved before the move.\nAppended after.\n`,
+		);
+
+		// A session still running an older Posthorse writes inside the checkout again after the
+		// update removed the link. Both versions survive, and the link returns.
+		mkdirSync(join(legacy, "task"), { recursive: true });
+		writeFileSync(join(legacy, "task", "state.md"), "Written by an older Posthorse.");
+		const relisted = toolText(await notes(checkout, { op: "list" }));
+		const copy = requireValue(/^(from-checkout-\d+)\/task\/state\.md {2}/m.exec(relisted))[1];
+		assert.equal(
+			readFileSync(join(moved, copy, "task", "state.md"), "utf8"),
+			"Written by an older Posthorse.",
+		);
+		assert.equal(
+			readFileSync(join(legacy, "task", "state.md"), "utf8"),
+			"Saved before the move.\nAppended after.\n",
+		);
+
+		// Pi cleans only the checkouts, so a folder holding several packages keeps its own notes.
+		await notes(realpathSync(owner), {
+			op: "write",
+			path: "fleet.md",
+			content: "Owner folder.",
+		});
+		assert.equal(
+			readFileSync(join(owner, ".pi", "notes", "fleet.md"), "utf8"),
+			"Owner folder.",
+		);
+	} finally {
+		if (previous === undefined) {
+			delete process.env.PI_CODING_AGENT_DIR;
+		} else {
+			process.env.PI_CODING_AGENT_DIR = previous;
+		}
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("notes list and search follow aliases while skipping cycles and missing targets", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-cycles-"));
 	try {

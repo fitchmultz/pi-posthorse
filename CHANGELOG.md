@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3 — 2026-10-12
+
+- Keep notes for the Git packages Pi installs in `~/.pi/agent/git/` under
+  `~/.pi/agent/notes/<host>/<path>`. `pi update` deletes untracked files in those checkouts, which
+  removed notes kept in their `.pi/notes`. Notes found in a checkout move there, and the old path
+  links to the new one for sessions still running an earlier Posthorse.
+
 ## 0.9.2 — 2026-10-12
 
 - Search all-session history faster with the same results. Ripgrep prefilters the newest session
