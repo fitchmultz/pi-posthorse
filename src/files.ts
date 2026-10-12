@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
 	createReadStream,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readFileSync,
 	realpathSync,
@@ -22,7 +23,7 @@ import {
 	unlink,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "./contracts.ts";
 
 async function lstatOrMissing(path: string) {
@@ -197,45 +198,45 @@ function notesRoot(cwd: string): string {
 	}
 }
 /**
- * `pi update` resets the Git packages Pi installs and runs `git clean -fdx` in them, deleting
- * notes kept inside. Notes for those checkouts live in the agent directory under the same
- * host and path.
+ * `pi update` resets the Git packages Pi installs in the agent directory and runs `git clean -fdx`
+ * in them, deleting notes kept inside. Their notes live in the agent directory under the same host
+ * and path instead.
+ * ponytail: packages installed for one project (its `.pi/git/`) still keep notes in the checkout;
+ * give them a per-project location if sessions start working inside them.
+ * ponytail: notes a package commits under `.pi/notes` return with each update and move into
+ * another `from-checkout-*` folder; skip tracked files if a package ever commits its notes.
  */
 function packageNotes(root: string): string | undefined {
 	const agentDir = getAgentDir();
 	const installs = join(agentDir, "git");
-	const userInstalls = existsSync(installs) ? realpathSync(installs) : installs;
-	for (let dir = dirname(root); dirname(dir) !== dir; dir = dirname(dir)) {
-		const projectInstalls =
-			basename(dir) === "git" && basename(dirname(dir)) === CONFIG_DIR_NAME;
-		if (dir === userInstalls || projectInstalls) {
-			return join(agentDir, "notes", relative(dir, root));
-		}
-	}
-	return undefined;
+	const path = relative(existsSync(installs) ? realpathSync(installs) : installs, root);
+	const inside =
+		path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+	// Pi cleans only the checkouts; folders that hold several of them keep their own notes.
+	return inside && existsSync(join(root, ".git")) ? join(agentDir, "notes", path) : undefined;
 }
-/** The notes directory for `cwd`, moving notes out of a Pi package checkout on first use. */
+/** The notes directory for `cwd`, moving any notes found inside a Pi package checkout. */
 export function notesDir(cwd: string): string {
 	const root = notesRoot(cwd);
 	const local = join(root, ".pi", "notes");
 	const moved = packageNotes(root);
-	if (moved === undefined || existsSync(moved) || !existsSync(local)) {
-		return moved ?? local;
+	if (moved === undefined) {
+		return local;
 	}
-	mkdirSync(dirname(moved), { recursive: true });
-	try {
-		renameSync(local, moved);
-	} catch (error) {
-		if (!existsSync(moved)) {
-			throw error;
+	if (lstatSync(local, { throwIfNoEntry: false })?.isDirectory() === true) {
+		mkdirSync(dirname(moved), { recursive: true });
+		// Notes an older Posthorse wrote here after an earlier move keep a folder of their own.
+		const target = existsSync(moved) ? join(moved, `from-checkout-${Date.now()}`) : moved;
+		try {
+			renameSync(local, target);
+			// Sessions still running an older Posthorse keep reaching the notes until they reload.
+			symlinkSync(moved, local, "junction");
+		} catch (error) {
+			if (lstatSync(local, { throwIfNoEntry: false })?.isDirectory() === true) {
+				throw error;
+			}
+			// Another session moved them first, or only the compatibility link failed.
 		}
-		return moved; // Another session moved them first.
-	}
-	try {
-		// Sessions still running an earlier Posthorse keep reaching the notes until they reload.
-		symlinkSync(moved, local, "junction");
-	} catch {
-		// The notes have already moved; only those earlier sessions would miss them.
 	}
 	return moved;
 }

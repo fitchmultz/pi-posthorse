@@ -3292,7 +3292,8 @@ test("notes for Pi package checkouts move to the agent directory and survive pi 
 	try {
 		const git = (cwd: string, ...args: readonly string[]) =>
 			execFileSync("git", args, { cwd, stdio: "ignore" });
-		const checkout = join(agentDir, "git", "github.com", "acme", "tool");
+		const owner = join(agentDir, "git", "github.com", "acme");
+		const checkout = join(owner, "tool");
 		const legacy = join(checkout, ".pi", "notes");
 		mkdirSync(join(checkout, "src"), { recursive: true });
 		git(checkout, "init", "-q");
@@ -3319,19 +3320,31 @@ test("notes for Pi package checkouts move to the agent directory and survive pi 
 			`File: ${join(moved, "task", "state.md")}\nSaved before the move.\nAppended after.\n`,
 		);
 
-		// Project-scoped packages install under the project's .pi/git, and paths can nest groups.
-		const project = join(dir, "project", ".pi", "git", "gitlab.com", "group", "sub", "pkg");
-		mkdirSync(project, { recursive: true });
-		git(project, "init", "-q");
-		await notes(project, { op: "write", path: "state.md", content: "Project package." });
+		// A session still running an older Posthorse writes inside the checkout again after the
+		// update removed the link. Both versions survive, and the link returns.
+		mkdirSync(join(legacy, "task"), { recursive: true });
+		writeFileSync(join(legacy, "task", "state.md"), "Written by an older Posthorse.");
+		const relisted = toolText(await notes(checkout, { op: "list" }));
+		const copy = requireValue(/^(from-checkout-\d+)\/task\/state\.md {2}/m.exec(relisted))[1];
 		assert.equal(
-			readFileSync(
-				join(agentDir, "notes", "gitlab.com", "group", "sub", "pkg", "state.md"),
-				"utf8",
-			),
-			"Project package.",
+			readFileSync(join(moved, copy, "task", "state.md"), "utf8"),
+			"Written by an older Posthorse.",
 		);
-		assert.equal(existsSync(join(project, ".pi")), false);
+		assert.equal(
+			readFileSync(join(legacy, "task", "state.md"), "utf8"),
+			"Saved before the move.\nAppended after.\n",
+		);
+
+		// Pi cleans only the checkouts, so a folder holding several packages keeps its own notes.
+		await notes(realpathSync(owner), {
+			op: "write",
+			path: "fleet.md",
+			content: "Owner folder.",
+		});
+		assert.equal(
+			readFileSync(join(owner, ".pi", "notes", "fleet.md"), "utf8"),
+			"Owner folder.",
+		);
 	} finally {
 		if (previous === undefined) {
 			delete process.env.PI_CODING_AGENT_DIR;
