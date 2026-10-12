@@ -7,7 +7,7 @@ import { toWindowedEntry, windowProjection } from "./history-entries.ts";
 import { historyReadPage, searchPage } from "./history-pages.ts";
 import { historyMatches, type HistorySource } from "./history-search.ts";
 import type { PageAccess } from "./paging.ts";
-import { filesContaining, scopedSessionFiles, sessionWindowEntries } from "./session-files.ts";
+import { scopedSessionFiles, sessionWindowEntries } from "./session-files.ts";
 
 type LocatedEntry = { readonly item: WindowedEntry; readonly source: string };
 function entryReference(id: string): { readonly entryId: string; readonly fileKey?: string } {
@@ -38,19 +38,20 @@ async function findEntry(
 	if (current !== undefined) {
 		return { item: current, source: "" };
 	}
-	const candidates =
-		fileKey === undefined && /^[\w-]+$/.test(entryId)
-			? await filesContaining(source.dir, [`"id":"${entryId}"`], signal)
-			: undefined;
 	for await (const file of scopedSessionFiles({
 		dir: source.dir,
 		cwd: source.cwd,
 		currentFile: source.currentFile,
 		signal,
 		fileKey,
-		candidates: candidates === undefined ? undefined : (candidate) => candidates.has(candidate),
+		needles:
+			fileKey === undefined && /^[\w-]+$/.test(entryId) ? [`"id":"${entryId}"`] : undefined,
 	})) {
-		for await (const item of sessionWindowEntries(file, signal, entryId)) {
+		for await (const item of sessionWindowEntries(
+			file,
+			signal,
+			(_bytes, entry) => entry.id === entryId,
+		)) {
 			return { item, source: relative(source.dir, file) };
 		}
 	}
