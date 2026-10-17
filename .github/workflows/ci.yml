@@ -3,6 +3,13 @@ name: Pi
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+    # Pull requests can restore native checkers that the default branch saved.
+    paths:
+      - patches/**
+      - scripts/setup-*.ts
+      - .github/workflows/ci.yml
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -24,6 +31,8 @@ concurrency:
 
 env:
   PI_AUTOMATION_REF: 54c687228d840506555801b9db038373e697d901 # main
+  GO_VERSION: "1.27.1"
+  RUST_TOOLCHAIN: "1.99.0"
 
 jobs:
   quality:
@@ -41,13 +50,28 @@ jobs:
           node-version: "24"
           check-latest: true
           package-manager-cache: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      # Keys cover every preparation fingerprint input plus the pinned compiler.
+      - name: Restore corrected native Oxlint
+        id: oxlint
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          go-version: "1.27.1"
+          path: ${{ runner.temp }}/npm-cache/pi-quality-engine/oxlint
+          key: oxlint-${{ runner.os }}-${{ runner.arch }}-rust-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('patches/oxlint-*.patch', 'scripts/setup-oxlint-engine.ts') }}
+      - name: Restore corrected tsgolint
+        id: tsgolint
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache/pi-quality-engine/tsgolint
+          key: tsgolint-${{ runner.os }}-${{ runner.arch }}-go-${{ env.GO_VERSION }}-${{ hashFiles('patches/tsgolint-*.patch', 'scripts/setup-quality-engine.ts') }}
+      - if: steps.tsgolint.outputs.cache-hit != 'true'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
           cache: false
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+      - if: steps.oxlint.outputs.cache-hit != 'true'
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: llvm-tools
           cache: false
           override: true
@@ -60,16 +84,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
       - run: npm ci --ignore-scripts --no-audit
-      - run: npm run verify
-      - name: Archive verified native checkers
-        run: tar -czf "$RUNNER_TEMP/native-checkers.tar.gz" -C "$npm_config_cache" pi-quality-engine
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - run: npm run quality:prepare
+      # Save before acceptance so a failing test does not discard a completed native build.
+      - if: steps.oxlint.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          name: posthorse-native-checkers
-          path: ${{ runner.temp }}/native-checkers.tar.gz
-          if-no-files-found: error
-          retention-days: 3
-          overwrite: true
+          path: ${{ runner.temp }}/npm-cache/pi-quality-engine/oxlint
+          key: ${{ steps.oxlint.outputs.cache-primary-key }}
+      - if: steps.tsgolint.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache/pi-quality-engine/tsgolint
+          key: ${{ steps.tsgolint.outputs.cache-primary-key }}
+      - run: npm run verify
 
   resolve:
     uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@54c687228d840506555801b9db038373e697d901 # main
@@ -78,20 +105,23 @@ jobs:
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
-  verify:
-    needs: [resolve, quality]
+  qualify:
+    needs: resolve
     if: ${{ !cancelled() }}
-    name: Pi fork and official
+    name: Pi ${{ matrix.host }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [official, fork]
     steps:
       - name: Use a job-private compilation cache
         run: printf 'npm_config_cache=%s/npm-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Require resolved latest hosts
         env:
           RESOLVE: ${{ needs.resolve.result }}
-          QUALITY: ${{ needs.quality.result }}
-        run: test "$RESOLVE" = success && test "$QUALITY" = success
+        run: test "$RESOLVE" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: extension
@@ -102,7 +132,8 @@ jobs:
           ref: ${{ env.PI_AUTOMATION_REF }}
           path: automation
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: matrix.host == 'fork'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         id: fork
         with:
           repository: fitchmultz/pi
@@ -118,14 +149,16 @@ jobs:
         working-directory: extension
         run: |
           ! grep '"resolved": "' package-lock.json | grep -v '"resolved": "https://registry.npmjs.org/'
-      - name: Use the reviewed npm version
-        run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
       - name: Install native test prerequisites
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
-      - name: Build the current fork
+      - if: matrix.host == 'fork'
+        name: Use the reviewed npm version
+        run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
+      - if: matrix.host == 'fork'
+        name: Build the current fork
         working-directory: fork
         env:
           PI_FORK_REF: ${{ steps.fork.outputs.commit }}
@@ -138,18 +171,34 @@ jobs:
           git diff --exit-code
       - name: Use the extension npm version
         run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      # Same keys as the strict quality job; a miss builds inside isolated qualification.
+      - name: Restore corrected native Oxlint
+        id: oxlint
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          go-version: "1.27.1"
+          path: ${{ runner.temp }}/npm-cache/pi-quality-engine/oxlint
+          key: oxlint-${{ runner.os }}-${{ runner.arch }}-rust-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('extension/patches/oxlint-*.patch', 'extension/scripts/setup-oxlint-engine.ts') }}
+      - name: Restore corrected tsgolint
+        id: tsgolint
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache/pi-quality-engine/tsgolint
+          key: tsgolint-${{ runner.os }}-${{ runner.arch }}-go-${{ env.GO_VERSION }}-${{ hashFiles('extension/patches/tsgolint-*.patch', 'extension/scripts/setup-quality-engine.ts') }}
+      - if: steps.tsgolint.outputs.cache-hit != 'true'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
           cache: false
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+      - if: steps.oxlint.outputs.cache-hit != 'true'
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: llvm-tools
           cache: false
           override: true
           rustflags: ""
-      - name: Keep Rust available with isolated HOME
+      - if: steps.oxlint.outputs.cache-hit != 'true'
+        name: Keep Rust available with isolated HOME
         run: |
           sysroot="$(rustc --print sysroot)"
           printf '%s\n' "$sysroot/bin" >> "$GITHUB_PATH"
@@ -158,17 +207,10 @@ jobs:
           df -hT /tmp /var/tmp "$RUNNER_TEMP"
           findmnt -T /tmp
           findmnt -T /var/tmp
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: posthorse-native-checkers
-          path: ${{ runner.temp }}/native-checkers
-      - name: Restore verified native checkers
-        run: |
-          mkdir -p "$npm_config_cache"
-          tar -xzf "$RUNNER_TEMP/native-checkers/native-checkers.tar.gz" -C "$npm_config_cache"
       - run: npm ci --ignore-scripts --no-audit
         working-directory: extension
-      - name: Qualify official Pi
+      - if: matrix.host == 'official'
+        name: Qualify official Pi
         env:
           GH_TOKEN: ${{ github.token }}
           version: ${{ needs.resolve.outputs.official-version }}
@@ -176,7 +218,8 @@ jobs:
           node automation/scripts/qualify.mjs \
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host official --target "$version" --output "$RUNNER_TEMP/posthorse-official"
-      - name: Qualify fork Pi
+      - if: matrix.host == 'fork'
+        name: Qualify fork Pi
         env:
           PI_COMPAT_FORK_REF: ${{ steps.fork.outputs.commit }}
         run: |
@@ -187,9 +230,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: host-qualification
-          path: |
-            ${{ runner.temp }}/posthorse-official
-            ${{ runner.temp }}/posthorse-fork
+          name: host-qualification-${{ matrix.host }}
+          path: ${{ runner.temp }}/posthorse-${{ matrix.host }}
           if-no-files-found: error
           retention-days: 3

@@ -5,8 +5,8 @@ import test from "node:test";
 import { expectFindings, fixture, lintFixture, repository } from "./quality-support.ts";
 import { sourcePolicies } from "../scripts/quality-source.ts";
 
-await test("unchecked JavaScript retains syntactic lint and Promise checks without semantic rules", () => {
-	expectFindings(
+await test("unchecked JavaScript retains syntactic lint and Promise checks without semantic rules", async () => {
+	await expectFindings(
 		{
 			files: {
 				"test/native.test.mjs":
@@ -20,7 +20,7 @@ await test("unchecked JavaScript retains syntactic lint and Promise checks witho
 	);
 });
 
-await test("TypeScript, inherited checkJs and per-file ts-check receive semantic lint", () => {
+await test("TypeScript, inherited checkJs and per-file ts-check receive semantic lint", async () => {
 	const files = {
 		"typed.ts":
 			"export function unchecked(value: number): number { if (value) { return 1; } return 0; }\n",
@@ -32,7 +32,7 @@ await test("TypeScript, inherited checkJs and per-file ts-check receive semantic
 		}),
 		"directive.js": "// @ts-check\nexport function unchecked() { Promise.resolve(1); }\n",
 	};
-	expectFindings({ files }, [
+	await expectFindings({ files }, [
 		{ code: "typescript/strict-boolean-expressions", file: "typed.ts", line: 1 },
 		{ code: "typescript/no-floating-promises", file: "checked/checked.js", line: 1 },
 		{ code: "promise/catch-or-return", file: "checked/checked.js", line: 1 },
@@ -69,8 +69,8 @@ await test("compiler diagnostics remain separate from semantic lint scope", () =
 	}
 });
 
-await test("compiler checking applies to inherited checkJs and ts-check, not unchecked JavaScript", () => {
-	const output = lintFixture({
+await test("compiler checking applies to inherited checkJs and ts-check, not unchecked JavaScript", async () => {
+	const output = await lintFixture({
 		files: {
 			"test/native.test.mjs": "export const x = (1).missing;\n",
 			"checked.ts": "export const x = (1).missing;\n",

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -14,13 +15,21 @@ import { lfLines } from "./files.ts";
 import { toWindowedEntry, windowProjection } from "./history-entries.ts";
 import { shortKey } from "./message-text.ts";
 
+/** Newest archive bytes searched before the rest; common queries finish within them. */
+const FIRST_SEARCH_BYTES = 256 * 1024 * 1024;
+/** File-list characters per ripgrep run, within Windows' 32,767 and POSIX ARG_MAX limits. */
+const ARGUMENT_CHARS = process.platform === "win32" ? 30_000 : 256 * 1024;
+/** Pi writes these keys first, so most lines yield window metadata without JSON.parse. */
+const ENTRY_HEAD = /^\{"type":"([^"\\]*)","id":"([^"\\]*)","parentId":(null|"[^"\\]*")[,}]/u;
+
 function execFileText(
 	file: string,
 	args: readonly string[],
+	cwd: string,
 	signal?: AbortSignal,
 ): Promise<string> {
 	return new Promise((resolveOutput, reject) => {
-		execFile(file, args, { signal, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
+		execFile(file, args, { cwd, signal, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
 			if (error !== null) {
 				const failure: Error = error;
 				reject(failure);
@@ -30,65 +39,127 @@ function execFileText(
 		});
 	});
 }
-/** Raw JSONL needles must cover every match in normalized text; otherwise scan all files. */
+/** Label text normalization adds, and raw JSONL that every entry showing it contains. */
+const LABEL_SOURCES: readonly (readonly [label: string, needles: readonly string[]])[] = [
+	["call id", ['"type":"toolCall"', '"toolCallId"']],
+	["execution arguments", ['"executionArguments"']],
+	["no handoff", ['"type":"context_window"']],
+	["excluded from model context by pi", ['"excludeFromContext":true']],
+	["images", ['"type":"image"']],
+	["unknown type", ['"type":"image"']],
+	["unknown", ['"type":"custom_message"']],
+];
+/**
+ * Raw JSONL needles, one of which every line rendering the lowercase query contains; undefined
+ * means every line must be scanned.
+ */
 export function prefilterNeedles(query: string): string[] | undefined {
-	if (/["\\[\](){}:$\p{Cc}]/u.test(query) || query.trim() !== query) {
+	// A match contains every fragment between characters that JSON escapes or labels may add.
+	const [fragment] = query
+		.split(/["\\[\](){}:$\p{Cc}\p{Cs}]/u)
+		.map((part) => part.trim())
+		.sort((a, b) => b.length - a.length);
+	if (fragment === "") {
 		return undefined;
 	}
-	if (
-		["call id", "execution arguments", "no handoff", "excluded from model context by pi"].some(
-			(phrase) => phrase.includes(query),
-		)
-	) {
-		return undefined;
-	}
-	const image =
-		query.includes(",") ||
-		/^\d+ ?i?m?a?g?e?s?$/.test(query) ||
-		["images", "unknown type"].some((phrase) => phrase.includes(query));
-	return image ? [query, '"type":"image"'] : [query];
+	const image = fragment.includes(",") || /^\d+ ?i?m?a?g?e?s?$/.test(fragment);
+	return [
+		fragment,
+		...LABEL_SOURCES.filter(([label]) => label.includes(fragment)).flatMap(
+			([, needles]) => needles,
+		),
+		...(image ? ['"type":"image"'] : []),
+		// İ lowercases to i + U+0307, which case-insensitive raw matching cannot see.
+		...(/i|\u0307/u.test(fragment) ? ["\u0130"] : []),
+	];
 }
-export async function filesContaining(
+/** UTF-8 of the only non-ASCII characters that case-fold to ASCII letters, read as Latin-1. */
+const ASCII_FOLDS: Readonly<Partial<Record<string, string>>> = {
+	k: "\u00e2\u0084\u00aa",
+	s: "\u00c5\u00bf",
+};
+const DOTTED_I = Buffer.from("\u0130");
+/** The read capabilities line filters need from a raw journal line. */
+export type RawLine = Readonly<Pick<Buffer, "includes" | "toString">>;
+/** Whether a raw line contains one of prefilterNeedles' needles, ignoring case like its text would. */
+export function needleLines(needles: readonly string[]): (bytes: RawLine) => boolean {
+	const others = needles.filter((needle) => needle !== "\u0130");
+	const dotted = others.length < needles.length;
+	if (others.every((needle) => /^[\0-\x7f]*$/u.test(needle))) {
+		// ASCII text matches its Latin-1 byte view, so most lines are never decoded as UTF-8.
+		const latin1 = others.map((needle) =>
+			needle
+				.split("")
+				.map((char) => {
+					const fold = ASCII_FOLDS[char.toLowerCase()];
+					return fold === undefined ? RegExp.escape(char) : `(?:${char}|${fold})`;
+				})
+				.join(""),
+		);
+		const pattern = new RegExp(latin1.join("|"), "i");
+		return (bytes) =>
+			(dotted && bytes.includes(DOTTED_I)) || pattern.test(bytes.toString("latin1"));
+	}
+	const pattern = new RegExp(needles.map((needle) => RegExp.escape(needle)).join("|"), "iu");
+	return (bytes) => pattern.test(bytes.toString("utf8"));
+}
+/** File lists that each fit one ripgrep command line. */
+function commandGroups(paths: readonly string[]): string[][] {
+	const groups: string[][] = [];
+	let group: string[] = [];
+	let chars = 0;
+	for (const path of paths) {
+		if (group.length > 0 && chars + path.length > ARGUMENT_CHARS) {
+			groups.push(group);
+			group = [];
+			chars = 0;
+		}
+		group.push(path);
+		chars += path.length + 1;
+	}
+	return group.length > 0 ? [...groups, group] : groups;
+}
+/** Files containing a needle, per ripgrep; files of a failed run stay candidates. */
+function ripgrepFilter(
 	dir: string,
 	needles: readonly string[],
 	signal?: AbortSignal,
-): Promise<Set<string> | undefined> {
-	const args = [
+): (files: readonly string[]) => Promise<string[]> {
+	let binaries = [join(getAgentDir(), "bin", "rg"), "rg"];
+	const flags = [
 		"--files-with-matches",
+		"--null",
 		"--fixed-strings",
 		"--ignore-case",
-		"--no-ignore",
-		"--hidden",
 		"--no-messages",
-		"--glob",
-		"*.jsonl",
 		...needles.flatMap((needle) => ["--regexp", needle]),
-		dir,
+		"--",
 	];
-	for (const rg of [join(getAgentDir(), "bin", "rg"), "rg"]) {
-		try {
-			// Try the host-managed binary first; PATH is a fallback only when it is unavailable.
-			// oxlint-disable-next-line no-await-in-loop
-			const stdout = await execFileText(rg, args, signal);
-			return new Set(
-				stdout
-					.split("\n")
-					.filter((file) => file !== "")
-					.map((file) => resolve(file)),
-			);
-		} catch (error) {
-			const code = isRecord(error) ? error.code : undefined;
-			if (code === 1) {
-				return new Set();
+	const matching = async (paths: readonly string[]): Promise<readonly string[]> => {
+		for (const binary of binaries) {
+			try {
+				// Try the host-managed binary first; PATH is a fallback only when it is unavailable.
+				// oxlint-disable-next-line no-await-in-loop
+				return (await execFileText(binary, [...flags, ...paths], dir, signal)).split("\0");
+			} catch (error) {
+				const code = isRecord(error) ? error.code : undefined;
+				if (code === 1) {
+					return [];
+				}
+				if (code !== "ENOENT") {
+					signal?.throwIfAborted();
+					return paths;
+				}
+				binaries = binaries.filter((candidate) => candidate !== binary);
 			}
-			if (code === "ENOENT") {
-				continue;
-			}
-			signal?.throwIfAborted();
-			return undefined;
 		}
-	}
-	return;
+		return paths;
+	};
+	return async (files) => {
+		const paths = files.map((file) => relative(dir, file));
+		const found = new Set((await Promise.all(commandGroups(paths).map(matching))).flat());
+		return files.filter((_file, index) => found.has(paths[index]));
+	};
 }
 function messageFrom(value: unknown): MessageLike | undefined {
 	if (!isRecord(value)) {
@@ -138,40 +209,90 @@ function parsedEntry(line: string): EntryLike | undefined {
 		return undefined;
 	} // Pi skips malformed journal lines too.
 }
+/** Window metadata of a Pi-ordered line that cannot open a window, without parsing it. */
+function entryHead(bytes: RawLine): EntryLike | undefined {
+	const head = ENTRY_HEAD.exec(bytes.toString("utf8", 0, 512));
+	if (head === null || head[1] === "compaction" || head[1] === "context_window") {
+		return undefined;
+	}
+	return {
+		type: head[1],
+		id: head[2],
+		parentId: head[3] === "null" ? null : head[3].slice(1, -1),
+	};
+}
+/** Whether a caller may need a line; other lines only advance window ancestry. */
+type LineFilter = (bytes: RawLine, entry: EntryLike) => boolean;
 export async function* sessionWindowEntries(
 	file: string,
 	signal?: AbortSignal,
-	entryId?: string,
+	wanted: LineFilter = () => true,
 ): AsyncGenerator<WindowedEntry> {
 	if (!existsSync(file)) {
 		return;
 	}
 	const project = windowProjection();
-	for await (const line of lfLines(file, signal)) {
-		const entry = parsedEntry(line);
+	for await (const bytes of lfLines(file, signal, 1024 * 1024)) {
+		const head = entryHead(bytes);
+		if (head !== undefined && !wanted(bytes, head)) {
+			project(head);
+			continue;
+		}
+		const entry = parsedEntry(bytes.toString("utf8"));
 		if (entry === undefined) {
 			continue;
 		}
 		const windowId = project(entry);
-		if (entryId !== undefined && entry.id !== entryId) {
-			continue;
-		}
-		const item = toWindowedEntry(entry, windowId);
+		const item =
+			head !== undefined || wanted(bytes, entry)
+				? toWindowedEntry(entry, windowId)
+				: undefined;
 		if (item !== undefined) {
 			yield item;
 		}
 	}
 }
-function sessionFiles(dir: string): string[] {
-	if (!existsSync(dir)) {
-		return [];
+/** Breadth-first, like readdirSync's recursive order, reading each level concurrently. */
+async function sessionFiles(dir: string): Promise<string[]> {
+	const files: string[] = [];
+	let level = existsSync(dir) ? [dir] : [];
+	while (level.length > 0) {
+		// Each level lists the directories the previous level found.
+		// oxlint-disable-next-line no-await-in-loop
+		const listings = await Promise.all(
+			level.map((path) => readdir(path, { withFileTypes: true })),
+		);
+		level = [];
+		for (const entry of listings.flat()) {
+			const path = join(entry.parentPath, entry.name);
+			if (entry.isDirectory()) {
+				level.push(path);
+			} else if (
+				entry.isFile() &&
+				entry.name.endsWith(".jsonl") &&
+				!entry.name.includes(".intent.")
+			) {
+				files.push(path);
+			}
+		}
 	}
-	return readdirSync(dir, { recursive: true, withFileTypes: true })
-		.filter(
-			(entry) =>
-				entry.isFile() && entry.name.endsWith(".jsonl") && !entry.name.includes(".intent."),
-		)
-		.map((entry) => join(entry.parentPath, entry.name));
+	return files;
+}
+type SessionFile = { readonly file: string; readonly size: number; readonly mtime: number };
+async function newestFirst(files: readonly string[]): Promise<SessionFile[]> {
+	const stats = await Promise.all(files.map((file) => stat(file)));
+	return files
+		.map((file, index) => ({ file, size: stats[index].size, mtime: stats[index].mtimeMs }))
+		.sort((a, b) => b.mtime - a.mtime);
+}
+/** The newest files up to FIRST_SEARCH_BYTES, then the rest. */
+function searchPhases(files: readonly SessionFile[]): readonly (readonly string[])[] {
+	let count = 0;
+	for (let bytes = 0; count < files.length && bytes < FIRST_SEARCH_BYTES; count++) {
+		bytes += files[count].size;
+	}
+	const paths = files.map(({ file }) => file);
+	return [paths.slice(0, count), paths.slice(count)];
 }
 async function sessionHeader(
 	file: string,
@@ -179,7 +300,7 @@ async function sessionHeader(
 ): Promise<{ readonly cwd?: string } | undefined> {
 	for await (const line of lfLines(file, signal)) {
 		try {
-			const value: unknown = JSON.parse(line);
+			const value: unknown = JSON.parse(line.toString("utf8"));
 			if (value === null) {
 				continue;
 			}
@@ -212,7 +333,8 @@ export type SessionScope = {
 	readonly currentFile?: string;
 	readonly signal?: AbortSignal;
 	readonly fileKey?: string;
-	readonly candidates?: (file: string) => boolean;
+	/** Raw-text needles; files without any of them are skipped. */
+	readonly needles?: readonly string[];
 };
 /** Scope memoization is owned by one enumeration; nested runs inherit their parent's project. */
 function membership(
@@ -240,25 +362,31 @@ function membership(
 	};
 	return belongs;
 }
-/** Newest modified project session files, optionally limited by file key or prefilter. */
+/** Newest modified project session files, optionally limited by file key or needles. */
 export async function* scopedSessionFiles(scope: SessionScope): AsyncGenerator<string> {
-	const files = sessionFiles(scope.dir);
+	const files = await sessionFiles(scope.dir);
 	const fileSet = new Set(files);
 	const belongs = membership(scope, (file) => fileSet.has(file));
-	const selected = files
-		.filter(
+	const selected = await newestFirst(
+		files.filter(
 			(file) =>
-				(scope.candidates === undefined || scope.candidates(resolve(file))) &&
-				(scope.fileKey === undefined ||
-					scope.fileKey.startsWith(shortKey(relative(scope.dir, file)))),
-		)
-		.map((file) => ({ file, mtime: statSync(file).mtimeMs }))
-		.sort((a, b) => b.mtime - a.mtime);
-	for (const { file } of selected) {
-		// Preserve newest-first traversal while closing each header stream before opening another.
+				scope.fileKey === undefined ||
+				scope.fileKey.startsWith(shortKey(relative(scope.dir, file))),
+		),
+	);
+	const prefilter =
+		scope.needles === undefined
+			? undefined
+			: ripgrepFilter(scope.dir, scope.needles, scope.signal);
+	for (const phase of searchPhases(selected)) {
+		// Older files are searched only when the newest ones did not satisfy the caller.
 		// oxlint-disable-next-line no-await-in-loop
-		if (await belongs(file)) {
-			yield file;
+		for (const file of prefilter === undefined ? phase : await prefilter(phase)) {
+			// Preserve newest-first traversal while closing each header stream before opening another.
+			// oxlint-disable-next-line no-await-in-loop
+			if (await belongs(file)) {
+				yield file;
+			}
 		}
 	}
 }

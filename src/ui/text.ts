@@ -44,6 +44,44 @@ export function textBlock(text: string, theme: Theme, color: OutputColor = "tool
 	return new Text(text.length > 0 ? theme.fg(color, clean(text)) : "", 0, 0);
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/**
+ * Rows of `textBlock(text)` wrapped only as far as a preview needs, so resizing long text stays
+ * cheap: the first `count` rows are exact, and any further row means the full text has more.
+ */
+export function leadingRows(
+	text: string,
+	theme: Theme,
+	color: OutputColor,
+	count: number,
+): (width: number) => readonly string[] {
+	// One line past `count` already wraps to more rows when the text continues.
+	const head = clean(text)
+		.split("\n", count + 1)
+		.join("\n");
+	const segments = graphemes.segment(head);
+	const wrap = (width: number): readonly string[] => {
+		for (let limit = (count + 1) * width + 1024; ; limit *= 2) {
+			// pi-tui wraps greedily by grapheme, so text cut between graphemes wraps like the
+			// whole text in every row but its last.
+			const end = segments.containing(limit)?.index ?? head.length;
+			const prefix = theme.fg(color, head.slice(0, end));
+			const rows = new Text(text.length > 0 ? prefix : "", 0, 0).render(width);
+			if (end === head.length || rows.length > count) {
+				return rows;
+			}
+		}
+	};
+	let cached: { readonly width: number; readonly rows: readonly string[] } | undefined;
+	return (width) => {
+		if (cached?.width !== width) {
+			cached = { width, rows: wrap(width) };
+		}
+		return cached.rows;
+	};
+}
+
 export function hint(theme: Theme, width: number): string {
 	const key = keyText("app.tools.expand");
 	return truncateToWidth(

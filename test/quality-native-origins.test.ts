@@ -20,7 +20,7 @@ function libraryNames(): readonly string[] {
 	});
 }
 
-await test("every configured native-library input allowance excludes mutable application names", () => {
+await test("every configured native-library input allowance excludes mutable application names", async () => {
 	const names = libraryNames();
 	const generic = new Set([
 		"Promise",
@@ -40,7 +40,7 @@ await test("every configured native-library input allowance excludes mutable app
 				`type ${name} = { state: number };\nexport function reject${name}(value: ${name}): number { return value.state; }`,
 		)
 		.join("\n");
-	expectFindings(
+	await expectFindings(
 		{ files: { "natives.ts": natives, "impostors.ts": impostors } },
 		names.map((_name, index) => ({
 			code: "typescript/prefer-readonly-parameter-types",
@@ -50,7 +50,7 @@ await test("every configured native-library input allowance excludes mutable app
 	);
 });
 
-await test("SDK allowances cannot transfer to matching types from another installed package", () => {
+await test("SDK allowances cannot transfer to matching types from another installed package", async () => {
 	const names = ["ExtensionAPI", "ExtensionContext", "Theme", "Component", "Node"];
 	const declarations = names
 		.map((name) => `export interface ${name} { state: number; }`)
@@ -61,7 +61,7 @@ await test("SDK allowances cannot transfer to matching types from another instal
 				`export function reject${name}(value: ${name}): number { return value.state; }`,
 		)
 		.join("\n");
-	expectFindings(
+	await expectFindings(
 		{
 			files: {
 				"node_modules/@quality/impostor/package.json": JSON.stringify({
@@ -82,8 +82,8 @@ await test("SDK allowances cannot transfer to matching types from another instal
 	);
 });
 
-await test("native handles cannot hide mutable attached or nested application-owned state", () => {
-	expectFindings(
+await test("native handles cannot hide mutable attached or nested application-owned state", async () => {
+	await expectFindings(
 		{
 			files: {
 				"owned.ts": [
@@ -105,19 +105,19 @@ await test("native handles cannot hide mutable attached or nested application-ow
 	);
 });
 
-await test("native and SDK inputs check application-owned declaration augmentations deeply", () => {
+await test("native and SDK inputs check application-owned declaration augmentations deeply", async () => {
 	const members = [
 		{ declaration: "readonly counter: number", mutable: false },
 		{ declaration: "counter: number", mutable: true },
 		{ declaration: "readonly counter: { readonly count: number }", mutable: false },
 		{ declaration: "readonly counter: { count: number }", mutable: true },
 	];
-	for (const name of ["URL", "Theme", "ReadonlyArray"]) {
-		for (const member of members) {
+	const probes = ["URL", "Theme", "ReadonlyArray"].flatMap((name) =>
+		members.map(async (member) => {
 			const sdk = name === "Theme";
 			const declaration = name === "ReadonlyArray" ? "ReadonlyArray<T>" : name;
 			const type = name === "ReadonlyArray" ? "readonly number[]" : name;
-			expectFindings(
+			await expectFindings(
 				{
 					files: {
 						"augmentation.d.ts": sdk
@@ -137,6 +137,7 @@ await test("native and SDK inputs check application-owned declaration augmentati
 						]
 					: [],
 			);
-		}
-	}
+		}),
+	);
+	await Promise.all(probes);
 });

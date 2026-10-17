@@ -9,7 +9,16 @@ import {
 	type HistorySection,
 	type PosthorseDisplay,
 } from "./display.ts";
-import { argsOf, argument, clean, hint, textBlock, textOf, type OutputColor } from "./text.ts";
+import {
+	argsOf,
+	argument,
+	clean,
+	hint,
+	leadingRows,
+	textBlock,
+	textOf,
+	type OutputColor,
+} from "./text.ts";
 
 export type ToolName = "notes" | "history" | "get_context_remaining" | "new_context";
 const titles: Readonly<Record<ToolName, string>> = {
@@ -197,45 +206,6 @@ function previewBody(facts: ResultFacts, sections: readonly HistorySection[] | u
 		: body;
 }
 
-interface ResultLayout {
-	readonly full: Component;
-	readonly summary: Component;
-	readonly preview: Component;
-	readonly submitted: Component;
-	readonly attachment: string;
-	readonly attachmentBlock: Component;
-	readonly footer: Component;
-	readonly searchPreviews: readonly string[] | undefined;
-	readonly hasDetails: boolean;
-}
-
-function resultLayout(
-	facts: ResultFacts,
-	sections: readonly HistorySection[] | undefined,
-	theme: Theme,
-): ResultLayout {
-	const color = resultColor(facts);
-	const submission = submittedText(facts);
-	const attachment = attachmentSummary(facts);
-	const { display } = facts;
-	const footerLength = display?.kind === "history-search" ? (display.footerLength ?? 0) : 0;
-	return {
-		full: fullBody(facts, sections, theme),
-		summary: textBlock(resultSummary(facts, sections), theme, color),
-		preview: textBlock(previewBody(facts, sections), theme, color),
-		submitted: textBlock(submission, theme),
-		attachment,
-		attachmentBlock: textBlock(attachment, theme, "muted"),
-		footer: textBlock(
-			sections !== undefined && footerLength > 0 ? facts.raw.slice(-footerLength) : "",
-			theme,
-			"muted",
-		),
-		searchPreviews: searchPreviews(facts, sections, theme),
-		hasDetails: sections !== undefined || submission.length > 0 || noteHeaderLength(facts) > 0,
-	};
-}
-
 function attachmentSummary(facts: ResultFacts): string {
 	if (facts.imageCount === 0) {
 		return "";
@@ -275,58 +245,83 @@ function searchPreviews(
 		: undefined;
 }
 
-function previewRows(facts: ResultFacts, layout: ResultLayout, width: number): string[] {
-	if (summaryOnly(facts.display) && !facts.isError && !facts.isPartial) {
-		return [];
-	}
-	return (
-		layout.searchPreviews?.map((line) => truncateToWidth(line, width)) ??
-		layout.preview.render(width)
+type RowView = (width: number) => string[];
+
+function expandedView(
+	facts: ResultFacts,
+	sections: readonly HistorySection[] | undefined,
+	theme: Theme,
+): RowView {
+	const full = fullBody(facts, sections, theme);
+	const attachment = textBlock(attachmentSummary(facts), theme, "muted");
+	const { display } = facts;
+	const footerLength = display?.kind === "history-search" ? (display.footerLength ?? 0) : 0;
+	const footer = textBlock(
+		sections !== undefined && footerLength > 0 ? facts.raw.slice(-footerLength) : "",
+		theme,
+		"muted",
 	);
+	const submission = submittedText(facts);
+	const submitted = textBlock(submission, theme);
+	return (width) => [
+		...full.render(width),
+		...attachment.render(width),
+		...footer.render(width),
+		...(submission.length > 0 ? ["", ...submitted.render(width)] : []),
+	];
 }
 
-function collapsedRows(
+function previewSource(
 	facts: ResultFacts,
-	layout: ResultLayout,
+	sections: readonly HistorySection[] | undefined,
 	theme: Theme,
-	width: number,
-): string[] {
-	const summaryRows = layout.summary.render(width).slice(0, 5);
-	const previews = previewRows(facts, layout, width);
-	const shown = previews.slice(
-		0,
-		Math.max(0, Math.min(3, 5 - summaryRows.length - (layout.attachment.length > 0 ? 1 : 0))),
-	);
-	const hidden =
-		summaryOnly(facts.display) || previews.length > shown.length || layout.hasDetails;
-	const attachments =
-		layout.attachment.length > 0
-			? [truncateToWidth(theme.fg("muted", layout.attachment), width)]
-			: [];
-	return [...summaryRows, ...shown, ...attachments, ...(hidden ? [hint(theme, width)] : [])];
+): (width: number) => readonly string[] {
+	if (summaryOnly(facts.display) && !facts.isError && !facts.isPartial) {
+		return () => [];
+	}
+	const searches = searchPreviews(facts, sections, theme);
+	if (searches !== undefined) {
+		return (width) => searches.map((line) => truncateToWidth(line, width));
+	}
+	return leadingRows(previewBody(facts, sections), theme, resultColor(facts), 3);
+}
+
+function collapsedView(
+	facts: ResultFacts,
+	sections: readonly HistorySection[] | undefined,
+	theme: Theme,
+): RowView {
+	const summary = textBlock(resultSummary(facts, sections), theme, resultColor(facts));
+	const previews = previewSource(facts, sections, theme);
+	const attachment = attachmentSummary(facts);
+	const details =
+		summaryOnly(facts.display) ||
+		sections !== undefined ||
+		submittedText(facts).length > 0 ||
+		noteHeaderLength(facts) > 0;
+	return (width) => {
+		const summaryRows = summary.render(width).slice(0, 5);
+		const rows = previews(width);
+		const shown = rows.slice(
+			0,
+			Math.max(0, Math.min(3, 5 - summaryRows.length - (attachment.length > 0 ? 1 : 0))),
+		);
+		const attachments =
+			attachment.length > 0 ? [truncateToWidth(theme.fg("muted", attachment), width)] : [];
+		const hidden = details || rows.length > shown.length;
+		return [...summaryRows, ...shown, ...attachments, ...(hidden ? [hint(theme, width)] : [])];
+	};
 }
 
 function resultComponent(facts: ResultFacts, theme: Theme): Component {
 	const sections =
 		!facts.isError && !facts.isPartial ? historySections(facts.raw, facts.display) : undefined;
-	const layout = resultLayout(facts, sections, theme);
+	const render = (facts.expanded ? expandedView : collapsedView)(facts, sections, theme);
 	return {
 		invalidate() {
-			// Pi creates this presentation for each result/theme update; it keeps no width cache.
+			// Pi creates this presentation for each result, theme, and expansion update.
 		},
-		render(width) {
-			if (facts.expanded) {
-				const submitted =
-					submittedText(facts).length > 0 ? ["", ...layout.submitted.render(width)] : [];
-				return [
-					...layout.full.render(width),
-					...layout.attachmentBlock.render(width),
-					...layout.footer.render(width),
-					...submitted,
-				];
-			}
-			return collapsedRows(facts, layout, theme, width);
-		},
+		render,
 	};
 }
 

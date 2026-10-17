@@ -75,7 +75,7 @@ await test("suppression policy parses actual comments, never strings, regexes or
 	}
 });
 
-await test("suppression governance detects directives inside empty containers and punctuation gaps", () => {
+await test("suppression governance detects directives inside empty containers and punctuation gaps", async () => {
 	const containers = [
 		"export const empty = { /* oxlint-disable eqeqeq */ };",
 		"export const empty = [ /* oxlint-disable eqeqeq */ ];",
@@ -83,22 +83,24 @@ await test("suppression governance detects directives inside empty containers an
 		"export const number = ( /* oxlint-disable eqeqeq */ 1 );",
 		"export const first = 1; /* oxlint-disable eqeqeq */ export const second = 2;",
 	];
-	for (const container of containers) {
-		const files = {
-			"hidden.ts": `${container}\nexport function unsafe(n: number): boolean { return n == 1; }\n`,
-		};
-		expectFindings({ files }, []);
-		const project = fixture({ files });
-		try {
-			const source = sourcePolicies(project.root, ["hidden.ts"]).at(0);
-			assert.ok(source);
-			assert.deepEqual(suppressionProblems(source), [
-				"hidden.ts:1: only one named rule on oxlint-disable-next-line is permitted",
-			]);
-		} finally {
-			project.dispose();
-		}
-	}
+	await Promise.all(
+		containers.map(async (container) => {
+			const files = {
+				"hidden.ts": `${container}\nexport function unsafe(n: number): boolean { return n == 1; }\n`,
+			};
+			await expectFindings({ files }, []);
+			const project = fixture({ files });
+			try {
+				const source = sourcePolicies(project.root, ["hidden.ts"]).at(0);
+				assert.ok(source);
+				assert.deepEqual(suppressionProblems(source), [
+					"hidden.ts:1: only one named rule on oxlint-disable-next-line is permitted",
+				]);
+			} finally {
+				project.dispose();
+			}
+		}),
+	);
 });
 
 await test("JSX text and template literals are not directives, but JSX expression comments are", () => {
@@ -124,7 +126,7 @@ await test("JSX text and template literals are not directives, but JSX expressio
 	}
 });
 
-await test("arity directives require SDK declaration identity rather than method or interface names", () => {
+await test("arity directives require SDK declaration identity rather than method or interface names", async () => {
 	const files = {
 		"src/context-tools.ts": [
 			"import type { ExtensionAPI as NativeExtensionAPI } from '@earendil-works/pi-coding-agent';",
@@ -151,7 +153,7 @@ await test("arity directives require SDK declaration identity rather than method
 			"}",
 		].join("\n"),
 	};
-	expectFindings({ files }, []);
+	await expectFindings({ files }, []);
 	const project = fixture({ files });
 	try {
 		const source = sourcePolicies(project.root, ["src/context-tools.ts"]).at(0);
@@ -218,10 +220,10 @@ await test("only described dedicated negative type tests may use expect-error", 
 	}
 });
 
-await test("framework mutation allowances cannot exempt an ordinary input or another file", () => {
+await test("framework mutation allowances cannot exempt an ordinary input or another file", async () => {
 	const body =
 		"export function stream(opts) { opts.cacheRetention = 'none'; }\nexport function ordinary(input) { input.value = 1; }\n";
-	expectFindings(
+	await expectFindings(
 		{
 			files: { "test/native.test.mjs": body, "test/host.test.mjs": body },
 			paths: ["test/native.test.mjs", "test/host.test.mjs"],
@@ -234,13 +236,16 @@ await test("framework mutation allowances cannot exempt an ordinary input or ano
 	);
 });
 
-await test("contract-required undefined options retain checks outside the two exact fixture files", () => {
+await test("contract-required undefined options retain checks outside the two exact fixture files", async () => {
 	const body =
 		"export const nothing: () => undefined = () => undefined;\nexport function optional(value?: number): number | undefined { return value; }\nexport const value = optional(undefined);\n";
-	expectFindings({ files: { "test/posthorse.test.ts": body, "test/unscoped.test.ts": body } }, [
-		{ code: "unicorn/no-useless-undefined", file: "test/unscoped.test.ts", line: 1 },
-		{ code: "unicorn/no-useless-undefined", file: "test/unscoped.test.ts", line: 3 },
-	]);
+	await expectFindings(
+		{ files: { "test/posthorse.test.ts": body, "test/unscoped.test.ts": body } },
+		[
+			{ code: "unicorn/no-useless-undefined", file: "test/unscoped.test.ts", line: 1 },
+			{ code: "unicorn/no-useless-undefined", file: "test/unscoped.test.ts", line: 3 },
+		],
+	);
 });
 
 await test("maintained source inventory and effective projects remain covered in normal lint", () => {

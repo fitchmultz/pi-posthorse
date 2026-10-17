@@ -3283,6 +3283,78 @@ test("notes resolve the repository root from nested directories, worktrees, and 
 	}
 });
 
+test("notes for Pi package checkouts move to the agent directory and survive pi update", async () => {
+	// An unresolved temporary path also covers a symlinked agent directory on macOS.
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-package-notes-"));
+	const agentDir = join(dir, "agent");
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const git = (cwd: string, ...args: readonly string[]) =>
+			execFileSync("git", args, { cwd, stdio: "ignore" });
+		const owner = join(agentDir, "git", "github.com", "acme");
+		const checkout = join(owner, "tool");
+		const legacy = join(checkout, ".pi", "notes");
+		mkdirSync(join(checkout, "src"), { recursive: true });
+		git(checkout, "init", "-q");
+		mkdirSync(join(legacy, "task"), { recursive: true });
+		writeFileSync(join(legacy, "task", "state.md"), "Saved before the move.");
+		const { tools, context } = await setup();
+		const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
+			run(tools, "notes", params, { ...context, cwd });
+		const moved = join(agentDir, "notes", "github.com", "acme", "tool");
+
+		const listing = toolText(await notes(join(checkout, "src"), { op: "list" }));
+		assert.ok(listing.startsWith(`Notes directory: ${moved}\ntask/state.md  `), listing);
+		await notes(checkout, { op: "append", path: "task/state.md", content: "Appended after." });
+		assert.equal(
+			readFileSync(join(legacy, "task", "state.md"), "utf8"),
+			"Saved before the move.\nAppended after.\n",
+			"sessions running an earlier Posthorse still reach the notes through the old path",
+		);
+		// pi update resets a git package to its new commit and deletes everything Git does not track.
+		git(checkout, "clean", "-fdx", "-q");
+		assert.equal(existsSync(join(checkout, ".pi")), false);
+		assert.equal(
+			toolText(await notes(checkout, { op: "read", path: "task/state.md" })),
+			`File: ${join(moved, "task", "state.md")}\nSaved before the move.\nAppended after.\n`,
+		);
+
+		// A session still running an older Posthorse writes inside the checkout again after the
+		// update removed the link. Both versions survive, and the link returns.
+		mkdirSync(join(legacy, "task"), { recursive: true });
+		writeFileSync(join(legacy, "task", "state.md"), "Written by an older Posthorse.");
+		const relisted = toolText(await notes(checkout, { op: "list" }));
+		const copy = requireValue(/^(from-checkout-\d+)\/task\/state\.md {2}/m.exec(relisted))[1];
+		assert.equal(
+			readFileSync(join(moved, copy, "task", "state.md"), "utf8"),
+			"Written by an older Posthorse.",
+		);
+		assert.equal(
+			readFileSync(join(legacy, "task", "state.md"), "utf8"),
+			"Saved before the move.\nAppended after.\n",
+		);
+
+		// Pi cleans only the checkouts, so a folder holding several packages keeps its own notes.
+		await notes(realpathSync(owner), {
+			op: "write",
+			path: "fleet.md",
+			content: "Owner folder.",
+		});
+		assert.equal(
+			readFileSync(join(owner, ".pi", "notes", "fleet.md"), "utf8"),
+			"Owner folder.",
+		);
+	} finally {
+		if (previous === undefined) {
+			delete process.env.PI_CODING_AGENT_DIR;
+		} else {
+			process.env.PI_CODING_AGENT_DIR = previous;
+		}
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("notes list and search follow aliases while skipping cycles and missing targets", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-cycles-"));
 	try {
@@ -3987,7 +4059,7 @@ test("all-session history cursors fit the declared limit for nested session file
 	}
 });
 
-test("all-session search finds the same entries without ripgrep, and queries raw JSONL cannot show skip its prefilter", async () => {
+test("all-session search finds the same entries with or without ripgrep, including text raw JSONL cannot show", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-prefilter-"));
 	try {
 		const archive = (name: string, content: string) =>
@@ -4003,6 +4075,8 @@ test("all-session search finds the same entries without ripgrep, and queries raw
 		archive("quoted", 'say "needle" twice');
 		archive("plain", "a plain needle");
 		archive("other", "nothing here");
+		archive("dotted", "İSTANBUL");
+		archive("lone", "half \ud83d moon");
 		writeArchive(
 			join(dir, "bare.jsonl"),
 			JSON.stringify({ type: "context_window", id: "bare", parentId: null }),
@@ -4020,10 +4094,11 @@ test("all-session search finds the same entries without ripgrep, and queries raw
 			]
 				.map((match) => match[1])
 				.sort();
-		// Session JSONL stores quotes escaped, and "No handoff" exists only in the rendered entry,
-		// so a raw-text prefilter would drop both files.
-		const queries = ["needle", '"needle"', "No handoff"];
-		const expected = [["plain", "quoted"], ["quoted"], ["bare"]];
+		// Session JSONL stores quotes and lone surrogates escaped, "No handoff" exists only in the
+		// rendered entry, and İ lowercases to two characters, so a plain raw-text prefilter would
+		// drop these files.
+		const queries = ["needle", '"needle"', "No handoff", "İstanbul", "half \ud83d"];
+		const expected = [["plain", "quoted"], ["quoted"], ["bare"], ["dotted"], ["lone"]];
 		assert.deepEqual(await Promise.all(queries.map(hits)), expected);
 		const { PATH, PI_CODING_AGENT_DIR } = process.env;
 		Object.assign(process.env, { PATH: "", PI_CODING_AGENT_DIR: dir });
@@ -4069,7 +4144,7 @@ test("all-session search still finds text that exists only in normalized entries
 		const image = (mimeType?: string) => ({
 			type: "image",
 			data: "AA==",
-			...(mimeType !== undefined && mimeType !== "" ? { mimeType } : {}),
+			...(mimeType === undefined ? {} : { mimeType }),
 		});
 		// One entry per flattenEntry branch, so every label it adds is exercised. Ids, headers, and paths carry
 		// no label words or digits, so a query can only reach an entry's file through the entry itself.
@@ -4083,6 +4158,7 @@ test("all-session search still finds text that exists only in normalized entries
 						{ type: "text", text: "two shots" },
 						image("image/png"),
 						image("image/jpeg"),
+						image(""),
 						image(),
 					],
 				},
@@ -4142,6 +4218,7 @@ test("all-session search still finds text that exists only in normalized entries
 			},
 			{ type: "context_window", id: "fresh" },
 			{ type: "context_window", id: "handed", handoff: "carry on" },
+			{ type: "custom_message", id: "plain", content: "hush" },
 			{
 				type: "context_edit",
 				id: "trim",
@@ -4149,12 +4226,13 @@ test("all-session search still finds text that exists only in normalized entries
 				replacement: { content: "trimmed" },
 			},
 		];
-		for (const entry of entries) {
+		for (const { type, id, ...fields } of entries) {
 			writeFileSync(
-				join(dir, `${entry.id}.jsonl`),
+				join(dir, `${id}.jsonl`),
 				[
 					{ type: "session", id: "s", cwd: "/" },
-					{ ...entry, parentId: null, timestamp: "t" },
+					// Pi's key order, which lets scans skip lines without parsing them.
+					{ type, id, parentId: null, timestamp: "t", ...fields },
 				]
 					.map((line) => JSON.stringify(line))
 					.join("\n"),

@@ -23,7 +23,7 @@ import {
 	type PolicyContext,
 	type TextResult,
 } from "./contracts.ts";
-import { isBinaryFile, notesRoot, publishFile, readText } from "./files.ts";
+import { isBinaryFile, notesDir, publishFile, readText } from "./files.ts";
 import { excerpt, excerptAround } from "./message-text.ts";
 import type { PageAccess } from "./paging.ts";
 
@@ -45,7 +45,7 @@ const SEARCH_OFFSET_LIMIT = 1_000_000;
 function safeJoin(dir: string, path: string): string {
 	const relative = normalize(path.replace(/^[/\\]+/, ""));
 	if (relative === ".." || relative.startsWith(`..${sep}`) || isAbsolute(relative)) {
-		throw new Error(`Invalid path "${path}": must stay inside .pi/notes/.`);
+		throw new Error(`Invalid path "${path}": must stay inside the notes directory.`);
 	}
 	return join(dir, relative);
 }
@@ -278,7 +278,7 @@ export function registerNotes(
 				{ description: "Operation to perform" },
 			),
 			path: Type.Optional(
-				Type.String({ description: "Note or folder path relative to .pi/notes/" }),
+				Type.String({ description: "Note or folder path relative to the notes directory" }),
 			),
 			content: Type.Optional(
 				Type.String({ description: "Full file content (write) or text to add (append)" }),
@@ -296,7 +296,7 @@ export function registerNotes(
 		// Pi's fixed tool contract supplies id, params, signal, updates, and context.
 		// oxlint-disable-next-line max-params
 		async execute(_id, params, signal, _onUpdate, ctx) {
-			const dir = join(notesRoot(ctx.cwd), ".pi", "notes");
+			const dir = notesDir(ctx.cwd);
 			switch (params.op) {
 				case "list":
 					return listNotes(dir, params, policy(ctx), pages);
