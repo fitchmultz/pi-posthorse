@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Honor Pi's effective `compaction.keepRecentTokens` on automatic threshold and overflow rollover,
+  without calling a summarization model. Retain a safely paired projected tail beside the bounded
+  recovery record; shrink or drop whole groups when the fresh context budget is too small, and
+  avoid repeating retained inputs and evidence in recovery.
+- Make the pre-rollover reminder a notes-only nudge: update the current-state note, then continue
+  working and let automatic rollover happen. `new_context` remains an optional deliberate clean
+  reset with no retained messages; manual `/compact` remains native summarization.
+
 ## 0.9.3 — 2026-10-12
 
 - Keep notes for the Git packages Pi installs in `~/.pi/agent/git/` under

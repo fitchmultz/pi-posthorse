@@ -649,6 +649,389 @@ test("oversized tool output rolls over without credentials and repeated resets d
 	);
 });
 
+for (const reason of ["threshold", "overflow"]) {
+	test(`automatic ${reason} retains the effective recent projected tail without duplicating recovery`, async (t) => {
+		const ids = {};
+		const h = await fixture(t, {
+			contextWindow: 335_000,
+			reserveTokens: 64_000,
+			keepRecentTokens: 1,
+			seed(manager) {
+				manager.appendMessage({
+					role: "user",
+					content: `DISCARDED_OWNER ${"o".repeat(reason === "threshold" ? 1_100_000 : 200_000)}`,
+					timestamp: 1,
+				});
+				ids.prose = manager.appendMessage(
+					fauxAssistantMessage(`RECENT_ASSISTANT ${"a".repeat(40_000)}`),
+				);
+				ids.owner = manager.appendMessage({
+					role: "user",
+					content: `RETAINED_OWNER ${"u".repeat(20_000)}`,
+					timestamp: 2,
+				});
+				const omitted = manager.appendMessage({
+					role: "user",
+					content: "OMITTED_PRIVATE_INPUT",
+					timestamp: 3,
+				});
+				manager.appendContextEdit(omitted, null);
+				ids.call = manager.appendMessage(
+					toolTurn({ ...fauxToolCall("read", {}), id: "retained-read" }),
+				);
+				ids.result = manager.appendMessage({
+					role: "toolResult",
+					toolName: "read",
+					toolCallId: "retained-read",
+					content: [{ type: "text", text: "PRIVATE_UNEDITED_RESULT" }],
+					isError: false,
+					timestamp: 4,
+				});
+				manager.appendContextEdit(ids.result, {
+					content: [{ type: "text", text: `PROJECTED_RECEIPT ${"r".repeat(80_000)}` }],
+				});
+			},
+		});
+		h.settingsManager.applyOverrides({
+			compaction: {
+				modelOverrides: { "faux/official-posthorse": { keepRecentTokens: 30_000 } },
+			},
+		});
+		let fresh;
+		h.faux.setResponses([
+			...(reason === "overflow" ? [overflow()] : []),
+			(ctx) => {
+				fresh = ctx.messages;
+				return toolTurn(
+					fauxToolCall("history", { op: "search", query: "PROJECTED_RECEIPT" }),
+				);
+			},
+			fauxAssistantMessage("Finished without summarization."),
+		]);
+		await h.session.prompt("Continue with this new input.");
+		assert.equal(boundaries(h).length, 1);
+		const boundary = boundaries(h)[0];
+		assert.equal(boundary.details.reason, reason);
+		assert.equal(boundary.firstKeptEntryId, ids.prose);
+		assert.equal(boundary.usage, undefined);
+		assert.equal(h.faux.state.callCount, reason === "overflow" ? 3 : 2);
+		const retained = fresh.filter((message) => message.role !== "system");
+		assert.ok(retained.some((message) => textOf(message).startsWith("RETAINED_OWNER")));
+		assert.ok(retained.some((message) => textOf(message).startsWith("RECENT_ASSISTANT")));
+		assert.ok(retained.some((message) => textOf(message).startsWith("PROJECTED_RECEIPT")));
+		assert.doesNotMatch(JSON.stringify(fresh), /OMITTED_PRIVATE_INPUT|PRIVATE_UNEDITED_RESULT/);
+		assert.doesNotMatch(boundary.summary, /RETAINED_OWNER|PROJECTED_RECEIPT|RECENT_ASSISTANT/);
+		assert.match(boundary.summary, /DISCARDED_OWNER/);
+		assert.match(textOf(toolResult(h, "history")), /skipped.*context/i);
+		assert.match(textOf(toolResult(h, "history")), /^No history matches/);
+		const reopened = SessionManager.open(h.sessionManager.getSessionFile());
+		assert.deepEqual(
+			reopened.buildSessionContext().messages,
+			JSON.parse(JSON.stringify(h.sessionManager.buildSessionContext().messages)),
+		);
+		h.settingsManager.applyOverrides({
+			compaction: {
+				modelOverrides: { "faux/official-posthorse": { keepRecentTokens: 25_000 } },
+			},
+		});
+		let repeated;
+		h.faux.setResponses([
+			overflow(),
+			(ctx) => {
+				repeated = ctx.messages;
+				return fauxAssistantMessage("Recovered again.");
+			},
+		]);
+		await h.session.prompt("Continue after another overflow.");
+		assert.equal(boundaries(h).length, 2);
+		assert.equal(boundaries(h)[1].firstKeptEntryId, ids.owner);
+		assert.match(JSON.stringify(repeated), /RETAINED_OWNER|PROJECTED_RECEIPT/);
+		assert.doesNotMatch(boundaries(h)[1].summary, /RETAINED_OWNER|PROJECTED_RECEIPT/);
+		assert.match(
+			boundaries(h)[1].summary,
+			/No discarded owner or visible coordination inputs were selected for this recovery record\./,
+		);
+		assert.doesNotMatch(boundaries(h)[1].summary, /No selected current-window owner/);
+		assert.equal(
+			boundaries(h)[1].summary.split("Automatic context rollover recovery record.").length,
+			2,
+		);
+	});
+}
+
+for (const [contextWindow, keepRecentTokens] of [
+	[32_000, 0],
+	[32_000, 30_000],
+	[100_000, 0],
+]) {
+	test(`automatic retain-none is safe in a ${contextWindow} fresh budget (keep=${keepRecentTokens})`, async (t) => {
+		const h = await fixture(t, {
+			contextWindow,
+			reserveTokens: 1_000,
+			keepRecentTokens,
+			seed(manager) {
+				manager.appendMessage({
+					role: "user",
+					content: "Earlier input that native preparation can discard.",
+					timestamp: 0,
+				});
+				manager.appendMessage({
+					role: "user",
+					content: `OLD_INPUT ${"o".repeat(contextWindow * 4)}`,
+					timestamp: 1,
+				});
+				manager.appendMessage(
+					toolTurn({ ...fauxToolCall("read", {}), id: "oversized-group" }),
+				);
+				manager.appendMessage({
+					role: "toolResult",
+					toolCallId: "oversized-group",
+					toolName: "read",
+					content: [{ type: "text", text: `BOUNDED_RECEIPT ${"r".repeat(48_000)}` }],
+					isError: false,
+					timestamp: 2,
+				});
+			},
+		});
+		let fresh;
+		h.faux.setResponses([
+			(ctx) => {
+				fresh = ctx.messages;
+				return fauxAssistantMessage("Done.");
+			},
+		]);
+		await h.session.prompt("Continue.");
+		assert.equal(boundaries(h).length, 1);
+		assert.equal(
+			h.sessionManager.getEntry(boundaries(h)[0].firstKeptEntryId).customType,
+			"posthorse-boundary",
+		);
+		assert.ok(!fresh.some((message) => message.role === "toolResult"));
+		assert.match(boundaries(h)[0].summary, /BOUNDED_RECEIPT/);
+		assert.ok(JSON.stringify(fresh).length < 32_000);
+		assert.equal(h.faux.state.callCount, 1);
+	});
+}
+
+test("fresh-window fallback retains paired receipts with a compatible injected policy reader", async (t) => {
+	let receipts = 0;
+	const h = await fixture(t, {
+		getPolicy: () => ({ enabled: true, reserveTokens: 16_384 }),
+		extension(pi) {
+			pi.registerTool({
+				name: "receipt",
+				label: "Receipt",
+				description: "Read a sizable receipt",
+				parameters: { type: "object", properties: {} },
+				async execute() {
+					return {
+						content: [
+							{ type: "text", text: `RECEIPT_${++receipts} ${"r".repeat(80_000)}` },
+						],
+						details: {},
+					};
+				},
+			});
+		},
+	});
+	let fresh;
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Keep inspecting receipts." })),
+		...Array.from({ length: 6 }, () => toolTurn(fauxToolCall("receipt", {}))),
+		(ctx) => {
+			fresh = ctx.messages;
+			return fauxAssistantMessage("Done.");
+		},
+	]);
+	await h.session.prompt("Inspect receipts.");
+	assert.equal(boundaries(h).length, 2);
+	const boundary = boundaries(h)[1];
+	assert.equal(boundary.details.reason, "threshold");
+	const call = h.sessionManager.getEntry(boundary.firstKeptEntryId);
+	assert.equal(call.message.role, "assistant");
+	const ids = new Set(
+		call.message.content.filter((part) => part.type === "toolCall").map((part) => part.id),
+	);
+	const result = h.sessionManager.getBranch().find((entry) => ids.has(entry.message?.toolCallId));
+	assert.ok(fresh.some((message) => message.toolCallId === result.message.toolCallId));
+	assert.ok(!boundary.summary.includes(textOf(result.message).split(" ")[0]));
+	assert.ok(fresh.filter((message) => message.role === "toolResult").length < receipts);
+	assert.equal(h.faux.state.callCount, 8);
+});
+
+test("automatic retention of owner input permits another native threshold rollover in the same run", async (t) => {
+	const h = await fixture(t, {
+		seed(manager) {
+			manager.appendMessage({
+				role: "user",
+				content: `DISCARDED_OWNER ${"o".repeat(400_000)}`,
+				timestamp: 1,
+			});
+			manager.appendMessage(fauxAssistantMessage("a".repeat(40_000)));
+			manager.appendMessage({
+				role: "user",
+				content: `RETAINED_OWNER ${"u".repeat(10_000)}`,
+				timestamp: 2,
+			});
+		},
+		extension(pi) {
+			registerDump(pi, false, 80_000);
+		},
+	});
+	const requests = [];
+	h.faux.setResponses([
+		...Array.from({ length: 6 }, () => (ctx) => {
+			requests.push(ctx.messages);
+			return toolTurn(fauxToolCall("dump", {}));
+		}),
+		(ctx) => {
+			requests.push(ctx.messages);
+			return fauxAssistantMessage("Finished the same uninterrupted run.");
+		},
+	]);
+	await h.session.prompt("Keep working without another owner prompt.");
+	assert.equal(boundaries(h).length, 2);
+	assert.ok(requests[0].some((message) => textOf(message).startsWith("RETAINED_OWNER")));
+	for (const boundary of boundaries(h)) {
+		assert.equal(boundary.details.reason, "threshold");
+		assert.equal(boundary.fromHook, true, "the native hook, not the fresh-window fallback");
+		assert.equal(boundary.usage, undefined);
+	}
+	assert.equal(
+		h.sessionManager.getBranch().filter((entry) => entry.message?.toolName === "dump").length,
+		6,
+	);
+	assert.equal(h.faux.state.callCount, 7, "no extra summary or continuation requests");
+	assert.match(textOf(requests.at(-1).at(-1)), /DUMP_TAIL/);
+});
+
+for (const omitted of ["call", "result"]) {
+	test(`automatic retention drops an incomplete projected tool group (omitted ${omitted})`, async (t) => {
+		const h = await fixture(t, {
+			keepRecentTokens: 1,
+			seed(manager) {
+				manager.appendMessage({
+					role: "user",
+					content: "o".repeat(400_000),
+					timestamp: 1,
+				});
+				manager.appendMessage({
+					role: "user",
+					content: "LATER_OWNER_INPUT",
+					timestamp: 2,
+				});
+				const call = manager.appendMessage(
+					toolTurn({ ...fauxToolCall("read", {}), id: "omitted-call" }),
+				);
+				const result = manager.appendMessage({
+					role: "toolResult",
+					toolName: "read",
+					toolCallId: "omitted-call",
+					content: [{ type: "text", text: "LEGACY_ORPHAN_RECEIPT" }],
+					isError: false,
+					timestamp: 3,
+				});
+				manager.appendContextEdit(omitted === "call" ? call : result, null);
+			},
+		});
+		let fresh;
+		h.faux.setResponses([
+			...(omitted === "call" ? [overflow()] : []),
+			(ctx) => {
+				fresh = ctx.messages;
+				return fauxAssistantMessage("Done.");
+			},
+		]);
+		await h.session.prompt("Continue.");
+		assert.equal(boundaries(h).length, 1, "native preparation reached the automatic hook");
+		assert.ok(!fresh.some((message) => message.role === "toolResult"));
+		assert.ok(!fresh.some((message) => message.role === "assistant"));
+		if (omitted === "call") {
+			assert.match(boundaries(h)[0].summary, /LEGACY_ORPHAN_RECEIPT/);
+			assert.match(boundaries(h)[0].summary, /No matching projected call/);
+		} else {
+			assert.doesNotMatch(JSON.stringify(fresh), /LEGACY_ORPHAN_RECEIPT/);
+		}
+		assert.equal(h.faux.state.callCount, omitted === "call" ? 2 : 1);
+	});
+}
+
+test("a retained old notes reminder neither leaks nor suppresses the new window's notes nudge", async (t) => {
+	let oldWindow;
+	let oldReminder;
+	const h = await fixture(t, {
+		keepRecentTokens: 30_000,
+		seed(manager) {
+			oldWindow = manager.appendCompaction("Earlier explicit handoff.", null, 100, {
+				posthorse: 1,
+				reason: "explicit",
+			});
+			manager.appendMessage({
+				role: "user",
+				content: "o".repeat(250_000),
+				timestamp: 1,
+			});
+			manager.appendMessage(fauxAssistantMessage("a".repeat(40_000)));
+			oldReminder = manager.appendCustomMessageEntry(
+				"posthorse-reminder",
+				"OLD_NOTES_NUDGE",
+				true,
+				{ windowId: oldWindow, contextWindow: 100_000, reserveTokens: 16_384 },
+			);
+			manager.appendMessage({
+				role: "user",
+				content: "u".repeat(20_000),
+				timestamp: 2,
+			});
+			manager.appendMessage({
+				...toolTurn({ ...fauxToolCall("read", {}), id: "retained-nudge-receipt" }),
+				// Native preflight requires an assistant newer than the preceding compaction.
+				timestamp: Date.parse(manager.getEntry(oldWindow).timestamp) + 1,
+			});
+			manager.appendMessage({
+				role: "toolResult",
+				toolCallId: "retained-nudge-receipt",
+				toolName: "read",
+				content: [{ type: "text", text: "r".repeat(80_000) }],
+				isError: false,
+				timestamp: 3,
+			});
+		},
+	});
+	const requests = [];
+	h.faux.setResponses([
+		(ctx) => {
+			requests.push(ctx.messages);
+			return toolTurn(fauxToolCall("get_context_remaining", {}));
+		},
+		(ctx) => {
+			requests.push(ctx.messages);
+			return fauxAssistantMessage("Continue working after saving notes.");
+		},
+	]);
+	await h.session.prompt("p".repeat(160_000));
+	assert.equal(boundaries(h).length, 2, "the earlier explicit boundary and automatic rollover");
+	const current = boundaries(h)[1];
+	const reminders = h.sessionManager
+		.getBranch()
+		.filter((entry) => entry.customType === "posthorse-reminder");
+	assert.equal(reminders.length, 2);
+	assert.equal(reminders[1].details.windowId, current.id);
+	assert.notEqual(reminders[1].details.windowId, oldWindow);
+	assert.ok(
+		h.sessionManager
+			.buildSessionProjection()
+			.entries.some((entry) => entry.sourceEntry.id === oldReminder),
+		"the old reminder really lies in the retained range",
+	);
+	assert.doesNotMatch(JSON.stringify(requests), /OLD_NOTES_NUDGE/);
+	assert.match(
+		JSON.stringify(requests[1]),
+		/Notes checkpoint:[\s\S]*continue working; let automatic rollover happen without calling new_context/,
+	);
+	assert.equal(h.faux.state.callCount, 2);
+});
+
 test("native terminating batch keeps its receipt without a reset or unsolicited request", async (t) => {
 	const h = await fixture(t, { extension: (pi) => registerDump(pi, true) });
 	h.faux.setResponses([toolTurn(fauxToolCall("dump", {})), fauxAssistantMessage("MUST_NOT_RUN")]);
@@ -707,9 +1090,11 @@ test("eligible overflow (keepRecentTokens=1) retries fresh and later requests ca
 		// The later request must recover after the previous retry has settled.
 		// oxlint-disable-next-line no-await-in-loop
 		await h.session.prompt(`Owner request ${cycle}`);
-		assert.equal(retry.filter((message) => message.role !== "system").length, 1);
+		const results = retry.filter((message) => message.role === "toolResult");
+		assert.equal(results.length, 1, "the safe recent call/result group survives recovery");
 		assert.doesNotMatch(JSON.stringify(retry), /prompt is too long/);
-		assert.match(JSON.stringify(retry), /Tool result evidence[\s\S]*DUMP_HEAD[\s\S]*DUMP_TAIL/);
+		assert.match(textOf(results[0]), /DUMP_HEAD[\s\S]*DUMP_TAIL/);
+		assert.doesNotMatch(boundaries(h).at(-1).summary, /Tool result evidence|DUMP_HEAD/);
 	}
 	assert.equal(boundaries(h).length, 2);
 	assert.equal(h.faux.state.callCount, 6);
@@ -837,7 +1222,7 @@ test("default file extension keeps guidance, reminders and explicit reset despit
 	for (const request of requests) {
 		assert.match(getCurrentSystemPrompt(request), /Context self-management \(Posthorse\)/);
 	}
-	assert.match(JSON.stringify(requests[1]), /Checkpoint now:/);
+	assert.match(JSON.stringify(requests[1]), /Notes checkpoint:/);
 	assert.equal(
 		h.sessionManager
 			.getBranch()
@@ -890,7 +1275,7 @@ test("default policy follows runtime and per-model overrides for guidance, budge
 		assert.match(getCurrentSystemPrompt(request), /rollover line is 68,001 tokens/);
 	}
 	assert.match(textOf(toolResult(h, "get_context_remaining")), /line at 68,001/);
-	assert.match(JSON.stringify(requests), /Checkpoint now:/);
+	assert.match(JSON.stringify(requests), /Notes checkpoint:/);
 	assert.equal(
 		h.sessionManager
 			.getBranch()
@@ -1777,7 +2162,8 @@ test("earlier turn-start drafts leave fresh-window compaction Pi-owned", async (
 	await h.session.prompt("Inspect.");
 	assert.equal(intercepted, 1, "the native automatic hook owns this eligible span");
 	assert.equal(boundaries(h).length, 2);
-	assert.match(boundaries(h)[1].summary, /NEW_TURN_START_DRAFT/);
+	assert.match(JSON.stringify(h.session.messages), /NEW_TURN_START_DRAFT/);
+	assert.doesNotMatch(boundaries(h)[1].summary, /NEW_TURN_START_DRAFT/);
 	assert.equal(h.faux.state.callCount, 3);
 });
 

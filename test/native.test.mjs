@@ -1254,7 +1254,15 @@ for (const [continuation, stopReason] of [
 				);
 		if (continuation !== "none") {
 			assert.equal(reminders().length, 1);
-			assert.match(JSON.stringify(requests.slice(1)), /Checkpoint now:/);
+			assert.match(JSON.stringify(requests.slice(1)), /Notes checkpoint:/);
+			assert.match(
+				textOf(reminders()[0]),
+				/Then continue working; let automatic rollover happen without calling new_context/,
+			);
+			assert.doesNotMatch(
+				JSON.stringify(requests.slice(1)),
+				/Stop normal work|Then call new_context/,
+			);
 			assert.equal(
 				h.session.messages.findLast((message) => message.role === "assistant").stopReason,
 				"stop",
@@ -1291,7 +1299,7 @@ for (const [continuation, stopReason] of [
 		]);
 		await h.session.prompt("Continue working.");
 		assert.equal(reminders().length, 1, "a skipped final answer does not consume the reminder");
-		assert.match(JSON.stringify(requests.at(-1)), /Checkpoint now:/);
+		assert.match(JSON.stringify(requests.at(-1)), /Notes checkpoint:/);
 		h.faux.setResponses([
 			fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
 				stopReason: "toolUse",
@@ -1334,7 +1342,7 @@ test("public enabled-to-disabled policy removes the active reminder but keeps it
 	]);
 	await h.session.prompt("Continue without automatic rollover");
 	assert.match(input, /Pi compaction is disabled/);
-	assert.doesNotMatch(input, /Checkpoint now:|then call new_context now/);
+	assert.doesNotMatch(input, /Notes checkpoint:|then call new_context now/);
 	assert.deepEqual(reminders(), [original]);
 });
 
@@ -1375,7 +1383,7 @@ test("public checkpoint reminder reaches the model after Pi compacts inside a ro
 		/Context window \S+ starts here/,
 		"the compaction removed the window marker",
 	);
-	assert.match(input ?? "", /Checkpoint now:/);
+	assert.match(input ?? "", /Notes checkpoint:/);
 });
 
 for (const nativeCompact of [false, true]) {

@@ -14,7 +14,6 @@ import {
 import {
 	isRecord,
 	isReminderType,
-	MIN_PAGE_CHARS,
 	REMINDER_TYPE,
 	type CompactionPolicy,
 	type PolicyContext,
@@ -23,7 +22,7 @@ import {
 } from "./contracts.ts";
 import { registerContextTools } from "./context-tools.ts";
 import { safeJsonStringify } from "./message-text.ts";
-import { buildAutoHandoff } from "./recovery.ts";
+import { automaticRecovery } from "./retention.ts";
 import {
 	createReminderLookup,
 	hasReminder,
@@ -175,7 +174,7 @@ function sendReminder(
 	pi.sendMessage(
 		{
 			customType: REMINDER_TYPE,
-			content: `[posthorse] Checkpoint now: ${(budget.rolloverAt - tokens).toLocaleString("en-US")} tokens remain before Pi's automatic rollover line. Stop normal work, ${CHECKPOINT_STEPS}.`,
+			content: `[posthorse] Notes checkpoint: ${(budget.rolloverAt - tokens).toLocaleString("en-US")} tokens remain before Pi's automatic rollover line. Please ${CHECKPOINT_STEPS}.`,
 			display: true,
 			details: fingerprint,
 		},
@@ -232,12 +231,20 @@ function registerReminderFilter(
 function automaticDraft(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
-	recovery: { readonly handoff: string; readonly tokensBefore: number; readonly reason: string },
+	recovery: {
+		readonly handoff: string;
+		readonly tokensBefore: number;
+		readonly reason: string;
+		readonly firstKeptEntryId?: string;
+	},
 ) {
-	// Public compaction requires an entry id. An invisible sentinel keeps no prior conversation.
-	pi.appendEntry("posthorse-boundary", {});
-	const firstKeptEntryId = ctx.sessionManager.getLeafId();
-	if (firstKeptEntryId === null || firstKeptEntryId === "") {
+	let firstKeptEntryId = recovery.firstKeptEntryId;
+	if (firstKeptEntryId === undefined) {
+		// Public compaction requires an entry id even when no prior conversation safely fits.
+		pi.appendEntry("posthorse-boundary", {});
+		firstKeptEntryId = ctx.sessionManager.getLeafId() ?? undefined;
+	}
+	if (firstKeptEntryId === undefined || firstKeptEntryId === "") {
 		throw new Error("Pi did not persist the context boundary.");
 	}
 	return {
@@ -316,17 +323,16 @@ function thresholdFallback(
 		return undefined;
 	}
 	const projected = event.context.contextEntries;
-	const limit = freshPayloadChars(host, toolTokens(), event.context.pendingMessages);
 	const ownerQuestionRegistered = pi
 		.getAllTools()
 		.some((tool) => tool.name === "ask_question" && tool.namespace === undefined);
-	const summary = buildAutoHandoff(
+	const recovery = automaticRecovery(
 		ctx.sessionManager.getBranch(),
 		projected,
-		limit,
+		{ host, toolTokens: toolTokens(), pendingMessages: event.context.pendingMessages },
 		ownerQuestionRegistered,
 	);
-	if (limit < MIN_PAGE_CHARS || summary.length > limit) {
+	if (recovery === undefined) {
 		return undefined;
 	}
 	// ponytail: turn_end drafts are eager. Later projection editors must replace/remove this draft;
@@ -336,8 +342,8 @@ function thresholdFallback(
 			...event.entries,
 			{
 				type: "compaction",
-				summary,
-				firstKeptEntryId: null,
+				summary: recovery.handoff,
+				firstKeptEntryId: recovery.firstKeptEntryId ?? null,
 				details: { posthorse: 1, reason: "threshold" },
 			},
 		],
@@ -362,17 +368,20 @@ function registerAutomaticRollover(
 			if (budgetFor(host)?.supported !== true) {
 				return;
 			}
-			const limit = freshPayloadChars(host, activeToolTokens());
 			const ownerQuestionRegistered = pi
 				.getAllTools()
 				.some((tool) => tool.name === "ask_question" && tool.namespace === undefined);
-			const handoff = buildAutoHandoff(
+			const recovery = automaticRecovery(
 				event.branchEntries,
 				ctx.sessionManager.buildSessionProjection().entries,
-				limit,
+				{
+					host,
+					toolTokens: activeToolTokens(),
+					firstKeptEntryId: event.preparation.firstKeptEntryId,
+				},
 				ownerQuestionRegistered,
 			);
-			if (limit < MIN_PAGE_CHARS || handoff.length > limit) {
+			if (recovery === undefined) {
 				throw new Error(
 					"Too little fresh context capacity for an automatic recovery record.",
 				);
@@ -381,7 +390,7 @@ function registerAutomaticRollover(
 				return { cancel: true };
 			}
 			return automaticDraft(pi, ctx, {
-				handoff,
+				...recovery,
 				tokensBefore: event.preparation.tokensBefore,
 				reason: event.reason,
 			});

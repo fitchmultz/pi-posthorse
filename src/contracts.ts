@@ -4,6 +4,7 @@ import type { PosthorseDisplay } from "../ui.ts";
 export type CompactionPolicy = {
 	readonly enabled: boolean;
 	readonly reserveTokens: number;
+	readonly keepRecentTokens?: number;
 };
 export type ContextUsage = {
 	readonly tokens: number | null;

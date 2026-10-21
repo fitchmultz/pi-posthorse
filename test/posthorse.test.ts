@@ -301,7 +301,10 @@ function automaticResult(
 			reason: "threshold",
 			branchEntries,
 			signal: new AbortController().signal,
-			preparation: { settings: context.getCompactionSettings(), tokensBefore: 100 },
+			preparation: {
+				settings: { ...context.getCompactionSettings(), keepRecentTokens: 0 },
+				tokensBefore: 100,
+			},
 		},
 		{
 			...context,
@@ -388,7 +391,7 @@ test("a minimum-budget automatic record keeps a complete history pointer without
 		Array.from({ length: 100 }, (_unused, index) => ({ ...boundary, id: `record-${index}` })),
 	];
 	for (const [index, entries] of branches.entries()) {
-		const handoff = buildAutoHandoff(entries, [], 1_000, false);
+		const handoff = buildAutoHandoff(entries, [], 1_000, { ownerQuestionRegistered: false });
 		assert.ok(handoff.length <= 1_000);
 		assert.match(
 			handoff,
@@ -633,10 +636,10 @@ test("budget policy sends one best-effort reminder below the line and lets Pi ow
 
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 1);
-		assert.match(messages[0].content, /Checkpoint now/);
+		assert.match(messages[0].content, /Notes checkpoint/);
 		assert.match(
 			messages[0].content,
-			/current-state note .*available file-editing tools.*Then call new_context\.$/,
+			/current-state note .*available file-editing tools.*Then continue working; let automatic rollover happen without calling new_context\.$/,
 		);
 		assert.deepEqual(messages[0].details, {
 			windowId: "window-2",

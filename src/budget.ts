@@ -14,7 +14,7 @@ import { imagesOf, textOf } from "./message-text.ts";
 
 const MIN_USABLE_TOKENS = Math.ceil(MAX_HANDOFF_CHARS / 4) * 2;
 export const CHECKPOINT_STEPS =
-	"update the task's current-state note (goal, progress, decisions, next steps) with available file-editing tools at its absolute path; use notes write only for creation, substantial restructuring, or when editing tools are unavailable. If the note is already current, leave it unchanged. Then call new_context";
+	"update the task's current-state note (goal, progress, decisions, next steps) with available file-editing tools at its absolute path; use notes write only for creation, substantial restructuring, or when editing tools are unavailable. If the note is already current, leave it unchanged. Then continue working; let automatic rollover happen without calling new_context";
 export type Budget = {
 	readonly contextWindow: number;
 	readonly reserveTokens: number;
@@ -84,7 +84,7 @@ function automaticGuidance(budget: Budget | undefined, enabled: boolean): string
 		budget === undefined
 			? ""
 			: ` The rollover line is ${budget.rolloverAt.toLocaleString("en-US")} tokens used under the available Pi settings.`;
-	return `Automatic rollover follows Pi's compaction setting.${line} At most one checkpoint reminder may arrive at the end of a working turn before the rollover line (${deadline}), never on a turn that ends the run; when it does, stop normal work, ${CHECKPOINT_STEPS}.`;
+	return `Automatic rollover follows Pi's compaction setting and retains a safe recent-message tail using compaction.keepRecentTokens, without model summarization.${line} At most one notes reminder may arrive at the end of a working turn before the rollover line (${deadline}), never on a turn that ends the run; when it does, ${CHECKPOINT_STEPS}. new_context is an optional deliberate clean reset, not a checkpoint requirement.`;
 }
 export function buildGuidance(ctx: PolicyContext): string {
 	const budget = budgetFor(ctx);
@@ -92,7 +92,7 @@ export function buildGuidance(ctx: PolicyContext): string {
 	const capacity =
 		budget === undefined
 			? "Configured context capacity is unknown."
-			: `Configured context capacity: ${budget.contextWindow.toLocaleString("en-US")} tokens. This is Pi's best available native limit, not remaining space or a measured provider boundary. Fresh windows use the active configuration; system instructions, tools, the handoff, and new messages consume part of it.`;
+			: `Configured context capacity: ${budget.contextWindow.toLocaleString("en-US")} tokens. This is Pi's best available native limit, not remaining space or a measured provider boundary. Fresh windows use the active configuration; system instructions, tools, the handoff, retained recent messages, and new messages consume part of it.`;
 	return `## Context self-management (Posthorse)
 ${capacity}
 Do not guess context capacity or remaining space from response-token limits or reasoning budgets. Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining. If usage is unknown, report it as unknown. No routine budget checks are needed.
