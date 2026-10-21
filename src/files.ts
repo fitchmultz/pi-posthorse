@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
 	createReadStream,
 	existsSync,
@@ -197,36 +197,78 @@ function notesRoot(cwd: string): string {
 		}
 	}
 }
+function packageRelativePath(installs: string, root: string): string | undefined {
+	const path = relative(installs, root);
+	return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path)
+		? path
+		: undefined;
+}
+function projectPackageNotes(root: string, cwd: string): string | undefined {
+	let moved: string | undefined;
+	let checkout = root;
+	for (let dir = cwd; dirname(dir) !== dir; dir = dirname(dir)) {
+		// Retain the logical checkout path when a package container or source segment is linked.
+		if (existsSync(join(dir, ".git")) && realpathSync(dir) === root) {
+			checkout = dir;
+		}
+		if (basename(dir) !== "git" || basename(dirname(dir)) !== ".pi") {
+			continue;
+		}
+		const path = packageRelativePath(dir, checkout);
+		if (path !== undefined) {
+			// Flat full keys keep arbitrary Git URL prefix paths out of one another's note stores.
+			const key = createHash("sha256").update(path.split(sep).join("/")).digest("hex");
+			moved = join(realpathSync(dirname(dir)), "package-notes", key, "notes");
+		}
+	}
+	// The outermost package container also protects packages installed inside another package.
+	return moved;
+}
 /**
- * `pi update` resets the Git packages Pi installs in the agent directory and runs `git clean -fdx`
- * in them, deleting notes kept inside. Their notes live in the agent directory under the same host
- * and path instead.
- * ponytail: packages installed for one project (its `.pi/git/`) still keep notes in the checkout;
- * give them a per-project location if sessions start working inside them.
+ * Pi's package manager installs Git sources in <agent>/git or <project>/.pi/git and runs
+ * `git clean -fdx` inside their checkouts on update. Keep notes alongside, not inside, that tree.
  * ponytail: notes a package commits under `.pi/notes` return with each update and move into
  * another `from-checkout-*` folder; skip tracked files if a package ever commits its notes.
  */
-function packageNotes(root: string): string | undefined {
+function packageNotes(root: string, cwd: string): string | undefined {
+	// Pi cleans only the checkouts; folders that hold several of them keep their own notes.
+	if (!existsSync(join(root, ".git"))) {
+		return;
+	}
 	const agentDir = getAgentDir();
 	const installs = join(agentDir, "git");
-	const path = relative(existsSync(installs) ? realpathSync(installs) : installs, root);
-	const inside =
-		path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
-	// Pi cleans only the checkouts; folders that hold several of them keep their own notes.
-	return inside && existsSync(join(root, ".git")) ? join(agentDir, "notes", path) : undefined;
+	const path = packageRelativePath(
+		existsSync(installs) ? realpathSync(installs) : installs,
+		root,
+	);
+	return path === undefined
+		? (projectPackageNotes(root, cwd) ?? projectPackageNotes(root, root))
+		: join(agentDir, "notes", path);
+}
+/** Preserve every existing entry, including empty directories and dangling links. */
+function migrationTarget(moved: string): string {
+	if (lstatSync(moved, { throwIfNoEntry: false }) === undefined) {
+		return moved;
+	}
+	const base = join(moved, `from-checkout-${Date.now()}`);
+	let target = base;
+	for (let suffix = 1; lstatSync(target, { throwIfNoEntry: false }) !== undefined; suffix++) {
+		target = `${base}-${suffix}`;
+	}
+	return target;
 }
 /** The notes directory for `cwd`, moving any notes found inside a Pi package checkout. */
 export function notesDir(cwd: string): string {
 	const root = notesRoot(cwd);
 	const local = join(root, ".pi", "notes");
-	const moved = packageNotes(root);
+	const moved = packageNotes(root, cwd);
 	if (moved === undefined) {
 		return local;
 	}
 	if (lstatSync(local, { throwIfNoEntry: false })?.isDirectory() === true) {
 		mkdirSync(dirname(moved), { recursive: true });
 		// Notes an older Posthorse wrote here after an earlier move keep a folder of their own.
-		const target = existsSync(moved) ? join(moved, `from-checkout-${Date.now()}`) : moved;
+		const target = migrationTarget(moved);
 		try {
 			renameSync(local, target);
 			// Sessions still running an older Posthorse keep reaching the notes until they reload.

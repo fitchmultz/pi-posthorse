@@ -76,7 +76,7 @@ Removal leaves notes and Pi session history in place. See the [installation refe
 
 ## Data and privacy
 
-Posthorse makes no network requests. Notes are plaintext files under `.pi/notes/`; linked Git worktrees share them. Notes for the Git packages Pi installs in `~/.pi/agent/git/` live under `~/.pi/agent/notes/` instead, because `pi update` deletes untracked files in those checkouts. Add `.pi/notes/` to `.gitignore` if the notes must stay private.
+Posthorse makes no network requests. Notes are plaintext files under `.pi/notes/`; linked Git worktrees share them. Notes for Pi-managed Git packages live outside their checkouts because `pi update` deletes untracked files there: global packages (including their descendants) use Pi's agent-directory `notes/`, and other project-local packages use the containing project's `.pi/package-notes/`, with project-local stores keyed by a full SHA-256 digest of the host and package path. Access existing checkout-local notes with this version before updating the package so they can migrate. Add `.pi/notes/` and `.pi/package-notes/` to the containing project's `.gitignore` if the notes must stay private.
 
 History can include user messages, assistant thinking, tool arguments, errors, and images. Content you retrieve enters the context of your selected model and provider.
 
