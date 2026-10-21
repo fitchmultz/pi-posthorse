@@ -1522,7 +1522,7 @@ test("late queued input defers an explicit handoff that no longer fits", async (
 
 for (const trigger of ["user", "custom"]) {
 	test(`resumed over-budget ${trigger} run respects native preflight without a summary request`, async (t) => {
-		let api, modernStart;
+		let api;
 		const trace = [];
 		const persisted = "persisted ".repeat(70_000);
 		const seed = (manager, model) => {
@@ -1551,8 +1551,7 @@ for (const trigger of ["user", "custom"]) {
 			extension(pi) {
 				api = pi;
 				pi.on("before_agent_start", (event) => {
-					modernStart = "messageType" in event;
-					trace.push(`${event.messageType ?? "user"}_start`);
+					trace.push(`${event.messageType}_start`);
 				});
 				pi.on("session_before_compact", () => {
 					trace.push("compact");
@@ -1560,8 +1559,8 @@ for (const trigger of ["user", "custom"]) {
 			},
 		});
 		if (trigger === "custom") {
-			h.faux.setResponses([fauxAssistantMessage("Host contract identified.")]);
-			await h.session.prompt("Identify the user-start contract.");
+			h.faux.setResponses([fauxAssistantMessage("Initial run completed.")]);
+			await h.session.prompt("Complete the initial run before custom delivery.");
 			seed(h.sessionManager, h.faux.getModel());
 			h.session.refreshContext();
 			trace.length = 0;
@@ -1588,11 +1587,7 @@ for (const trigger of ["user", "custom"]) {
 			);
 			await h.session.waitForIdle();
 		}
-		const preflight = trigger === "user" || modernStart;
-		assert.deepEqual(
-			trace,
-			preflight ? ["compact", `${trigger}_start`, "request"] : ["request", "compact"],
-		);
+		assert.deepEqual(trace, ["compact", `${trigger}_start`, "request"]);
 		assert.equal(
 			requests.length,
 			1,
@@ -1604,20 +1599,11 @@ for (const trigger of ["user", "custom"]) {
 		assert.ok(boundary.summary.length <= 20_000);
 		assert.equal(boundary.usage, undefined, "no summary-model usage");
 		assert.match(boundary.summary, /persisted/);
-		if (preflight) {
-			assert.ok(!boundary.summary.includes(input));
-		} else {
-			assert.ok(boundary.summary.includes(input), "official recovery follows delivery");
-		}
-		assert.equal(
-			requests[0].filter((message) => textOf(message) === persisted).length,
-			preflight ? 0 : 1,
-		);
+		assert.ok(!boundary.summary.includes(input));
+		assert.equal(requests[0].filter((message) => textOf(message) === persisted).length, 0);
 		assert.equal(requests[0].filter((message) => textOf(message) === input).length, 1);
 		if (trigger === "custom") {
-			if (preflight) {
-				assert.ok(JSON.stringify(requests[0]).length < 30_000);
-			}
+			assert.ok(JSON.stringify(requests[0]).length < 30_000);
 			assert.equal(
 				h.sessionManager
 					.getBranch()

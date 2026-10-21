@@ -5,7 +5,7 @@ For a quick start, see the [README](../README.md).
 
 ## Install
 
-Posthorse requires Pi `>=1.0.0`. Update an older host before you install Posthorse.
+Posthorse requires Pi `>=1.3.0`. Update an older host before you install Posthorse.
 
 ```bash
 pi install npm:pi-posthorse                        # from npm
@@ -25,7 +25,7 @@ Both hosts get the same tools, guidance, reminders, notes, history, and recovery
 
 - **Automatic eligibility on both hosts:** Pi's compaction preparation must succeed before the automatic hook runs. Posthorse's custom compaction result bypasses the default summarizer and its credential lookup. In fresh compaction windows without a subsequent projected turn-start input, Posthorse owns threshold rollover at completed turn end when known usage reaches the enabled, supported threshold; it preserves normal continuation and never requests another response after a final answer. Other threshold spans and overflow/truncated-response recovery stay Pi-owned. Tiny overflow/truncated responses can still miss native recovery, and oversized initial input can reach the provider before recovery.
 - **Policy:** guidance, reminders and budget reports use Pi's live effective settings, including runtime and per-model compaction overrides, defaults and validation; the turn-end threshold fallback uses this same policy reader, while the native automatic hook uses the live settings in its event. Manual settings-file edits take effect when Pi refreshes its live settings, just like Pi's own compaction, not on Posthorse's next evaluation. SDK hosts can inject policy with `createPosthorse(getPolicy)`. Handoffs appear as compaction-summary messages. Background work owned outside the foreground batch is not serialized or stopped by Posthorse.
-- **Idle custom wakeups:** hosts that prepare custom runs refresh Posthorse's run-local prompt options and check compaction before delivery, preserving the new custom input separately from the bounded recovery record. Official Pi 1.1.0 skips both steps for custom runs: guidance still uses current model/settings in the named section, but over-budget history can reach the provider before native recovery runs after the response. Settled forced-prompt options never carry into a later run.
+- **Idle custom wakeups:** supported official Pi and the maintained fork refresh Posthorse's run-local prompt options and check compaction before delivery, preserving the new custom input separately from the bounded recovery record. Settled forced-prompt options never carry into a later run. Official Pi 1.1.0 skipped that preflight and could deliver over-budget history before recovery; that historical limitation does not apply to the supported 1.3.0 baseline.
 
 Legacy fork `context_window` entries remain readable for history recovery. New boundaries do not use the retired native-window/async ABI. Opening legacy fork journals in official Pi can reintroduce earlier context because official Pi does not interpret those old markers; do not assume cross-host session migration.
 
