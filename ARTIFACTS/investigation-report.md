@@ -1,16 +1,24 @@
 # Posthorse cached-token investigation
 
+> **Historical implementation baseline, reusable measurement plan.** The mechanisms below describe
+> revision `ea25232`, not the current checkout or every released version. Current source retains a
+> safe recent-message tail during automatic rollover; explicit `new_context` still retains none.
+> Current reminders are notes-only nudges during working runs and do not wake a finished agent.
+> Tail retention and the notes-only wording are tracked under [Unreleased](../CHANGELOG.md#unreleased)
+> until a versioned release includes them. See [current guarantees and limits](../docs/context-recovery.md)
+> before applying this report's implementation observations to an installation.
+
 ## Conclusion and limits
 
 The reported incident was approximately **4.26 billion cache-read input tokens/day**, **11.2 million output tokens/day**, and a **97% input cache-hit ratio**, using a 500,000-token model with multiple agents. These figures are unverified: no production journals, provider invoices, actual settings or matched workload baseline were inspected.
 
-Posthorse does not directly call a provider, warm caches, spawn agents or run an inference timer. Its **no-summary policy can amplify cached-input volume** by allowing large contexts to remain in subsequent requests until rollover. A checkpoint reminder can also cause a bounded extra provider response. Neither mechanism establishes the cause of this incident or proves that the deployment has no request loop elsewhere.
+Posthorse does not directly call a provider, warm caches, spawn agents or run an inference timer. Its **no-summary policy can amplify cached-input volume** by allowing large contexts to remain in subsequent requests until rollover. At the historical baseline, a checkpoint reminder could also cause a bounded extra provider response; current reminders do not wake finished agents, though model-driven checkpoint work can still add cost. Neither mechanism establishes the cause of this incident or proves that the deployment has no request loop elsewhere.
 
 **No runtime fix or measured performance improvement is claimed.** The useful next action is the controlled measurement below, not changing the product's no-summary contract.
 
 ## Source baseline
 
-This report describes [Posthorse at `ea25232`](https://github.com/fitchmultz/pi-posthorse/tree/ea25232a21bb24af0cacafd952ef534b51dac2ee), superseding the original investigation at `0ce2594`. See the current [README](../README.md) for supported hosts, settings and limitations.
+This report describes [Posthorse at `ea25232`](https://github.com/fitchmultz/pi-posthorse/tree/ea25232a21bb24af0cacafd952ef534b51dac2ee), superseding the original investigation at `0ce2594`. Source links and test names below refer to that historical baseline, not current file layouts or freshly executed tests. See the current [README](../README.md) for supported hosts, settings and limitations.
 
 Changes since the original investigation:
 
@@ -23,7 +31,7 @@ The original report's claims that official Pi is refused, that Posthorse bounds 
 
 ## What can affect request volume and size
 
-| Mechanism              | Current behavior                                                                                                                                                                                                                                                                                                                                                                                                                         | Evidence                                                                                                                                                                                               |
+| Mechanism              | Behavior at the historical baseline                                                                                                                                                                                                                                                                                                                                                                                                      | Evidence                                                                                                                                                                                               |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Automatic rollover     | `session_before_compact` supplies a bounded recovery record and retains no prior conversation. It does not call a summary model. Manual `/compact` stays Pi's summarization.                                                                                                                                                                                                                                                             | [`index.ts`, automatic hook](https://github.com/fitchmultz/pi-posthorse/blob/ea25232a21bb24af0cacafd952ef534b51dac2ee/index.ts#L1110-L1139); real-SDK explicit/automatic reset suites                  |
 | Checkpoint reminder    | `turn_end` steers a best-effort reminder when no matching window/context-capacity/reserve fingerprint remains in active context. A changed fingerprint or native compaction summarizing away a reminder may allow another. Error/aborted turns, disabled compaction, unsupported budgets and usage already beyond the rollover line do not send one. A reminder can cause another provider response carrying the existing large context. | [`index.ts`, reminder](https://github.com/fitchmultz/pi-posthorse/blob/ea25232a21bb24af0cacafd952ef534b51dac2ee/index.ts#L1037-L1084); `test/native.test.mjs` reminder scenarios                       |
@@ -35,7 +43,7 @@ The extension contains no direct provider client, network request, cache warmer 
 
 ### Host boundaries matter
 
-Both hosts use the public compaction hook with the same native eligibility: Pi must first prepare a summarizable span. Tiny overflow/truncated responses or a second large result without a new user turn can miss the hook; oversized initial input can reach the provider before recovery. Posthorse does not own physical payload clamping. See README **Official Pi and the fork** for the exact limits rather than treating a rollover policy as a provider-request-size guarantee.
+At the historical baseline, both hosts used the public compaction hook with the same native eligibility: Pi had to first prepare a summarizable span. Tiny overflow/truncated responses or a second large result without a new user turn could miss the hook; oversized initial input could reach the provider before recovery. Current Posthorse additionally handles a supported fresh-window threshold case at completed turn end, without requesting a response after a final answer; that is not a replacement for all native overflow recovery. Posthorse still does not own physical payload clamping. See the current [host boundaries](../docs/reference.md#official-pi-and-the-fork) rather than treating a rollover policy as a provider-request-size guarantee.
 
 ## Arithmetic: plausible amplification, not attribution
 
@@ -59,7 +67,7 @@ Stock summarization also lets contexts grow between compactions. Comparing a nea
 2. **Separate request sources.** Count actual provider requests and input/cache-read/cache-write/output tokens. Where the host records separate `cache_warm` usage, distinguish those requests from ordinary assistant requests. Check provider invoice semantics before equating a cache ratio with spend.
 3. **Hold the workload constant.** Use the same task set, starting state, tools, model, host, compaction settings, warming policy, child-session count and fresh/fork policy. Account for cold/warm cache state. Run repeated trials and compare completion quality as well as latency, request count, cumulative tokens and billed cost.
 4. **Compare Posthorse loaded against Posthorse unloaded, with automatic compaction enabled in both.** Restart isolated sessions after changing extension loading. Removing Posthorse restores the host's stock automatic summarization path; do not load a competing policy extension. Keep the production configuration unchanged during the experiment.
-5. **Do not use `compaction.enabled:false` as the stock-compaction baseline.** It disables automatic compaction and Posthorse reminders/automatic rollover; it does not unload Posthorse, restore automatic summaries, or remove `new_context`. This can leave a growing request without automatic recovery. Existing `test/official.test.mjs` disabled-policy scenarios verify retained tools and no automatic boundary.
+5. **Do not use `compaction.enabled:false` as the stock-compaction baseline.** It disables automatic compaction and Posthorse reminders/automatic rollover; it does not unload Posthorse, restore automatic summaries, or remove `new_context`. This can leave a growing request without automatic recovery. The baseline's `test/official.test.mjs` disabled-policy scenarios cover retained tools and no automatic boundary; this report does not claim a fresh test run.
 6. **Inspect fan-out and wake-ups separately.** Extension inheritance, forked parent contexts, intercom steering, background completions and cache warming are host/profile-dependent. They can multiply requests or prefix sizes, but this investigation has not measured their contribution to the incident. Check the exact installed implementations and settings rather than assuming external defaults.
 
 Changing the effective model capacity or reserve can lower Posthorse's window ceiling, but it also changes rollover frequency and available working space. Keep at least 10,000 usable tokens; unsupported small budgets intentionally leave the host's own compaction behavior in place. Do not use that fallback as an implicit cost-control feature.
