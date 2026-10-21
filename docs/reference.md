@@ -7,6 +7,8 @@ For a quick start, see the [README](../README.md).
 
 Posthorse requires Pi `>=1.3.0`. Update an older host before you install Posthorse.
 
+When upgrading from Pi 1.0 or 1.1, review the [upstream changes through 1.3.0](https://github.com/earendil-works/pi/blob/v1.3.0/packages/coding-agent/CHANGELOG.md): Azure provider naming, Kimi base URL overrides, theme schemas, and extension start-event/busy-state contracts changed. Posthorse does not migrate those host settings or other extensions.
+
 ```bash
 pi install npm:pi-posthorse                        # from npm
 pi install git:github.com/fitchmultz/pi-posthorse    # from Git
