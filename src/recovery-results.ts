@@ -9,6 +9,7 @@ import {
 	toolIdentity,
 } from "./message-text.ts";
 
+export type RecoveryEntry = EntryLike & { readonly sourceEntryId: string | undefined };
 type LinkedCall = { readonly entry: EntryLike; readonly block: ToolCallLike };
 export type RecoveryBlock = { readonly header: string; readonly text: string };
 export type RecoveryBatch = { readonly callId?: string; readonly blocks: readonly RecoveryBlock[] };
@@ -83,7 +84,7 @@ function resultBlock(
 }
 /** Async receipts may arrive after a response; completion does not establish receipt delivery. */
 export function recoverableToolResults(
-	entries: readonly EntryLike[],
+	entries: readonly RecoveryEntry[],
 	retained: ReadonlySet<string>,
 ): RecoveryBatch | undefined {
 	const calls = callsById(entries);
@@ -93,7 +94,7 @@ export function recoverableToolResults(
 		if (
 			message?.role !== "toolResult" ||
 			message.toolCallId === undefined ||
-			retained.has(entry.id ?? "")
+			retained.has(entry.sourceEntryId ?? "")
 		) {
 			return false;
 		}
