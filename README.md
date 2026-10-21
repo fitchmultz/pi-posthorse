@@ -6,7 +6,7 @@ Posthorse starts fresh context windows for long [Pi](https://github.com/earendil
 
 ## Install and start
 
-Use Node 24.12.0 or later and Pi 1.0.0 or later. Posthorse supports official Pi and [fitchmultz/pi](https://github.com/fitchmultz/pi).
+Use Node 24.12.0 or later and Pi 1.3.0 or later. Posthorse supports official Pi and [fitchmultz/pi](https://github.com/fitchmultz/pi).
 
 Update an older Pi installation before you install Posthorse. Run these commands:
 

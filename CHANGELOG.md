@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Require official Pi 1.3.0 or later, or the maintained `fitchmultz/pi` fork with the same
+  public contracts. Lock the development Pi cohort to 1.3.0 and declare that floor in optional
+  Pi peers. Native tests now require custom-run preparation and pre-delivery compaction;
+  the skipped custom-run preflight documented for official 1.1.0 is historical.
+
 - Honor Pi's effective `compaction.keepRecentTokens` on automatic threshold and overflow rollover,
   without calling a summarization model. Retain a safely paired projected tail beside the bounded
   recovery record; shrink or drop whole groups when the fresh context budget is too small, and

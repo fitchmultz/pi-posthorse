@@ -41,7 +41,7 @@ function registerGuidance(pi: ExtensionAPI, policy: SnapshotReader): void {
 		promptOptions = event.systemPromptOptions;
 	});
 	pi.on("agent_settled", () => {
-		// Older hosts skip the start hook for custom runs; do not reuse a settled run's options.
+		// Prompt options belong to one run, never to later idle context evaluation.
 		promptOptions = undefined;
 	});
 	pi.on("context_with_system", (event, ctx) => {

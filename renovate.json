@@ -10,11 +10,11 @@
 			"enabled": false
 		},
 		{
-			"description": "Qualify Pi updates at the supported 1.0 floor or later.",
+			"description": "Qualify Pi updates at the supported 1.3 floor or later.",
 			"matchManagers": ["npm"],
 			"matchDepTypes": ["devDependencies"],
 			"matchPackageNames": ["@earendil-works/**"],
-			"allowedVersions": ">=1.0.0"
+			"allowedVersions": ">=1.3.0"
 		}
 	]
 }

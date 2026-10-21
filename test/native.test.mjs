@@ -938,7 +938,7 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 
 for (const mode of ["unforced", "forced", "forced-user-to-custom"]) {
 	test(`idle custom wakeup gets current request-local guidance (${mode})`, async (t) => {
-		let api, modernStart, projected;
+		let api, projected;
 		let forcePrompt = mode === "forced-user-to-custom";
 		const starts = [];
 		const h = await fixture(t, {
@@ -946,9 +946,8 @@ for (const mode of ["unforced", "forced", "forced-user-to-custom"]) {
 			extension(pi) {
 				api = pi;
 				pi.on("before_agent_start", (event, ctx) => {
-					modernStart = "messageType" in event;
 					starts.push({
-						messageType: event.messageType ?? "user",
+						messageType: event.messageType,
 						message: event.message,
 						hasPrompt: "prompt" in event,
 						idle: ctx.isIdle(),
@@ -968,6 +967,7 @@ for (const mode of ["unforced", "forced", "forced-user-to-custom"]) {
 		h.faux.setResponses([fauxAssistantMessage("First run completed.")]);
 		await h.session.prompt("Initial owner request.");
 		assert.equal(starts.length, 1);
+		assert.equal(starts[0].messageType, "user");
 		const previousOptions = starts[0].options;
 		forcePrompt = mode === "forced";
 		h.settingsManager.applyOverrides({ compaction: { reserveTokens: 32_000 } });
@@ -985,15 +985,13 @@ for (const mode of ["unforced", "forced", "forced-user-to-custom"]) {
 		);
 		await h.session.waitForIdle();
 		assert.equal(h.faux.state.callCount, 2);
-		assert.equal(starts.length, modernStart ? 2 : 1);
-		if (modernStart) {
-			assert.equal(starts[1].messageType, "custom");
-			assert.equal(starts[1].hasPrompt, false);
-			assert.equal(starts[1].idle, false);
-			assert.equal(textOf(starts[1].message), content);
-			assert.notEqual(starts[1].options, previousOptions);
-		}
-		const forced = modernStart && forcePrompt;
+		assert.equal(starts.length, 2);
+		assert.equal(starts[1].messageType, "custom");
+		assert.equal(starts[1].hasPrompt, false);
+		assert.equal(starts[1].idle, false);
+		assert.equal(textOf(starts[1].message), content);
+		assert.notEqual(starts[1].options, previousOptions);
+		const forced = forcePrompt;
 		const local = projected.filter((message) => message.customType === "posthorse-guidance");
 		assert.equal(local.length, forced ? 1 : 0);
 		const prompt = getCurrentSystemPrompt(request);
