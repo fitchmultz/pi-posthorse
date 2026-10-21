@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	lstatSync,
@@ -13,10 +14,19 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { notesDir } from "../src/files.ts";
 
+function projectStore(project: string, identity = "github.com/acme/tool"): string {
+	return join(
+		project,
+		".pi",
+		"package-notes",
+		createHash("sha256").update(identity).digest("hex"),
+		"notes",
+	);
+}
 function git(cwd: string, ...args: readonly string[]): void {
 	execFileSync("git", args, { cwd, stdio: "ignore" });
 }
@@ -56,7 +66,7 @@ test("project package notes migrate outside the checkout and survive Pi's update
 	try {
 		const checkout = packageCheckout(project);
 		const legacy = writeLegacy(checkout, "before migration");
-		const moved = join(project, ".pi", "package-notes", "github.com", "acme", "tool", "notes");
+		const moved = projectStore(project);
 		assert.equal(notesDir(join(checkout, "src")), moved);
 		assert.equal(readFileSync(join(moved, "task", "state.md"), "utf8"), "before migration");
 		assert.equal(lstatSync(legacy).isSymbolicLink(), true);
@@ -84,10 +94,7 @@ test("fresh project package notes are isolated by project, including symlinked p
 		const secondCheckout = packageCheckout(second);
 		symlinkSync(first, join(dir, "alias"), "dir");
 		const moved = notesDir(firstCheckout);
-		assert.equal(
-			moved,
-			join(first, ".pi", "package-notes", "github.com", "acme", "tool", "notes"),
-		);
+		assert.equal(moved, projectStore(first));
 		assert.equal(
 			notesDir(join(dir, "alias", ".pi", "git", "github.com", "acme", "tool", "src")),
 			moved,
@@ -110,7 +117,7 @@ test("project package migration preserves existing notes and timestamp collision
 	context.mock.method(Date, "now", () => 1234);
 	try {
 		const checkout = packageCheckout(project);
-		const moved = join(project, ".pi", "package-notes", "github.com", "acme", "tool", "notes");
+		const moved = projectStore(project);
 		mkdirSync(join(moved, "task"), { recursive: true });
 		writeFileSync(join(moved, "task", "state.md"), "canonical");
 		mkdirSync(join(moved, "from-checkout-1234"));
@@ -160,20 +167,7 @@ test("linked project-package worktrees share relocated notes outside the outermo
 		assert.equal(notesDir(worktree), notesDir(checkout));
 		const nested = packageCheckout(checkout);
 		const legacy = writeLegacy(nested, "nested package notes");
-		const moved = join(
-			project,
-			".pi",
-			"package-notes",
-			"github.com",
-			"acme",
-			"tool",
-			".pi",
-			"git",
-			"github.com",
-			"acme",
-			"tool",
-			"notes",
-		);
+		const moved = projectStore(project, "github.com/acme/tool/.pi/git/github.com/acme/tool");
 		assert.equal(notesDir(nested), moved);
 		assert.equal(lstatSync(legacy).isSymbolicLink(), true);
 		updateCheckout(nested);
@@ -188,9 +182,8 @@ test("a blocked migration fails without modifying checkout notes or the destinat
 	try {
 		const checkout = packageCheckout(project);
 		const legacy = writeLegacy(checkout, "still local");
-		const parent = join(project, ".pi", "package-notes", "github.com", "acme", "tool");
-		mkdirSync(parent, { recursive: true });
-		const moved = join(parent, "notes");
+		const moved = projectStore(project);
+		mkdirSync(dirname(moved), { recursive: true });
 		writeFileSync(moved, "not a directory");
 		assert.throws(() => notesDir(checkout));
 		assert.equal(readFileSync(join(legacy, "task", "state.md"), "utf8"), "still local");
@@ -218,15 +211,7 @@ for (const [segment, parts] of [
 			symlinkSync(external, link, "dir");
 			const checkout = packageCheckout(project);
 			const legacy = writeLegacy(checkout, "linked package notes");
-			const moved = join(
-				project,
-				".pi",
-				"package-notes",
-				"github.com",
-				"acme",
-				"tool",
-				"notes",
-			);
+			const moved = projectStore(project);
 			assert.equal(notesDir(join(checkout, "src")), moved);
 			assert.equal(lstatSync(legacy).isSymbolicLink(), true);
 			updateCheckout(checkout);

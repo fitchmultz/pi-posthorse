@@ -10,7 +10,8 @@
   Retention follows the original source-entry ID; discarded edited evidence still links to its
   effective replacement entry for history reads.
 - Relocate project-local Pi Git package notes outside `.pi/git` before update cleanup, preserve
-  migration collisions, and separate newly relocated nested project-package note stores. See the
+  migration collisions, and isolate newly relocated project-package note stores with flat full
+  SHA-256 keys, including generic Git URL paths that prefix another package path. See the
   storage reference for migration timing, supported linked paths, and cross-process limits.
 - Honor Pi's effective `compaction.keepRecentTokens` on automatic threshold and overflow rollover,
   without calling a summarization model. Retain a safely paired projected tail beside the bounded
