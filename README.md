@@ -1,6 +1,6 @@
 # Posthorse
 
-Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks and keeps earlier conversation recoverable. Each rollover uses a handoff or recovery record without a model-generated summary.
+Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks without an automatic model-generated summary. Stock Pi already preserves the session journal and retains a recent tail during compaction; Posthorse adds explicit notes and history retrieval, with a handoff or bounded recovery record instead of the automatic summary.
 
 ![A Pi conversation rolls into a fresh context window. Task notes and the complete session transcript remain available.](.github/readme/context-rollover.png)
 
@@ -27,7 +27,9 @@ Posthorse can nudge the model to update task notes before rollover, then continu
 
 Automatic rollover retains a safe recent-message tail using Pi's `compaction.keepRecentTokens`, alongside a bounded recovery record for discarded inputs and tool evidence. It never calls a summarization model. The model must restore notes and check live state before it continues. Optional `new_context` deliberately retains no prior messages; manual `/compact` uses Pi's normal summarization.
 
-See [rollover and recovery details](docs/reference.md#how-it-works).
+Safe recent-tail retention and the notes-only reminder described here are [Unreleased](CHANGELOG.md#unreleased) until included in a versioned release. Match these docs to your installed version.
+
+Recoverable history is not guaranteed model recall. See the [practical guarantees and limits](docs/context-recovery.md) for the stock-Pi comparison, search scope, checkpoints, privacy, concurrency and cost, or the [rollover reference](docs/reference.md#how-it-works) for implementation details.
 
 ## Tools
 
