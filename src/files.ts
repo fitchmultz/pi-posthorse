@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
 	createReadStream,
 	existsSync,
@@ -216,7 +216,9 @@ function projectPackageNotes(root: string, cwd: string): string | undefined {
 		}
 		const path = packageRelativePath(dir, checkout);
 		if (path !== undefined) {
-			moved = join(realpathSync(dirname(dir)), "package-notes", path, "notes");
+			// Flat full keys keep arbitrary Git URL prefix paths out of one another's note stores.
+			const key = createHash("sha256").update(path.split(sep).join("/")).digest("hex");
+			moved = join(realpathSync(dirname(dir)), "package-notes", key, "notes");
 		}
 	}
 	// The outermost package container also protects packages installed inside another package.

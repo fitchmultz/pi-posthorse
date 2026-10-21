@@ -3406,6 +3406,58 @@ test("notes for Pi package checkouts move to the agent directory and survive pi 
 	}
 });
 
+test("generic Git URL prefix packages cannot disclose or overwrite each other's notes", async () => {
+	const project = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-package-prefix-")));
+	try {
+		// Exercise the installed official parser rather than assuming Git-host namespace rules.
+		const imported: unknown = await import(
+			new URL("./utils/git.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href
+		);
+		const parser = record(imported).parseGitUrl;
+		assert.ok(typeof parser === "function");
+		const source = (url: string) => record(Reflect.apply(parser, undefined, [url]));
+		const first = source("https://git.example.com/acme/tool.git");
+		const second = source("https://git.example.com/acme/tool/notes.git");
+		assert.equal(first.host, "git.example.com");
+		assert.equal(first.path, "acme/tool");
+		assert.equal(second.host, first.host);
+		assert.equal(second.path, "acme/tool/notes");
+		const outer = join(project, ".pi", "git", stringValue(first.host), stringValue(first.path));
+		const inner = join(
+			project,
+			".pi",
+			"git",
+			stringValue(second.host),
+			stringValue(second.path),
+		);
+		mkdirSync(inner, { recursive: true });
+		execFileSync("git", ["init", "-q"], { cwd: outer });
+		execFileSync("git", ["init", "-q"], { cwd: inner });
+		const { tools, context } = await setup();
+		const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
+			run(tools, "notes", params, { ...context, cwd });
+		await notes(outer, { op: "write", path: "outer.md", content: "outer checkpoint" });
+		await notes(inner, { op: "write", path: "inner.md", content: "private inner checkpoint" });
+		assert.doesNotMatch(toolText(await notes(outer, { op: "list" })), /inner\.md/);
+		assert.doesNotMatch(
+			toolText(await notes(outer, { op: "search", query: "checkpoint" })),
+			/private inner/,
+		);
+		assert.doesNotMatch(toolText(await notes(inner, { op: "list" })), /outer\.md/);
+		await notes(outer, { op: "write", path: "notes/inner.md", content: "outer-owned file" });
+		assert.match(
+			toolText(await notes(inner, { op: "read", path: "inner.md" })),
+			/private inner checkpoint$/,
+		);
+		assert.match(
+			toolText(await notes(outer, { op: "read", path: "notes/inner.md" })),
+			/outer-owned file$/,
+		);
+	} finally {
+		rmSync(project, { recursive: true, force: true });
+	}
+});
+
 test("nested project-package notes do not leak through outer package list or search", async () => {
 	const project = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-nested-package-")));
 	try {
