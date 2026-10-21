@@ -112,8 +112,10 @@ including the warning about opening legacy fork `context_window` journals in off
 
 Recovery construction respects Pi's projected context: omitted entries stay out and replacements
 supersede their originals there. The underlying journal is still append-only. Edited-away originals
-remain searchable; reading an original entry ID returns its raw journal content, while a replacement
-ID returns the replacement. Removing text from active context therefore does not erase it from
+remain searchable; reading an original entry ID returns the original entry's normalized text and
+supported images, subject to history's scope and exclusions. Reading a replacement ID returns the
+replacement's normalized text and supported images under the same limits. Removing text from active
+context therefore does not erase it from
 storage or prevent later retrieval.
 
 Posthorse makes no network requests, but notes and retrieved history become input to the selected
