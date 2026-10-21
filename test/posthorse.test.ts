@@ -2257,6 +2257,54 @@ test("automatic handoff carries trailing synchronous results, with entry ids and
 	}
 });
 
+test("retained edited async receipts are excluded by source identity while discarded edits keep history pointers", () => {
+	const call = {
+		type: "message",
+		id: "call-entry",
+		message: {
+			role: "assistant",
+			stopReason: "toolUse",
+			content: [
+				{ type: "toolCall", id: "receipt-call", name: "work", async: true, arguments: {} },
+			],
+		},
+	};
+	const result = {
+		type: "message",
+		id: "result-entry",
+		message: {
+			role: "toolResult",
+			toolCallId: "receipt-call",
+			toolName: "work",
+			content: "PRIVATE_ORIGINAL_RECEIPT",
+		},
+	};
+	const edit = {
+		type: "context_edit",
+		id: "edit-entry",
+		targetId: result.id,
+		replacement: { content: "APPROVED_RECEIPT" },
+	};
+	const projected = [
+		{ sourceEntry: call, messages: [call.message] },
+		{
+			sourceEntry: result,
+			messages: [{ ...result.message, content: edit.replacement.content }],
+		},
+	];
+	const entries = [call, result, edit];
+	const discarded = buildAutoHandoff(entries, projected, 20_000, {
+		ownerQuestionRegistered: false,
+	});
+	assert.match(discarded, /\[result entry edit-entry\]\nAPPROVED_RECEIPT/);
+	assert.doesNotMatch(discarded, /PRIVATE_ORIGINAL_RECEIPT/);
+	const retained = buildAutoHandoff(entries, projected, 20_000, {
+		ownerQuestionRegistered: false,
+		retainedEntryIds: new Set([call.id, result.id]),
+	});
+	assert.doesNotMatch(retained, /Tool result evidence|APPROVED_RECEIPT|PRIVATE_ORIGINAL_RECEIPT/);
+});
+
 test("async receipt recovery shares the handoff header budget across earlier batches", async () => {
 	const { handlers, context } = await setup();
 	const branch: Record<string, unknown>[] = [

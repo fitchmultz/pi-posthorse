@@ -18,6 +18,7 @@ import {
 	recoverableToolResults,
 	type RecoveryBatch,
 	type RecoveryBlock,
+	type RecoveryEntry,
 } from "./recovery-results.ts";
 
 const MAX_RECOVERY_RECORD_CHARS = 4_000;
@@ -264,13 +265,15 @@ function skippedRecords(ids: readonly string[], limit: number): string | undefin
 function projectedToolEntries(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
-): EntryLike[] {
+): RecoveryEntry[] {
 	const edits = contextEdits(entries);
 	return projected.flatMap(({ sourceEntry, messages }) =>
 		messages
 			.filter((message) => message.role === "assistant" || message.role === "toolResult")
 			.map((message) => ({
 				type: "message",
+				// Retention follows the source; history reads follow the effective replacement.
+				sourceEntryId: sourceEntry.id,
 				id: edits.get(sourceEntry.id ?? "")?.id ?? sourceEntry.id,
 				message,
 			})),

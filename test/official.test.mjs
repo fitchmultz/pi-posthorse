@@ -649,8 +649,13 @@ test("oversized tool output rolls over without credentials and repeated resets d
 	);
 });
 
-for (const reason of ["threshold", "overflow"]) {
-	test(`automatic ${reason} retains the effective recent projected tail without duplicating recovery`, async (t) => {
+for (const [reason, asynchronous] of [
+	["threshold", false],
+	["threshold", true],
+	["overflow", false],
+	["overflow", true],
+]) {
+	test(`automatic ${reason} retains the effective recent projected tail without duplicating recovery (async=${asynchronous})`, async (t) => {
 		const ids = {};
 		const h = await fixture(t, {
 			contextWindow: 335_000,
@@ -677,7 +682,11 @@ for (const reason of ["threshold", "overflow"]) {
 				});
 				manager.appendContextEdit(omitted, null);
 				ids.call = manager.appendMessage(
-					toolTurn({ ...fauxToolCall("read", {}), id: "retained-read" }),
+					toolTurn({
+						...fauxToolCall("read", {}),
+						id: "retained-read",
+						...(asynchronous ? { async: true } : {}),
+					}),
 				);
 				ids.result = manager.appendMessage({
 					role: "toolResult",

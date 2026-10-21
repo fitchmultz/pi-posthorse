@@ -6,7 +6,9 @@
   public contracts. Lock the development Pi cohort to 1.3.0 and declare that floor in optional
   Pi peers. Native tests now require custom-run preparation and pre-delivery compaction;
   the skipped custom-run preflight documented for official 1.1.0 is historical.
-
+- Avoid duplicating retained, context-edited asynchronous tool receipts in automatic recovery.
+  Retention follows the original source-entry ID; discarded edited evidence still links to its
+  effective replacement entry for history reads.
 - Honor Pi's effective `compaction.keepRecentTokens` on automatic threshold and overflow rollover,
   without calling a summarization model. Retain a safely paired projected tail beside the bounded
   recovery record; shrink or drop whole groups when the fresh context budget is too small, and
