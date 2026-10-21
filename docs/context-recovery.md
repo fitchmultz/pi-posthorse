@@ -4,10 +4,11 @@ Posthorse is a no-summary rollover policy plus tools for recovering earlier work
 exact evidence and explicit task notes matter more than an automatically written narrative of the
 conversation. Recovery is available to the model, not guaranteed recall by the model.
 
-This guide describes the current source checkout. Safe recent-tail retention on automatic rollover
-and the notes-only reminder are listed under [Unreleased](../CHANGELOG.md#unreleased); they are not
-released changes until included in a versioned release. Check your installed version against the
-changelog rather than assuming the default-branch documentation describes it.
+This guide describes the source revision you are reading. Safe recent-tail retention on automatic
+rollover and the notes-only reminder belong to the [0.10.0 changes](../CHANGELOG.md#0100). For an
+installed package, consult the changelog for that version. Default-branch documentation can describe
+changes not yet published; a source version or changelog heading alone does not confirm npm
+availability.
 
 ## What changes compared with stock Pi?
 

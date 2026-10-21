@@ -4,9 +4,10 @@
 > revision `ea25232`, not the current checkout or every released version. Current source retains a
 > safe recent-message tail during automatic rollover; explicit `new_context` still retains none.
 > Current reminders are notes-only nudges during working runs and do not wake a finished agent.
-> Tail retention and the notes-only wording are tracked under [Unreleased](../CHANGELOG.md#unreleased)
-> until a versioned release includes them. See [current guarantees and limits](../docs/context-recovery.md)
-> before applying this report's implementation observations to an installation.
+> Tail retention and the notes-only wording are part of the [0.10.0 changes](../CHANGELOG.md#0100).
+> A source version or changelog heading does not confirm publication; match these observations to
+> your installed version. See [current guarantees and limits](../docs/context-recovery.md) before
+> applying this report's implementation observations to an installation.
 
 ## Conclusion and limits
 

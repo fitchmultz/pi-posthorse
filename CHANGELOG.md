@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.10.0
+
 - Require official Pi 1.3.0 or later, or the maintained `fitchmultz/pi` fork with the same
   public contracts. Lock the development Pi cohort to 1.3.0 and declare that floor in optional
   Pi peers. Native tests now require custom-run preparation and pre-delivery compaction;
@@ -19,6 +21,10 @@
 - Make the pre-rollover reminder a notes-only nudge: update the current-state note, then continue
   working and let automatic rollover happen. `new_context` remains an optional deliberate clean
   reset with no retained messages; manual `/compact` remains native summarization.
+- Document practical context-recovery guarantees and limits: stock Pi's existing journal and tail,
+  literal retrieval scope, best-effort checkpoints, lifecycle and privacy boundaries, shared-note
+  concurrency, and cost measurement. Clearly distinguish historical investigation claims from
+  current source behavior.
 
 ## 0.9.3 — 2026-10-12
 
