@@ -9,6 +9,9 @@
 - Avoid duplicating retained, context-edited asynchronous tool receipts in automatic recovery.
   Retention follows the original source-entry ID; discarded edited evidence still links to its
   effective replacement entry for history reads.
+- Relocate project-local Pi Git package notes outside `.pi/git` before update cleanup, preserve
+  migration collisions, and separate newly relocated nested project-package note stores. See the
+  storage reference for migration timing, supported linked paths, and cross-process limits.
 - Honor Pi's effective `compaction.keepRecentTokens` on automatic threshold and overflow rollover,
   without calling a summarization model. Retain a safely paired projected tail beside the bounded
   recovery record; shrink or drop whole groups when the fresh context budget is too small, and

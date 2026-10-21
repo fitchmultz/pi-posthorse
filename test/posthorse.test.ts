@@ -3406,6 +3406,46 @@ test("notes for Pi package checkouts move to the agent directory and survive pi 
 	}
 });
 
+test("nested project-package notes do not leak through outer package list or search", async () => {
+	const project = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-nested-package-")));
+	try {
+		const outer = join(join(project, ".pi"), "git", "github.com", "acme", "outer");
+		const inner = join(outer, ".pi", "git", "github.com", "acme", "inner");
+		mkdirSync(inner, { recursive: true });
+		execFileSync("git", ["init", "-q"], { cwd: outer });
+		execFileSync("git", ["init", "-q"], { cwd: inner });
+		const { tools, context } = await setup();
+		const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
+			run(tools, "notes", params, { ...context, cwd });
+		await notes(outer, { op: "write", path: "outer.md", content: "outer checkpoint" });
+		await notes(inner, { op: "write", path: "inner.md", content: "inner checkpoint" });
+		const outerList = toolText(await notes(outer, { op: "list" }));
+		assert.match(outerList, /outer\.md/);
+		assert.doesNotMatch(outerList, /inner\.md/);
+		assert.doesNotMatch(
+			toolText(await notes(outer, { op: "search", query: "checkpoint" })),
+			/inner checkpoint/,
+		);
+		assert.match(
+			toolText(await notes(inner, { op: "search", query: "checkpoint" })),
+			/inner checkpoint/,
+		);
+		assert.doesNotMatch(toolText(await notes(inner, { op: "list" })), /outer\.md/);
+		// An outer note named like the nested checkout's path remains only an outer note.
+		await notes(outer, {
+			op: "write",
+			path: ".pi/git/github.com/acme/inner/notes/inner.md",
+			content: "not the inner note",
+		});
+		assert.match(
+			toolText(await notes(inner, { op: "read", path: "inner.md" })),
+			/inner checkpoint$/,
+		);
+	} finally {
+		rmSync(project, { recursive: true, force: true });
+	}
+});
+
 test("notes list and search follow aliases while skipping cycles and missing targets", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-cycles-"));
 	try {
