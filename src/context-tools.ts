@@ -60,8 +60,8 @@ export function registerContextTools(
 		label: "New Context",
 		...toolCards("new_context"),
 		description:
-			"Start a fresh context window once the current foreground tools succeed; background work continues across the reset. Earlier conversation stays recoverable through history. Put continuation state in handoff, or save fuller state in notes first.",
-		promptSnippet: "request a fresh context window with an optional handoff",
+			"Optionally request a deliberate clean context reset once the current foreground tools succeed; retains no prior messages, unlike automatic rollover. Not required after a notes reminder. Background work continues. Earlier conversation stays recoverable through history. Put continuation state in handoff, or save fuller state in notes first.",
+		promptSnippet: "optionally request a clean context reset with an optional handoff",
 		parameters: Type.Object({
 			handoff: Type.Optional(
 				Type.String({
@@ -94,7 +94,7 @@ export function registerContextTools(
 		label: "Context Remaining",
 		...toolCards("get_context_remaining"),
 		description:
-			"Estimate tokens left before Pi's automatic rollover and the configured context limit. Check before reporting remaining space or changing your work plan because of context limits. A checkpoint reminder may arrive before rollover on a working turn; no routine checks are needed.",
+			"Estimate tokens left before Pi's automatic rollover and the configured context limit. Check before reporting remaining space or changing your work plan because of context limits. A notes-only reminder may arrive before rollover on a working turn; continue afterward and let rollover happen automatically. No routine checks are needed.",
 		promptSnippet:
 			"verify remaining context before reporting a token count or changing plans because of context limits",
 		parameters: Type.Object({}),

@@ -1,7 +1,7 @@
 /**
  * Posthorse — fresh context, same journey.
  *
- * Pi owns persisted retain-none context boundaries. Posthorse owns reminder and
+ * Pi owns persisted context boundaries. Posthorse owns recent-tail retention, reminder and
  * rollover policy, bounded recovery, durable notes, and history retrieval.
  */
 import {

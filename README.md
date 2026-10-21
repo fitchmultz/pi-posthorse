@@ -23,9 +23,9 @@ Give Pi your task. For example:
 
 ## How rollover works
 
-Posthorse can remind the model to save task state before rollover. Large turns can reach rollover before this reminder. The reminder does not wake an agent after its final answer.
+Posthorse can nudge the model to update task notes before rollover, then continue working. The nudge does not require `new_context` or wake an agent after its final answer. Large turns can reach rollover before the nudge.
 
-Automatic rollover creates a recovery record from session inputs and tool results. The model must restore notes and check live state before it continues. Manual `/compact` uses Pi's normal summarization.
+Automatic rollover retains a safe recent-message tail using Pi's `compaction.keepRecentTokens`, alongside a bounded recovery record for discarded inputs and tool evidence. It never calls a summarization model. The model must restore notes and check live state before it continues. Optional `new_context` deliberately retains no prior messages; manual `/compact` uses Pi's normal summarization.
 
 See [rollover and recovery details](docs/reference.md#how-it-works).
 
@@ -33,12 +33,12 @@ See [rollover and recovery details](docs/reference.md#how-it-works).
 
 These tools are available to the model:
 
-| Tool                        | Use                                                                                                                                          |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `new_context({ handoff? })` | Request a fresh window after every foreground tool succeeds. Aborted turns and failed tools prevent the reset.                               |
-| `get_context_remaining()`   | Estimate tokens left until rollover and the configured context limit. Usage can be unknown before a model response.                          |
-| `notes({ op, ... })`        | List, read, search, write, or append task notes.                                                                                             |
-| `history({ op, ... })`      | Search earlier conversation and read entries, including images. `all: true` includes this project's other sessions and nested subagent runs. |
+| Tool                        | Use                                                                                                                                                |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new_context({ handoff? })` | Optionally request a clean reset with no retained messages after every foreground tool succeeds. Aborted turns and failed tools prevent the reset. |
+| `get_context_remaining()`   | Estimate tokens left until rollover and the configured context limit. Usage can be unknown before a model response.                                |
+| `notes({ op, ... })`        | List, read, search, write, or append task notes.                                                                                                   |
+| `history({ op, ... })`      | Search earlier conversation and read entries, including images. `all: true` includes this project's other sessions and nested subagent runs.       |
 
 Expand a tool card with Ctrl+O. In fullscreen mode, click a tool card to expand it. A `new_context` card shows a request. Pi's `Compacted from … tokens` card confirms the rollover.
 
@@ -48,10 +48,11 @@ See [tool examples and paging details](docs/reference.md#tools).
 
 Posthorse uses Pi's effective `compaction` settings. It has no separate settings.
 
-| Pi setting                 | Effect                                                                                                                                                             |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `compaction.enabled`       | Set to `false` to disable reminders and automatic rollover. `new_context` remains available.                                                                       |
-| `compaction.reserveTokens` | Automatic Posthorse rollover needs at least 10,000 tokens after this reserve. Smaller budgets use Pi's own compaction. Lower the reserve or choose a larger model. |
+| Pi setting                    | Effect                                                                                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `compaction.enabled`          | Set to `false` to disable reminders and automatic rollover. `new_context` remains available.                                                                       |
+| `compaction.reserveTokens`    | Automatic Posthorse rollover needs at least 10,000 tokens after this reserve. Smaller budgets use Pi's own compaction. Lower the reserve or choose a larger model. |
+| `compaction.keepRecentTokens` | Approximate recent tail for automatic rollover (Pi's default: 20,000). Zero keeps no messages. Tail size shrinks when safe groups cannot fit the fresh budget.     |
 
 Two Posthorse copies can register the same tools and compete for rollover. Keep one copy loaded. Check installed sources with `pi list`.
 

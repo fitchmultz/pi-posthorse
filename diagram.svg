@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080" role="img" aria-labelledby="t d">
   <title id="t">Posthorse flow</title>
-  <desc id="d">Two paths reach the same public retain-none compaction boundary: the model checkpoints on purpose and calls new_context, or, with a supported budget and room for a recovery record, Pi's enabled automatic compaction becomes a no-summary rollover. Unsupported budgets keep Pi's compaction; unsafe recovery cancels visibly. The fresh window restores notes, todos, and history from the complete on-disk transcript.</desc>
+  <desc id="d">Optional new_context clean resets retain no prior messages. Supported automatic rollover keeps a safe recent projected tail using Pi's retention setting, alongside bounded recovery without model summarization. Notes reminders ask the model to save state and continue, not reset. Unsupported budgets keep Pi's compaction; unsafe recovery cancels visibly. Restore notes, todos, and history and verify live state after rollover.</desc>
 
   <style>
     .sans { font-family: Inter, ui-sans-serif, Arial, sans-serif; }
@@ -60,7 +60,7 @@
   <!-- title block -->
   <text class="mono eyebrow" x="72" y="84">PI EXTENSION — FRESH CONTEXT. SAME JOURNEY.</text>
   <text class="sans title" x="72" y="134">Posthorse</text>
-  <text class="sans subtitle" x="72" y="170">Explicit checkpoints and supported automatic rollovers share one native boundary, without a summary.</text>
+  <text class="sans subtitle" x="72" y="170">Optional clean resets and supported automatic rollovers use native boundaries, without model summaries.</text>
   <text class="sans subtitle" x="72" y="196">Unsupported budgets keep Pi's compaction; unsafe recovery cancels visibly.</text>
 
   <!-- tool surface (top right) -->
@@ -80,12 +80,12 @@
   <g id="lane-a">
     <rect x="56" y="244" width="696" height="288" rx="20" fill="#0E1525" fill-opacity="0.75" stroke="#1E293B" stroke-width="1"/>
     <rect x="56" y="268" width="4" height="240" rx="2" fill="#60A5FA"/>
-    <text class="mono lane" x="72" y="232" fill="#60A5FA">MODEL-DRIVEN · EXPLICIT CHECKPOINT</text>
+    <text class="mono lane" x="72" y="232" fill="#60A5FA">MODEL-DRIVEN · OPTIONAL CLEAN RESET</text>
   </g>
   <g id="lane-b">
     <rect x="56" y="568" width="696" height="288" rx="20" fill="#0E1525" fill-opacity="0.75" stroke="#1E293B" stroke-width="1"/>
     <rect x="56" y="592" width="4" height="240" rx="2" fill="#F59E0B"/>
-    <text class="mono lane" x="72" y="556" fill="#F59E0B">PI-DRIVEN · AUTOMATIC FALLBACK</text>
+    <text class="mono lane" x="72" y="556" fill="#F59E0B">PI-DRIVEN · AUTOMATIC ROLLOVER</text>
   </g>
 
   <!-- on-disk zone -->
@@ -119,11 +119,11 @@
       <path d="M0 12 H6 L9 4 L13 20 L16 12 H24"/>
     </g>
     <text class="sans cardtitle" x="132" y="301">Signal</text>
-    <text class="sans cardbody" x="96" y="344">Stable guidance in the system</text>
-    <text class="sans cardbody" x="96" y="366">prompt; no per-request meter</text>
-    <text class="sans cardbody" x="96" y="388">or repeated budget updates.</text>
-    <text class="sans cardbody" x="96" y="410">One best-effort reminder before</text>
-    <text class="sans cardbody" x="96" y="432">the line, never at or past it.</text>
+    <text class="sans cardbody" x="96" y="344">Stable guidance, no meter.</text>
+    <text class="sans cardbody" x="96" y="366">One notes nudge before the line;</text>
+    <text class="sans cardbody" x="96" y="388">save state, then keep working.</text>
+    <text class="sans cardbody" x="96" y="410">Automatic rollover keeps a</text>
+    <text class="sans cardbody" x="96" y="432">safe tail using Pi retention.</text>
     <text class="sans cardbody" x="96" y="454">Native estimate on request.</text>
     <rect x="96" y="472" width="232" height="26" rx="13" fill="#12253F"/>
     <text class="mono chip" x="212" y="489" fill="#60A5FA">ONCE PER WINDOW + BUDGET</text>
@@ -138,11 +138,11 @@
       <path d="M9.5 12 H15.5 M9.5 16 H15.5"/>
     </g>
     <text class="sans cardtitle" x="484" y="301">Save</text>
-    <text class="sans cardbody" x="448" y="344">Stop normal work. Put concise</text>
-    <text class="sans cardbody" x="448" y="366">continuation state in the</text>
-    <text class="sans cardbody" x="448" y="388">handoff, or richer durable</text>
-    <text class="sans cardbody" x="448" y="410">state in .pi/notes/ first.</text>
-    <text class="sans cardbody" x="448" y="432">Then call new_context.</text>
+    <text class="sans cardbody" x="448" y="344">Optionally save continuation</text>
+    <text class="sans cardbody" x="448" y="366">state in a handoff; fuller</text>
+    <text class="sans cardbody" x="448" y="388">state belongs in notes.</text>
+    <text class="sans cardbody" x="448" y="410">new_context is a clean reset.</text>
+    <text class="sans cardbody" x="448" y="432">Notes nudges: save, continue.</text>
     <rect x="448" y="472" width="136" height="26" rx="13" fill="#12253F"/>
     <text class="mono chip" x="516" y="489" fill="#60A5FA">HANDOFF · NOTES</text>
   </g>
@@ -172,12 +172,12 @@
       <path d="M7 9 H17 M7 13 H17 M7 17 H13"/>
     </g>
     <text class="sans cardtitle" x="484" y="625">Recovery record</text>
-    <text class="sans cardbody" x="448" y="668">Owner inputs, ask_question</text>
-    <text class="sans cardbody" x="448" y="690">answers, visible coordination,</text>
-    <text class="sans cardbody" x="448" y="712">trailing tool batch: labeled,</text>
-    <text class="sans cardbody" x="448" y="734">chronological, ≤ 20k chars.</text>
-    <text class="sans cardbody" x="448" y="756">Older checkpoint marked stale.</text>
-    <text class="sans cardbody" x="448" y="778">Assistant prose is not state.</text>
+    <text class="sans cardbody" x="448" y="668">Discarded inputs and tool</text>
+    <text class="sans cardbody" x="448" y="690">evidence: labeled, bounded,</text>
+    <text class="sans cardbody" x="448" y="712">chronological, ≤ 20k chars.</text>
+    <text class="sans cardbody" x="448" y="734">Recent projected tail kept</text>
+    <text class="sans cardbody" x="448" y="756">separately when safe to fit.</text>
+    <text class="sans cardbody" x="448" y="778">Older checkpoints are stale.</text>
     <rect x="448" y="796" width="184" height="26" rx="13" fill="#3A2A10"/>
     <text class="mono chip" x="540" y="813" fill="#F59E0B">EMERGENCY INPUT RECORD</text>
   </g>
@@ -197,14 +197,14 @@
       <rect x="14" y="4" width="9" height="16" rx="2"/>
       <path d="M17 12 H20"/>
     </g>
-    <text class="sans cardtitle-inv" x="872" y="446">Hard cutover</text>
-    <text class="mono cardmono-inv" x="872" y="474">retain-none compaction</text>
-    <text class="sans cardbody-inv" x="872" y="516">Lands between turns, after</text>
-    <text class="sans cardbody-inv" x="872" y="540">the complete tool batch.</text>
-    <text class="sans cardbody-inv" x="872" y="564">The old window leaves model</text>
-    <text class="sans cardbody-inv" x="872" y="588">input; the handoff or</text>
-    <text class="sans cardbody-inv" x="872" y="612">recovery record is the first</text>
-    <text class="sans cardbody-inv" x="872" y="636">state in the fresh one.</text>
+    <text class="sans cardtitle-inv" x="872" y="446">Context cutover</text>
+    <text class="mono cardmono-inv" x="872" y="474">native compaction entry</text>
+    <text class="sans cardbody-inv" x="872" y="516">Automatic: safe recent tail</text>
+    <text class="sans cardbody-inv" x="872" y="540">plus bounded recovery record.</text>
+    <text class="sans cardbody-inv" x="872" y="564">Explicit: handoff only;</text>
+    <text class="sans cardbody-inv" x="872" y="588">no prior messages retained.</text>
+    <text class="sans cardbody-inv" x="872" y="612">System and tools survive.</text>
+    <text class="sans cardbody-inv" x="872" y="636">No model summarization.</text>
     <text class="sans cardbody-inv" x="872" y="762">A late reminder from the old</text>
     <text class="sans cardbody-inv" x="872" y="786">window is filtered out of</text>
     <text class="sans cardbody-inv" x="872" y="810">model input. The transcript</text>

@@ -82,12 +82,19 @@ function resultBlock(
 	};
 }
 /** Async receipts may arrive after a response; completion does not establish receipt delivery. */
-export function recoverableToolResults(entries: readonly EntryLike[]): RecoveryBatch | undefined {
+export function recoverableToolResults(
+	entries: readonly EntryLike[],
+	retained: ReadonlySet<string>,
+): RecoveryBatch | undefined {
 	const calls = callsById(entries);
 	const start = trailingStart(entries);
 	const results = entries.filter((entry, index) => {
 		const message = entry.message;
-		if (message?.role !== "toolResult" || message.toolCallId === undefined) {
+		if (
+			message?.role !== "toolResult" ||
+			message.toolCallId === undefined ||
+			retained.has(entry.id ?? "")
+		) {
 			return false;
 		}
 		const call = calls.get(message.toolCallId);

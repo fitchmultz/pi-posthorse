@@ -121,6 +121,7 @@ function projectedCurrent(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
 	current: readonly EntryLike[] = entries.slice(contextStart(entries).start),
+	retained: ReadonlySet<string> = new Set(),
 ): EntryLike[] {
 	const edits = contextEdits(entries);
 	const omittedIds = new Set(
@@ -130,7 +131,7 @@ function projectedCurrent(
 	);
 	return current.flatMap((entry) => {
 		const id = entry.id ?? "";
-		if (id !== "" && omittedIds.has(id)) {
+		if (retained.has(id) || omittedIds.has(id)) {
 			return [];
 		}
 		const edit = edits.get(id);
@@ -211,6 +212,7 @@ function recoveryAncestry(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
 	ownerQuestionRegistered: boolean,
+	retained: ReadonlySet<string>,
 ): {
 	readonly checkpoint?: EntryLike;
 	readonly carried: readonly RecoveryRecord[];
@@ -234,7 +236,7 @@ function recoveryAncestry(
 		if (owners.length > 0) {
 			return {
 				checkpoint: automaticBoundary(window.boundary) ? undefined : window.boundary,
-				carried: anchors(owners).fixed,
+				carried: anchors(owners.filter((record) => !retained.has(record.id))).fixed,
 				skipped,
 			};
 		}
@@ -378,37 +380,69 @@ function renderIndex(records: readonly RecoveryRecord[], available: number): str
 		...listed,
 	].join("\n");
 }
+function selectedInputs(
+	entries: readonly EntryLike[],
+	projected: readonly ProjectedEntry[],
+	options: {
+		readonly ownerQuestionRegistered: boolean;
+		readonly retained: ReadonlySet<string>;
+		readonly carried: readonly RecoveryRecord[];
+	},
+): { readonly fixed: readonly RecoveryRecord[]; readonly others: readonly RecoveryRecord[] } {
+	const { ownerQuestionRegistered, retained, carried } = options;
+	const current = projectedCurrent(entries, projected);
+	const allRecords = ownerRecords(current, projected, ownerQuestionRegistered);
+	const records = ownerRecords(
+		projectedCurrent(entries, projected, undefined, retained),
+		projected,
+		ownerQuestionRegistered,
+	);
+	const { fixed, others } = anchors(records);
+	if (!allRecords.some((record) => record.kind === "owner")) {
+		fixed.unshift(
+			...carried.map((record) =>
+				Object.assign({}, record, {
+					label: `${record.label}; carried from an earlier window, possibly already handled; not current progress`,
+				}),
+			),
+		);
+	}
+	return { fixed, others };
+}
 /** Raw owner anchors and projected tool evidence have distinct provenance and share one bounded payload. */
 export function buildAutoHandoff(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
 	maxChars: number,
-	ownerQuestionRegistered: boolean,
+	options: {
+		readonly ownerQuestionRegistered: boolean;
+		readonly retainedEntryIds?: ReadonlySet<string>;
+	},
 ): string {
-	const history = recoveryAncestry(entries, projected, ownerQuestionRegistered);
+	const { ownerQuestionRegistered, retainedEntryIds: retained = new Set<string>() } = options;
+	const preamble =
+		retained.size === 0
+			? PREAMBLE
+			: `${PREAMBLE}\nRecent messages follow separately; their inputs and tool evidence are not repeated in this record.`;
+	const history = recoveryAncestry(entries, projected, ownerQuestionRegistered, retained);
 	const priorWindow = history.checkpoint;
-	const records = ownerRecords(
-		projectedCurrent(entries, projected),
-		projected,
+	const { fixed, others } = selectedInputs(entries, projected, {
 		ownerQuestionRegistered,
-	);
-	const { fixed, others } = anchors(records);
-	if (!records.some((record) => record.kind === "owner")) {
-		fixed.unshift(
-			...history.carried.map((record) => ({
-				...record,
-				label: `${record.label}; carried from an earlier window, possibly already handled; not current progress`,
-			})),
-		);
-	}
+		retained,
+		carried: history.carried,
+	});
+	const emptyInputHeader =
+		retained.size > 0
+			? "No discarded owner or visible coordination inputs were selected for this recovery record."
+			: "No selected current-window owner or visible coordination inputs were found.";
 	const inputHeader =
 		fixed.length > 0
 			? "Selected owner and coordination inputs (chronological):"
-			: "No selected current-window owner or visible coordination inputs were found.";
-	const batch = recoverableToolResults(projectedToolEntries(entries, projected));
+			: emptyInputHeader;
+	const batch = recoverableToolResults(projectedToolEntries(entries, projected), retained);
 	const header = batchHeader(batch);
 	const minimum = [
-		PREAMBLE,
+		preamble,
 		inputHeader,
 		...fixed.map((record) => formatRecord(record, 0)),
 		header,
@@ -427,7 +461,7 @@ export function buildAutoHandoff(
 		(history.skipped.length > 0 ? 1 : 0);
 	const fixedBudget = Math.max(
 		0,
-		maxChars - joined([PREAMBLE, inputHeader, plan.bare]).length - HANDOFF_OVERHEAD_RESERVE,
+		maxChars - joined([preamble, inputHeader, plan.bare]).length - HANDOFF_OVERHEAD_RESERVE,
 	);
 	const fixedLimit =
 		count > 0
@@ -438,7 +472,7 @@ export function buildAutoHandoff(
 		skippedRecords(history.skipped, fixedLimit),
 	]);
 	const fixedParts = [
-		PREAMBLE,
+		preamble,
 		inputHeader,
 		...fixed.map((record) => formatRecord(record, fixedLimit)),
 	];
