@@ -229,7 +229,13 @@ test("native page reads estimate current active schemas only when usage is unkno
 	};
 	const readPair = async (tokens) => {
 		usage =
-			tokens === undefined ? undefined : { tokens, contextWindow: 100_000, percent: null };
+			tokens === undefined
+				? undefined
+				: {
+						tokens,
+						contextWindow: 100_000,
+						percent: tokens === null ? null : tokens / 1000,
+					};
 		return [
 			await call("notes", { op: "read", path: "state.md" }),
 			await call("history", { op: "read", id }),

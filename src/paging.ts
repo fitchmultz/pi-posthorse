@@ -63,7 +63,7 @@ export class PageReservations {
 			);
 		}
 		this.previousUsage = usage;
-		const remaining = pageCapacity(ctx, this.toolTokens()) - this.pendingTokens;
+		const remaining = pageCapacity(ctx, this.toolTokens) - this.pendingTokens;
 		const chars = Math.min(
 			MAX_PAGE_CHARS,
 			Math.max(0, remaining - PAGE_MARGIN_TOKENS) * 4 -
