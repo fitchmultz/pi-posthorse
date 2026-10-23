@@ -20,9 +20,11 @@ const {
 	createAgentSession,
 	DefaultResourceLoader,
 	discoverAndLoadExtensions,
+	ExtensionRunner,
 	ModelRuntime,
 	SessionManager,
 	SettingsManager,
+	wrapRegisteredTools,
 } = await import(hostIndex);
 
 // Resolve the faux provider from the selected host's graph as well.
@@ -171,6 +173,104 @@ async function loadedHistory(t) {
 		},
 	};
 }
+
+test("native page reads estimate current active schemas only when usage is unknown", async (t) => {
+	const h = await fixture(t, {
+		customPrompt: "Offline page regression.",
+		extension(pi) {
+			pi.registerTool({
+				name: "catalog",
+				label: "Catalog",
+				description: "d".repeat(280_000),
+				parameters: { type: "object", properties: {} },
+				async execute() {
+					return { content: [{ type: "text", text: "unused" }], details: {} };
+				},
+			});
+		},
+	});
+	t.after(() => rmSync(dirname(h.cwd), { recursive: true, force: true }));
+	const runner = h.session.extensionRunner;
+	assert.ok(runner instanceof ExtensionRunner);
+	const tools = wrapRegisteredTools(runner.getAllRegisteredTools(), runner);
+	const runtime = h.resourceLoader.getExtensions().runtime;
+	let usage;
+	const probes = [
+		t.mock.method(runtime, "getActiveTools", () => h.session.getActiveToolNames()),
+		t.mock.method(runtime, "getAllTools", () => h.session.getAllTools()),
+		t.mock.method(h.session, "getContextUsage", () => usage),
+		t.mock.method(runtime, "getSettings", () => h.settingsManager.getSettings()),
+	];
+	const dir = join(h.cwd, ".pi", "notes");
+	mkdirSync(dir, { recursive: true });
+	const file = join(dir, "state.md");
+	writeFileSync(file, "saved state");
+	const id = h.sessionManager.appendMessage({
+		role: "user",
+		content: "saved state",
+		timestamp: 1,
+	});
+	const actual = [],
+		expected = [];
+	const call = async (name, params) => {
+		await runner.emit({ type: "turn_start", turnIndex: 0, timestamp: 1 });
+		for (const probe of probes) {
+			probe.mock.resetCalls();
+		}
+		const result = await tools.find((tool) => tool.name === name).execute("page", params);
+		const counts = probes.map((probe) => probe.mock.callCount());
+		const unknown = usage === undefined || usage.tokens === null;
+		actual.push(counts);
+		expected.push([Number(unknown), Number(unknown), 1, Number(usage !== undefined)]);
+		t.diagnostic(
+			`${name} tokens=${String(usage?.tokens)} active/all/usage/policy=${counts.join("/")}`,
+		);
+		return result;
+	};
+	const readPair = async (tokens) => {
+		usage =
+			tokens === undefined ? undefined : { tokens, contextWindow: 100_000, percent: null };
+		return [
+			await call("notes", { op: "read", path: "state.md" }),
+			await call("history", { op: "read", id }),
+		];
+	};
+	h.session.setActiveToolsByName(["notes", "history"]);
+	const baseline = await readPair(1_000);
+	assert.equal(textOf(baseline[0]), `File: ${file}\nsaved state`);
+	assert.equal(
+		textOf(baseline[1]),
+		`${h.sessionManager.getEntry(id).timestamp} [window initial] [${id}] [chars 0-18 of 18] [user] saved state`,
+	);
+	for (const tokens of [0, null, undefined]) {
+		// Each evaluation owns the native usage state and callback counters.
+		// oxlint-disable-next-line no-await-in-loop
+		assert.deepEqual(await readPair(tokens), baseline);
+	}
+	const body = "n".repeat(50_000);
+	writeFileSync(file, body);
+	const small = await readPair(null);
+	h.session.setActiveToolsByName(["notes", "history", "catalog"]);
+	const large = await readPair(null);
+	assert.ok(
+		large[0].details.end < small[0].details.end,
+		"new active schemas reduce unknown-usage capacity",
+	);
+	const end = large[0].details.end;
+	assert.equal(
+		textOf(large[0]),
+		`File: ${file}\n${body.slice(0, end)}\n[chars 0-${end} of 50000; continue with offset ${end}]`,
+	);
+	assert.deepEqual(large[1], baseline[1]);
+	h.session.setActiveToolsByName(["notes", "history"]);
+	assert.deepEqual(
+		await readPair(null),
+		small,
+		"later loadouts are estimated afresh, not cached",
+	);
+	assert.equal(h.faux.state.callCount, 0, "registered tool execution needs no provider request");
+	assert.deepEqual(actual, expected, "only unknown usage invokes the active-tool estimator");
+});
 
 function countedArchive(cwd) {
 	const manager = SessionManager.inMemory(cwd);
