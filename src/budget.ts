@@ -137,10 +137,10 @@ export function freshPayloadChars(
 		) * 4,
 	);
 }
-export function pageCapacity(ctx: PolicyContext, toolTokens: number): number {
+export function pageCapacity(ctx: PolicyContext, toolTokens: () => number): number {
 	const usage = ctx.getContextUsage();
 	if (usage === undefined || usage.tokens === null) {
-		return freshPayloadChars(ctx, toolTokens, [], MAX_PAGE_CHARS) / 4 + PAGE_MARGIN_TOKENS;
+		return freshPayloadChars(ctx, toolTokens(), [], MAX_PAGE_CHARS) / 4 + PAGE_MARGIN_TOKENS;
 	}
 	const budget = budgetFor(ctx, usage.contextWindow);
 	const line =
