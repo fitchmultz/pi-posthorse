@@ -21,6 +21,7 @@ import {
 	rename,
 	stat,
 	unlink,
+	type FileHandle,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -128,14 +129,12 @@ export async function* lfChunks(
 	file: string,
 	signal?: AbortSignal,
 	highWaterMark = 64 * 1024,
-	fd?: number,
+	handle?: Readonly<Pick<FileHandle, "createReadStream">>,
 ): AsyncGenerator<{ readonly bytes: Buffer; readonly end: boolean }> {
-	const stream = createReadStream(file, {
-		signal,
-		highWaterMark,
-		fd,
-		autoClose: fd === undefined,
-	});
+	const stream =
+		handle === undefined
+			? createReadStream(file, { signal, highWaterMark })
+			: handle.createReadStream({ signal, highWaterMark, autoClose: false });
 	let openLine = false;
 	for await (const chunk of stream) {
 		if (!Buffer.isBuffer(chunk)) {

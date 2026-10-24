@@ -22,7 +22,7 @@ type LineRange = {
 };
 async function* lineRanges(
 	file: string,
-	fd: number,
+	handle: Readonly<Pick<FileHandle, "createReadStream">>,
 	signal: AbortSignal | undefined,
 	matcher: LineMatcher | undefined,
 ): AsyncGenerator<LineRange> {
@@ -32,7 +32,7 @@ async function* lineRanges(
 	let tail = "";
 	let decoder = new StringDecoder(matcher?.encoding);
 	let matches = matcher === undefined;
-	for await (const { bytes, end } of lfChunks(file, signal, 1024 * 1024, fd)) {
+	for await (const { bytes, end } of lfChunks(file, signal, 1024 * 1024, handle)) {
 		if (head.length < 512) {
 			head = Buffer.concat([head, bytes.subarray(0, 512 - head.length)]);
 		}
@@ -95,7 +95,7 @@ export async function* sessionLines(
 ): AsyncGenerator<SessionLine> {
 	const handle = await open(file, "r");
 	try {
-		for await (const line of lineRanges(file, handle.fd, signal, matcher)) {
+		for await (const line of lineRanges(file, handle, signal, matcher)) {
 			yield {
 				head: line.head,
 				matches: line.matches,

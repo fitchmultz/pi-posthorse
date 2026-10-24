@@ -117,6 +117,12 @@ test("archive search and later reads pass a nonmatching image beyond V8's string
 	);
 	assert.match(next, /\[window window\] \[older@[^\]]+\] \[user\] small marker older/);
 	assert.doesNotMatch(next, /continue with cursor/);
+	// A nonfinal record also exercises early archive iterator cleanup before the next read.
+	const olderId = requireValue(next.match(/\[(older@[^\]]+)\]/)?.[1]);
+	assert.match(
+		text(await history({ op: "read", id: olderId })),
+		/\[window window\].*\[user\] small marker older/,
+	);
 	const id = requireValue(first.match(/\[(newer@[^\]]+)\]/)?.[1]);
 	const read = await history({ op: "read", id });
 	assert.match(text(read), /\[user\] small marker newer/);
