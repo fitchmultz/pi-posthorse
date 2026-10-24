@@ -51,6 +51,7 @@ verification limits accurately.
 | Rule                                                                                          | Enforcement                                                                                                                                                                                                      |
 | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Resolve receipt retention against its source before substituting an edited history reference. | `projectedToolEntries` owns the decision; `recoverableToolResults` receives a required boolean, never the retention set or source ID. The retained/discarded edited-receipt regression runs in `npm run verify`. |
+| Keep shared qualification/release refs and declared support-floor policy coherent.            | `scripts/config-policy.ts` parses the YAML/JSON authority fields in `npm run quality:policy`, including normal lint and `npm run verify` in CI. It names the mismatched path and canonical source.               |
 
 Evidence and historical failure reproduction: [Correction safeguards](docs/corrections.md).
 Keep this table paired with executable enforcement when a correction repeats. Remove obsolete
