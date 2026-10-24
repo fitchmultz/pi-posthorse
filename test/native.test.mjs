@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { retainFile, retainSession } from "./fixture-files.ts";
 const hostIndex = process.env.PI_HOST_INDEX
 	? pathToFileURL(process.env.PI_HOST_INDEX).href
 	: import.meta.resolve("@earendil-works/pi-coding-agent");
@@ -114,7 +115,13 @@ async function fixture(t, options = {}) {
 		sessionManager,
 		noTools: "builtin",
 	});
-	t.after(() => session.dispose());
+	t.after(() => {
+		try {
+			session.dispose();
+		} finally {
+			retainSession(temp, sessionManager, "final");
+		}
+	});
 	await session.bindExtensions({
 		onError(error) {
 			throw new Error(error.error);
@@ -139,7 +146,13 @@ function reset(manager, handoff) {
 async function loadedHistory(t) {
 	t.diagnostic(`native history SDK: ${hostIndex}`);
 	const cwd = mkdtempSync(join(tmpdir(), "posthorse-history-"));
-	t.after(() => rmSync(cwd, { recursive: true, force: true }));
+	const managers = process.env.PI_COMPAT_EVIDENCE_DIR ? new Map() : undefined;
+	t.after(() => {
+		Array.from(managers?.values() ?? []).forEach((manager, index) => {
+			retainSession(cwd, manager, `history-${index}`);
+		});
+		rmSync(cwd, { recursive: true, force: true });
+	});
 	const { extensions, errors, runtime } = await discoverAndLoadExtensions(
 		[fileURLToPath(new URL("../index.ts", import.meta.url))],
 		cwd,
@@ -155,6 +168,7 @@ async function loadedHistory(t) {
 	return {
 		cwd,
 		async call(sessionManager, params) {
+			managers?.set(sessionManager.getSessionFile() ?? sessionManager, sessionManager);
 			// Isolate extension extraction from the host's separate usage-estimation cost.
 			const ctx = {
 				cwd,
@@ -496,6 +510,7 @@ for (const all of [false, true]) {
 				);
 			})
 			.join("\n");
+		retainFile(h.cwd, file, "before-rewrite");
 		writeFileSync(file, rewritten);
 		assert.doesNotMatch(
 			textOf(await call(SessionManager.open(file, dir))),
@@ -619,6 +634,7 @@ test("official resume keeps legacy saved window data recoverable after a public 
 				file,
 				`${JSON.stringify({ type: "context_window", id: "legacy-window", parentId: manager.getLeafId(), timestamp: "2026-09-01T00:00:00Z", handoff: "LEGACY_SAVED_HANDOFF" })}\n`,
 			);
+			retainFile(dirname(manager.getCwd()), file, "before-reload");
 			manager.setSessionFile(file);
 		},
 	});
@@ -665,6 +681,7 @@ test("all-session history scopes project sessions and their nested subagents", a
 				const other = SessionManager.create(cwd, dir);
 				const id = other.appendMessage({ role: "user", content, timestamp: Date.now() });
 				other.appendMessage(fauxAssistantMessage("Archive saved."));
+				retainSession(dirname(manager.getCwd()), other, "archive");
 				const source = relative(manager.getSessionDir(), other.getSessionFile());
 				return {
 					id: `${id}@${createHash("sha256").update(source).digest("base64url")}`,

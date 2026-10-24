@@ -21,6 +21,7 @@ import {
 	rename,
 	stat,
 	unlink,
+	type FileHandle,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -123,31 +124,50 @@ export async function publishFile(
 		throw error;
 	}
 }
-/** Raw LF-delimited lines; UTF-8 never encodes LF inside another character. */
-export async function* lfLines(
+/** Bounded LF-delimited segments; end also closes an unterminated final line at EOF. */
+export async function* lfChunks(
 	file: string,
 	signal?: AbortSignal,
 	highWaterMark = 64 * 1024,
-): AsyncGenerator<Buffer> {
-	const stream = createReadStream(file, { signal, highWaterMark });
-	let pending: Buffer[] = [];
+	handle?: Readonly<Pick<FileHandle, "createReadStream">>,
+): AsyncGenerator<{ readonly bytes: Buffer; readonly end: boolean }> {
+	const stream =
+		handle === undefined
+			? createReadStream(file, { signal, highWaterMark })
+			: handle.createReadStream({ signal, highWaterMark, autoClose: false });
+	let openLine = false;
 	for await (const chunk of stream) {
 		if (!Buffer.isBuffer(chunk)) {
 			throw new Error("Expected a byte stream.");
 		}
 		let start = 0;
 		for (let end = chunk.indexOf(10); end !== -1; end = chunk.indexOf(10, start)) {
-			const line = chunk.subarray(start, end);
-			yield pending.length === 0 ? line : Buffer.concat([...pending, line]);
-			pending = [];
+			yield { bytes: chunk.subarray(start, end), end: true };
+			openLine = false;
 			start = end + 1;
 		}
 		if (start < chunk.length) {
-			pending.push(chunk.subarray(start));
+			yield { bytes: chunk.subarray(start), end: false };
+			openLine = true;
 		}
 	}
-	if (pending.length > 0) {
-		yield Buffer.concat(pending);
+	if (openLine) {
+		yield { bytes: Buffer.alloc(0), end: true };
+	}
+}
+/** Raw LF-delimited lines; UTF-8 never encodes LF inside another character. */
+export async function* lfLines(
+	file: string,
+	signal?: AbortSignal,
+	highWaterMark = 64 * 1024,
+): AsyncGenerator<Buffer> {
+	let pending: Buffer[] = [];
+	for await (const { bytes, end } of lfChunks(file, signal, highWaterMark)) {
+		pending.push(bytes);
+		if (end) {
+			yield pending.length === 1 ? bytes : Buffer.concat(pending);
+			pending = [];
+		}
 	}
 }
 /** Git's heuristic: a NUL in the first 8,000 bytes marks binary content. */

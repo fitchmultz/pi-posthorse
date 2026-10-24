@@ -30,6 +30,7 @@ import {
 	InMemoryCredentialStore,
 } from "@earendil-works/pi-ai";
 import { createPosthorse } from "../index.ts";
+import { retainSession } from "./fixture-files.ts";
 
 const textOf = (message) =>
 	typeof message?.content === "string"
@@ -151,7 +152,13 @@ async function fixture(t, options = {}) {
 		sessionManager,
 		noTools: "builtin",
 	});
-	t.after(() => session.dispose());
+	t.after(() => {
+		try {
+			session.dispose();
+		} finally {
+			retainSession(temp, sessionManager, "final");
+		}
+	});
 	await session.bindExtensions({
 		onError(error) {
 			throw new Error(error.error);

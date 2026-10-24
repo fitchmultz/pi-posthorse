@@ -50,7 +50,7 @@ async function findEntry(
 		for await (const item of sessionWindowEntries(
 			file,
 			signal,
-			(_bytes, entry) => entry.id === entryId,
+			(entry) => entry.id === entryId,
 		)) {
 			return { item, source: relative(source.dir, file) };
 		}

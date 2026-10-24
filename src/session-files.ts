@@ -12,6 +12,7 @@ import {
 	type WindowedEntry,
 } from "./contracts.ts";
 import { lfLines } from "./files.ts";
+import { sessionLines, type LineMatcher, type SessionLine } from "./session-lines.ts";
 import { toWindowedEntry, windowProjection } from "./history-entries.ts";
 import { shortKey } from "./message-text.ts";
 
@@ -78,11 +79,11 @@ const ASCII_FOLDS: Readonly<Partial<Record<string, string>>> = {
 	k: "\u00e2\u0084\u00aa",
 	s: "\u00c5\u00bf",
 };
-const DOTTED_I = Buffer.from("\u0130");
-/** The read capabilities line filters need from a raw journal line. */
-export type RawLine = Readonly<Pick<Buffer, "includes" | "toString">>;
-/** Whether a raw line contains one of prefilterNeedles' needles, ignoring case like its text would. */
-export function needleLines(needles: readonly string[]): (bytes: RawLine) => boolean {
+const DOTTED_I = Buffer.from("\u0130").toString("latin1");
+/** Raw-line matcher for prefilterNeedles, ignoring case like the rendered text would. */
+export function needleLines(needles: readonly string[]): LineMatcher {
+	const overlap =
+		4 * needles.reduce((longest, needle) => Math.max(longest, needle.length), 0) + 4;
 	const others = needles.filter((needle) => needle !== "\u0130");
 	const dotted = others.length < needles.length;
 	if (others.every((needle) => /^[\0-\x7f]*$/u.test(needle))) {
@@ -97,11 +98,14 @@ export function needleLines(needles: readonly string[]): (bytes: RawLine) => boo
 				.join(""),
 		);
 		const pattern = new RegExp(latin1.join("|"), "i");
-		return (bytes) =>
-			(dotted && bytes.includes(DOTTED_I)) || pattern.test(bytes.toString("latin1"));
+		return {
+			test: (text) => (dotted && text.includes(DOTTED_I)) || pattern.test(text),
+			encoding: "latin1",
+			overlap,
+		};
 	}
 	const pattern = new RegExp(needles.map((needle) => RegExp.escape(needle)).join("|"), "iu");
-	return (bytes) => pattern.test(bytes.toString("utf8"));
+	return { test: (text) => pattern.test(text), encoding: "utf8", overlap };
 }
 /** File lists that each fit one ripgrep command line. */
 function commandGroups(paths: readonly string[]): string[][] {
@@ -210,8 +214,8 @@ function parsedEntry(line: string): EntryLike | undefined {
 	} // Pi skips malformed journal lines too.
 }
 /** Window metadata of a Pi-ordered line that cannot open a window, without parsing it. */
-function entryHead(bytes: RawLine): EntryLike | undefined {
-	const head = ENTRY_HEAD.exec(bytes.toString("utf8", 0, 512));
+function entryHead(prefix: string): EntryLike | undefined {
+	const head = ENTRY_HEAD.exec(prefix);
 	if (head === null || head[1] === "compaction" || head[1] === "context_window") {
 		return undefined;
 	}
@@ -222,31 +226,40 @@ function entryHead(bytes: RawLine): EntryLike | undefined {
 	};
 }
 /** Whether a caller may need a line; other lines only advance window ancestry. */
-type LineFilter = (bytes: RawLine, entry: EntryLike) => boolean;
+type LineFilter = (entry: EntryLike) => boolean;
+async function readEntry(
+	line: SessionLine,
+	wanted: LineFilter,
+): Promise<{ readonly entry: EntryLike; readonly selected: boolean } | undefined> {
+	const head = entryHead(line.head);
+	if (head !== undefined && (!line.matches || !wanted(head))) {
+		return { entry: head, selected: false };
+	}
+	const entry = parsedEntry(await line.text());
+	return entry === undefined
+		? undefined
+		: {
+				entry,
+				selected: head !== undefined || (line.matches && wanted(entry)),
+			};
+}
 export async function* sessionWindowEntries(
 	file: string,
 	signal?: AbortSignal,
 	wanted: LineFilter = () => true,
+	matcher?: LineMatcher,
 ): AsyncGenerator<WindowedEntry> {
 	if (!existsSync(file)) {
 		return;
 	}
 	const project = windowProjection();
-	for await (const bytes of lfLines(file, signal, 1024 * 1024)) {
-		const head = entryHead(bytes);
-		if (head !== undefined && !wanted(bytes, head)) {
-			project(head);
+	for await (const line of sessionLines(file, signal, matcher)) {
+		const candidate = await readEntry(line, wanted);
+		if (candidate === undefined) {
 			continue;
 		}
-		const entry = parsedEntry(bytes.toString("utf8"));
-		if (entry === undefined) {
-			continue;
-		}
-		const windowId = project(entry);
-		const item =
-			head !== undefined || wanted(bytes, entry)
-				? toWindowedEntry(entry, windowId)
-				: undefined;
+		const windowId = project(candidate.entry);
+		const item = candidate.selected ? toWindowedEntry(candidate.entry, windowId) : undefined;
 		if (item !== undefined) {
 			yield item;
 		}
