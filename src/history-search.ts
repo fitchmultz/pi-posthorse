@@ -82,21 +82,29 @@ function entryMessage(entry: EntryLike) {
 			return { content: entry.content, summary: entry.summary };
 	}
 }
-function contextVisibility(projected: readonly ProjectedEntry[]): (entry: EntryLike) => boolean {
-	const visible = new Map(
-		projected.flatMap(({ sourceEntry, messages }) =>
-			sourceEntry.id !== undefined && sourceEntry.id !== "" && messages.length > 0
-				? [[sourceEntry.id, messages.map(seenText).join("\n")]]
-				: [],
-		),
-	);
+function contextVisibility(project: HistorySource["projection"]): (entry: EntryLike) => boolean {
+	let visible: ReadonlyMap<string, ProjectedEntry["messages"]> | undefined;
 	return (entry) => {
 		if (entry.type === "custom_message" && isReminderType(entry.customType)) {
 			return false;
 		}
+		// Pi owns edits and compaction; only matching candidates need their projected text.
+		visible ??= new Map(
+			project().flatMap(({ sourceEntry, messages }) =>
+				sourceEntry.id !== undefined && sourceEntry.id !== "" && messages.length > 0
+					? [[sourceEntry.id, messages]]
+					: [],
+			),
+		);
 		const own = entryMessage(entry);
 		const id = entry.type === "context_edit" ? entry.targetId : entry.id;
-		return visible.get(id ?? "")?.includes(seenText(own)) === true;
+		return (
+			visible
+				.get(id ?? "")
+				?.map(seenText)
+				.join("\n")
+				.includes(seenText(own)) === true
+		);
 	};
 }
 type SearchProgress = {
@@ -299,7 +307,9 @@ export async function historyMatches(
 		fail("Invalid history cursor or changed query/scope; restart the search without it.");
 	}
 	const accumulator = new SearchAccumulator(limit, cursor, fail);
-	const inContext = contextVisibility(source.projection());
+	// Archive scans await I/O; keep their visibility snapshot at invocation time.
+	const projected = params.all === true ? source.projection() : undefined;
+	const inContext = contextVisibility(() => projected ?? source.projection());
 	const skipped =
 		params.all === true
 			? await archivedMatches(source, { query, signal, inContext }, accumulator)
