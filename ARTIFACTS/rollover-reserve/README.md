@@ -66,6 +66,20 @@ SDK requests that preserve system/tools and the safe paired tail without a summa
 - Adapter standalone cleanup removes redundant narration or speculative helpers from changed hunks.
   No checker, assertion contract, timeout, support floor, optional peer, lock policy, or safety rule changes.
 
+## Owner policy clarification after PR100
+
+After [PR100](https://github.com/fitchmultz/pi-posthorse/pull/100) merged, Mitch supplied this rationale
+in the task follow-up:
+
+> reason for 64k is to make sure rollover happens before 272k tokens based on my custom ctx window size of 335k tokens for models i use. some providers cost more above 272k tokens.
+
+At that window, the 64k reserve first crosses at 271,001, below 272,000. The 32k and 24k counterfactuals
+cross at 303,001 and 311,001, above his policy boundary. They are not equivalent cheaper alternatives
+for routes with that input-pricing tier. A trigger does not hard-cap requests or prevent overshoot.
+This is first-party policy intent, not verification of provider tiers, prices, or invoices. The
+[updated explanation](../../docs/rollover-cache-cost.md) preserves that distinction. No settings,
+fixtures, arithmetic artifacts, or historical raw results change in this documentation follow-up.
+
 ## Arithmetic reproduction
 
 [arithmetic.json](arithmetic.json) records formulas applied to public issue aggregates and synthetic

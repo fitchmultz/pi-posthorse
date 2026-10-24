@@ -51,7 +51,7 @@ Automatic recovery is an emergency input record, not proof of progress. The fres
 
 ## Settings
 
-For the reserve's capacity, cache-cost, and headroom tradeoffs, see [Rollover frequency and cache cost](rollover-cache-cost.md). The 64k, 32k, and 24k examples are scenarios, not a recommendation to change settings.
+For the reserve's capacity, cache-cost, and headroom tradeoffs, see [Rollover frequency and cache cost](rollover-cache-cost.md). The owner's 64k reserve targets rollover before a 272k input-pricing boundary with a custom 335k window. The 32k and 24k examples cross that policy boundary and are counterfactuals, not equivalent cheaper settings or recommendations. The rollover threshold is not a hard request-size cap.
 
 Posthorse follows Pi's effective `compaction` settings, including Pi's decision about whether project settings are trusted. Disabling `compaction.enabled` disables reminders and automatic rollover; `new_context` stays available. `keepRecentTokens` defaults to Pi's 20,000 tokens and supports runtime and per-model overrides. Existing injected policy readers that supply only `enabled` and `reserveTokens` remain compatible and use Pi's default retention on the turn-end fallback; the native hook always uses its resolved event settings.
 
