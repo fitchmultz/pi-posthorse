@@ -391,6 +391,37 @@ test("native history searches do not serialize unrelated active tool arguments t
 	);
 });
 
+for (const all of [false, true]) {
+	test(`native history normalizes a shared edit target only once (all=${all})`, async (t) => {
+		const h = await loadedHistory(t);
+		const manager = SessionManager.create(h.cwd, join(h.cwd, "sessions"));
+		const id = manager.appendMessage(fauxAssistantMessage("Before edits."));
+		let lastArguments;
+		for (let index = 0; index < 8; index++) {
+			lastArguments = { value: "MATCH_EDIT_ARGUMENT", payload: "x".repeat(4096) };
+			manager.appendContextEdit(id, {
+				content: [fauxToolCall("unrelated", lastArguments, { id: "same-call" })],
+			});
+		}
+		let serialized = 0;
+		const stringify = JSON.stringify;
+		t.mock.method(JSON, "stringify", (value, replacer, space) => {
+			if (value === lastArguments) {
+				serialized++;
+			}
+			return stringify(value, replacer, space);
+		});
+		const result = await h.call(manager, { op: "search", query: "MATCH_EDIT_ARGUMENT", all });
+		assert.match(textOf(result), /No history matches/);
+		assert.equal(result.details.skipped, 8);
+		assert.ok(
+			serialized <= (all ? 1 : 3),
+			`the same native projected target was serialized ${serialized} times`,
+		);
+		t.diagnostic(`shared target serializations: ${serialized}; edits: 8; all: ${all}`);
+	});
+}
+
 test("native all-session history keeps invocation-time context visibility across archive I/O", async (t) => {
 	const h = await loadedHistory(t);
 	const manager = SessionManager.create(h.cwd, join(h.cwd, "sessions"));

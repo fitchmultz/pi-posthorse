@@ -83,7 +83,7 @@ function entryMessage(entry: EntryLike) {
 	}
 }
 function contextVisibility(project: HistorySource["projection"]): (entry: EntryLike) => boolean {
-	let visible: ReadonlyMap<string, ProjectedEntry["messages"]> | undefined;
+	let visible: Map<string, ProjectedEntry["messages"] | string> | undefined;
 	return (entry) => {
 		if (entry.type === "custom_message" && isReminderType(entry.customType)) {
 			return false;
@@ -96,15 +96,16 @@ function contextVisibility(project: HistorySource["projection"]): (entry: EntryL
 					: [],
 			),
 		);
-		const own = entryMessage(entry);
-		const id = entry.type === "context_edit" ? entry.targetId : entry.id;
-		return (
-			visible
-				.get(id ?? "")
-				?.map(seenText)
-				.join("\n")
-				.includes(seenText(own)) === true
-		);
+		const id = (entry.type === "context_edit" ? entry.targetId : entry.id) ?? "";
+		let text = visible.get(id);
+		if (text === undefined) {
+			return false;
+		}
+		if (typeof text !== "string") {
+			text = text.map(seenText).join("\n");
+			visible.set(id, text);
+		}
+		return text.includes(seenText(entryMessage(entry)));
 	};
 }
 type SearchProgress = {
