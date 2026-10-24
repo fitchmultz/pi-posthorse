@@ -649,6 +649,83 @@ test("oversized tool output rolls over without credentials and repeated resets d
 	);
 });
 
+for (const reserveTokens of [64_000, 32_000, 24_000]) {
+	test(`reserve investigation preserves stable request inputs across automatic rollover (${reserveTokens})`, async (t) => {
+		const h = await fixture(t, { contextWindow: 335_000, reserveTokens });
+		let initialSystem, initialTools, fresh;
+		h.faux.setResponses([
+			(ctx) => {
+				initialSystem = getCurrentSystemPrompt(ctx.messages);
+				initialTools = structuredClone(getCurrentTools(ctx.messages));
+				return fauxAssistantMessage("Ready for the synthetic fixture.");
+			},
+		]);
+		await h.session.prompt("Establish the stable system and tools.");
+		h.sessionManager.appendMessage({
+			role: "user",
+			content: `ARCHIVED_OWNER ${"o".repeat(1_200_000)}`,
+			timestamp: 1,
+		});
+		h.sessionManager.appendMessage(
+			fauxAssistantMessage(`RECENT_ASSISTANT ${"a".repeat(16_000)}`),
+		);
+		h.sessionManager.appendMessage({
+			role: "user",
+			content: `RETAINED_OWNER ${"u".repeat(20_000)}`,
+			timestamp: 2,
+		});
+		h.sessionManager.appendMessage(
+			toolTurn({ ...fauxToolCall("read", {}), id: "stable-read" }),
+		);
+		h.sessionManager.appendMessage({
+			role: "toolResult",
+			toolName: "read",
+			toolCallId: "stable-read",
+			content: [{ type: "text", text: `RETAINED_RECEIPT ${"r".repeat(40_000)}` }],
+			isError: false,
+			timestamp: 3,
+		});
+		h.faux.setResponses([fauxAssistantMessage("Finish the full window.")]);
+		await h.session.prompt("Finish this synthetic window.");
+		assert.equal(
+			h.faux.state.callCount,
+			2,
+			"rollover must not add a summary or wake a finished run",
+		);
+		assert.equal(boundaries(h).length, 1);
+		assert.equal(boundaries(h)[0].details.reason, "threshold");
+		h.faux.setResponses([
+			(ctx) => {
+				fresh = structuredClone(ctx.messages);
+				return fauxAssistantMessage("Continue from the retained tail.");
+			},
+		]);
+		await h.session.prompt("Continue after the synthetic automatic boundary.");
+		assert.equal(h.faux.state.callCount, 3);
+		assert.equal(boundaries(h)[0].usage, undefined);
+		assert.ok(boundaries(h)[0].summary.length <= 20_000);
+		assert.equal(getCurrentSystemPrompt(fresh), initialSystem);
+		assert.deepEqual(getCurrentTools(fresh), initialTools);
+		for (const marker of ["RECENT_ASSISTANT", "RETAINED_OWNER", "RETAINED_RECEIPT"]) {
+			assert.ok(
+				fresh.some((message) => textOf(message).startsWith(marker)),
+				marker,
+			);
+			assert.ok(!boundaries(h)[0].summary.includes(marker), marker);
+		}
+		assert.ok(!fresh.some((message) => textOf(message).startsWith("ARCHIVED_OWNER")));
+		assert.match(boundaries(h)[0].summary, /ARCHIVED_OWNER/);
+		const evidence = process.env.PI_COMPAT_EVIDENCE_DIR;
+		if (evidence) {
+			mkdirSync(evidence, { recursive: true });
+			writeFileSync(
+				join(evidence, `reserve-${reserveTokens}.jsonl`),
+				readFileSync(h.sessionManager.getSessionFile()),
+			);
+		}
+	});
+}
+
 for (const [reason, asynchronous] of [
 	["threshold", false],
 	["threshold", true],

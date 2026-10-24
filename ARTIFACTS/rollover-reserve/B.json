@@ -1,0 +1,141 @@
+{
+	"pi-posthorse": {
+		"id": "pi-posthorse@0.10.0",
+		"name": "pi-posthorse",
+		"version": "0.10.0",
+		"size": 48359,
+		"unpackedSize": 169762,
+		"shasum": "71ee06cb1f98b50c808ecd276b7e8fbfb0dbf9dc",
+		"integrity": "sha512-4Ib035/4pyolR81/ZB/PmK868e47a06riUegWpVV7ohDkhCoDifLEgcMUntbBwbcFAWtbhS468dmrufL2LCgKQ==",
+		"filename": "pi-posthorse-0.10.0.tgz",
+		"files": [
+			{
+				"path": "LICENSE",
+				"size": 1068,
+				"mode": 420
+			},
+			{
+				"path": "README.md",
+				"size": 6918,
+				"mode": 420
+			},
+			{
+				"path": "index.ts",
+				"size": 1952,
+				"mode": 420
+			},
+			{
+				"path": "package.json",
+				"size": 2333,
+				"mode": 420
+			},
+			{
+				"path": "src/budget.ts",
+				"size": 7016,
+				"mode": 420
+			},
+			{
+				"path": "src/context-tools.ts",
+				"size": 4666,
+				"mode": 420
+			},
+			{
+				"path": "src/contracts.ts",
+				"size": 3960,
+				"mode": 420
+			},
+			{
+				"path": "src/files.ts",
+				"size": 9929,
+				"mode": 420
+			},
+			{
+				"path": "src/history-entries.ts",
+				"size": 7803,
+				"mode": 420
+			},
+			{
+				"path": "src/history-pages.ts",
+				"size": 5948,
+				"mode": 420
+			},
+			{
+				"path": "src/history-search.ts",
+				"size": 8945,
+				"mode": 420
+			},
+			{
+				"path": "src/history.ts",
+				"size": 5308,
+				"mode": 420
+			},
+			{
+				"path": "src/message-text.ts",
+				"size": 4732,
+				"mode": 420
+			},
+			{
+				"path": "src/notes.ts",
+				"size": 10843,
+				"mode": 420
+			},
+			{
+				"path": "src/paging.ts",
+				"size": 5218,
+				"mode": 420
+			},
+			{
+				"path": "src/recovery-results.ts",
+				"size": 4090,
+				"mode": 420
+			},
+			{
+				"path": "src/recovery.ts",
+				"size": 15688,
+				"mode": 420
+			},
+			{
+				"path": "src/reminders.ts",
+				"size": 4101,
+				"mode": 420
+			},
+			{
+				"path": "src/retention.ts",
+				"size": 6312,
+				"mode": 420
+			},
+			{
+				"path": "src/rollover.ts",
+				"size": 13435,
+				"mode": 420
+			},
+			{
+				"path": "src/session-files.ts",
+				"size": 13667,
+				"mode": 420
+			},
+			{
+				"path": "src/ui/cards.ts",
+				"size": 10171,
+				"mode": 420
+			},
+			{
+				"path": "src/ui/display.ts",
+				"size": 9599,
+				"mode": 420
+			},
+			{
+				"path": "src/ui/text.ts",
+				"size": 3100,
+				"mode": 420
+			},
+			{
+				"path": "ui.ts",
+				"size": 2960,
+				"mode": 420
+			}
+		],
+		"entryCount": 25,
+		"bundled": []
+	}
+}

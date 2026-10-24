@@ -1,0 +1,598 @@
+npm notice run pi-posthorse@0.10.0 verify
+npm notice run npm run lint && npm run format:check && npm run check:compat && npm run build
+npm notice run pi-posthorse@0.10.0 lint
+npm notice run npm run quality:prepare && npm run quality:policy && oxlint --deny-warnings .
+npm notice run pi-posthorse@0.10.0 quality:prepare
+npm notice run node scripts/quality-prepare.ts
+Corrected native Oxlint 1.87.0 ready: linux-x64-gnu
+Corrected quality engine ready: /workspace/issue-98/node_modules/.cache/pi-quality-engine/tsgolint/661d875a7caab22e012f7b35fc54f42f7fe8a2888304c253dab0d594c4cb706d/tsgolint
+npm notice run pi-posthorse@0.10.0 quality:policy
+npm notice run node scripts/quality-policy.ts
+Quality policy: maintained-code scope and suppression contracts passed.
+Found 0 warnings and 0 errors.
+Finished in 3.3s on 47 files with 225 rules using 2 threads.
+npm notice run pi-posthorse@0.10.0 format:check
+npm notice run oxfmt --check .
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 48ms on 73 files using 2 threads.
+npm notice run pi-posthorse@0.10.0 check:compat
+npm notice run npm run check && npm test
+npm notice run pi-posthorse@0.10.0 check
+npm notice run tsc
+npm notice run pi-posthorse@0.10.0 test
+npm notice run npm run quality:prepare && node --import ./test/pi-loader.ts --test test/*.test.ts test/host.test.mjs
+npm notice run pi-posthorse@0.10.0 quality:prepare
+npm notice run node scripts/quality-prepare.ts
+Corrected native Oxlint 1.87.0 ready: linux-x64-gnu
+Corrected quality engine ready: /workspace/issue-98/node_modules/.cache/pi-quality-engine/tsgolint/661d875a7caab22e012f7b35fc54f42f7fe8a2888304c253dab0d594c4cb706d/tsgolint
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ official explicit reset preserves system/tools and raw transcript; notes/history work after reset and resume (134.124462ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-jZiazz
+✔ context guidance follows model/settings changes during continuation and reset (forced=false) (31.573698ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-O7WzVa
+✔ context guidance follows model/settings changes during continuation and reset (forced=true) (26.218429ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-s09z6R
+✔ routed guidance and handoff admission use native context capacity (83.450366ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-iuw1ln
+✔ explicit handoff admission counts the real prompt and active tool schemas (63.815716ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-VOzwWr
+✔ a failed sibling cancels the explicit reset for the whole batch (31.282218ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-fqHVp3
+✔ a colliding foreign new_context cannot authorize Posthorse rollover (before) (21.672299ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-olwerm
+✔ a colliding foreign new_context cannot authorize Posthorse rollover (after) (27.874389ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-rVMbKC
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ oversized tool output rolls over without credentials and repeated resets do not nest recovery (380.704327ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-6BKzH9
+✔ reserve investigation preserves stable request inputs across automatic rollover (64000) (38.080228ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-AoSuLe
+✔ reserve investigation preserves stable request inputs across automatic rollover (32000) (46.131287ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-h0MlWv
+✔ reserve investigation preserves stable request inputs across automatic rollover (24000) (37.576678ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-ca38d0
+✔ automatic threshold retains the effective recent projected tail without duplicating recovery (async=false) (49.987997ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-aK1ouT
+✔ automatic threshold retains the effective recent projected tail without duplicating recovery (async=true) (64.881546ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-Sl7K9m
+✔ automatic overflow retains the effective recent projected tail without duplicating recovery (async=false) (36.025268ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-Y5Jz6Z
+✔ automatic overflow retains the effective recent projected tail without duplicating recovery (async=true) (51.226217ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-a1o9mA
+✔ automatic retain-none is safe in a 32000 fresh budget (keep=0) (17.375489ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-bQNukP
+✔ automatic retain-none is safe in a 32000 fresh budget (keep=30000) (18.988499ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-VEPSTA
+✔ automatic retain-none is safe in a 100000 fresh budget (keep=0) (19.572119ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-KdEi9M
+✔ fresh-window fallback retains paired receipts with a compatible injected policy reader (57.849016ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-80tLSw
+✔ automatic retention of owner input permits another native threshold rollover in the same run (45.768307ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-PcSXfc
+✔ automatic retention drops an incomplete projected tool group (omitted call) (35.980898ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-XLyzhM
+✔ automatic retention drops an incomplete projected tool group (omitted result) (17.972389ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-r8ATK0
+✔ a retained old notes reminder neither leaks nor suppresses the new window's notes nudge (27.814238ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-JUDwT8
+✔ native terminating batch keeps its receipt without a reset or unsolicited request (27.534159ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-7zLXPF
+✔ eligible overflow recovery (keepRecentTokens=1) retries once without summarization (20.842478ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-9Kpc1N
+✔ eligible overflow (keepRecentTokens=1) retries fresh and later requests can recover again (39.790387ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-iBGL7N
+✔ ordinary error does not trigger a Posthorse reset (25.156798ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-cF8xJ4
+✔ ordinary aborted does not trigger a Posthorse reset (51.368017ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-Sp4MsR
+✔ disabled live settings suppress automatic rollover and reminders but retain explicit reset (30.468588ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-nCrWC7
+✔ automatic handoff preserves projected edits and marks compactions as history windows (26.452168ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-9NHt2x
+✔ note publication retains symlinks/modes, serializes write+append, and propagates failure (35.903128ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-Va8zTO
+✔ default file extension keeps guidance, reminders and explicit reset despite malformed disk settings (729.295926ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-DO4q6b
+✔ default policy follows runtime and per-model overrides for guidance, budget and reminders (68.622226ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-hMTGbk
+✔ queued input arrives unchanged after native automatic rollover (62.175507ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-9iyuu5
+✔ oversized incoming input obeys the selected host's preflight boundary (25.910818ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-eJ2Fs9
+✔ manual compact remains native and calls the summarization provider (27.954869ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-wvfj2G
+✔ automatic recovery after a native /compact excludes summarized inputs and keeps the native summary (41.657007ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-if0K4m
+✔ cooperating boundary entries and continuation survive automatic rollover (975.783742ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-B0UloH
+✔ eligible overflow retry (keepRecentTokens=1) preserves later metadata and settlement drafts (16.500729ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-E72GIV
+✔ late queued input defers an explicit handoff that no longer fits (80.596325ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-kxPsEb
+✔ resumed over-budget user run respects native preflight without a summary request (23.874579ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-HTyNLg
+✔ resumed over-budget custom run respects native preflight without a summary request (24.010798ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-4cU1Un
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ same-boundary replacement and custom-message references recover committed text and images (197.524928ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-5LzjS8
+✔ multiple successful explicit requests select the first handoff (21.792029ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-n4FigM
+✔ eligible early length recovery (keepRecentTokens=1) makes no summary request (21.736829ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-ChzDn7
+✔ eligible mixed overflow/length recovery (keepRecentTokens=1) never replenishes the retry allowance (23.872428ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-SAeGEk
+✔ later turn_end replacements are read live by automatic recovery (49.522897ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-5tJ3fs
+✔ automatic cancellation checks the active turn signal before its sentinel (16.556749ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-aYy1Ip
+✔ automatic cancellation checks the compaction signal before its sentinel (13.11055ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-DHLwz8
+✔ a later compaction cancel result leaves only an invisible sentinel and no reset (14.54247ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-vwPfWh
+✔ a later compaction abort leaves only an invisible sentinel and no reset (15.280429ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-Ihm9lm
+✔ explicit reset is cancelled during sibling work but cannot prevent a later-handler abort commit (32.718608ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-BwsqRb
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-DKMhq8
+✔ automatic recovery uses event settings even when proactive settings disagree (22.152329ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-WokX63
+✔ unexpected recovery-builder failure cancels instead of falling through to a summarizer (46.337538ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-0NqxRg
+✔ unsupported automatic budget deliberately keeps native model summarization (31.554328ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-F0iM3w
+✔ tiny overflow obeys native recovery eligibility with default keepRecentTokens (20.228389ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-JGjOLp
+✔ tiny length obeys native recovery eligibility with default keepRecentTokens (17.883949ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-IYQko8
+✔ fresh-window threshold protects the next request (automatic, 350000 chars, keepRecentTokens=20000) (29.653849ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-njaYY5
+✔ fresh-window threshold protects the next request (automatic, 450000 chars, keepRecentTokens=20000) (32.065588ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-hJdmQP
+✔ fresh-window threshold protects the next request (explicit, 350000 chars, keepRecentTokens=20000) (26.342398ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-9KgvR7
+✔ fresh-window threshold protects the next request (explicit, 450000 chars, keepRecentTokens=20000) (52.051207ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-52iG6e
+✔ fresh-window threshold protects the next request (automatic, 350000 chars, keepRecentTokens=1) (29.471099ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-ORHV33
+✔ fresh-window threshold protects the next request (automatic, 450000 chars, keepRecentTokens=1) (28.807349ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-XMHYdo
+✔ fresh-window threshold protects the next request (explicit, 350000 chars, keepRecentTokens=1) (27.781108ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-QzGQk5
+✔ fresh-window threshold protects the next request (explicit, 450000 chars, keepRecentTokens=1) (29.403368ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-9LbiGc
+✔ fresh-window fallback skips unknown usage (29.413138ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-i4XWl7
+✔ fresh-window fallback skips disabled policy (26.871979ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-L56sa8
+✔ earlier turn-start drafts leave fresh-window compaction Pi-owned (51.987297ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-J4I6hc
+✔ automatic chains preserve durable intent (explicit) (33.045318ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-bZbdk4
+✔ automatic chains preserve durable intent (automatic) (31.723198ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-I0gjd7
+✔ automatic chains preserve durable intent (replaced owner) (33.978178ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-yMfW2a
+✔ automatic chains preserve durable intent (omitted owner) (37.633368ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-p4D810
+✔ fresh-window truncated answers keep native omit-and-retry recovery (158.21085ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-uDF6Yf
+✔ earlier redaction drafts defer fallback and never copy unredacted evidence (25.264519ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-lMv5KL
+✔ fresh-window threshold after a final answer does not request another response (597.295524ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-02zTcU
+✔ note publication rejects directory-only symlink targets and traversal through a file (21.873089ms)
+ℹ isolated fixture: /tmp/ph98v/posthorse-official-bb19dX
+✔ native page reads estimate current active schemas only when usage is unknown (24.485398ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-wPeGUA
+ℹ notes tokens=1000 active/all/usage/policy=0/0/1/1
+ℹ history tokens=1000 active/all/usage/policy=0/0/1/1
+ℹ notes tokens=0 active/all/usage/policy=0/0/1/1
+ℹ history tokens=0 active/all/usage/policy=0/0/1/1
+ℹ notes tokens=null active/all/usage/policy=1/1/1/1
+ℹ history tokens=null active/all/usage/policy=1/1/1/1
+ℹ notes tokens=undefined active/all/usage/policy=1/1/1/0
+ℹ history tokens=undefined active/all/usage/policy=1/1/1/0
+ℹ notes tokens=null active/all/usage/policy=1/1/1/1
+ℹ history tokens=null active/all/usage/policy=1/1/1/1
+ℹ notes tokens=null active/all/usage/policy=1/1/1/1
+ℹ history tokens=null active/all/usage/policy=1/1/1/1
+ℹ notes tokens=null active/all/usage/policy=1/1/1/1
+ℹ history tokens=null active/all/usage/policy=1/1/1/1
+✔ native loaded history extracts only early page hits and lookahead from a large archive (43.653728ms)
+ℹ native history SDK: file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js
+ℹ first-page archived content: 11/4096 entries extracted
+✔ native loaded history reads only the selected content and preserves abandoned-branch locators (111.001503ms)
+ℹ native history SDK: file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js
+ℹ known-ID archived content: 1/4096 entries extracted
+ℹ known-ID archived content: 1/4096 entries extracted
+ℹ bare/qualified archived-ID unrelated argument serializations: 0
+✔ official resume keeps legacy saved window data recoverable after a public reset (29.002748ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-cQTuy8
+✔ all-session history scopes project sessions and their nested subagents (58.598757ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-EwH9nm
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ history recovers every image across pages and fresh contexts (1028.133559ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-WnFbbC
+✔ automatic rollover keeps namespaced ask_question as evidence, not owner input (visible call) (23.583949ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-wfo8zE
+✔ automatic rollover keeps namespaced ask_question as evidence, not owner input (omitted call) (22.356279ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-9dxa1T
+✔ automatic rollover keeps namespaced ask_question as evidence, not owner input (replaced call) (24.119048ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-QAh7H8
+✔ automatic rollover keeps namespaced ask_question as evidence, not owner input (no call namespace call) (52.756457ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-4nOCqv
+✔ automatic rollover preserves bare owner question provenance (answer) (28.508658ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-JsWVt6
+✔ automatic rollover preserves bare owner question provenance (cancelled) (25.852558ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-mLwylX
+✔ automatic rollover preserves bare owner question provenance (error) (25.243699ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-wAtiwc
+✔ automatic rollover respects context edits in its recovery handoff (27.990988ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-ZL2C1I
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ edited image recovery points to the replacement rather than the raw original (97.862294ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-I3LuGD
+✔ public Posthorse guidance survives tool additions and rollover (structured) (20.806389ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-DQ0H9I
+✔ public Posthorse guidance survives tool additions and rollover (custom) (50.918147ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-dz6f5e
+✔ public Posthorse guidance survives tool additions and rollover (forced-before) (19.635629ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-gYaI1h
+✔ public Posthorse guidance survives tool additions and rollover (forced-after) (18.900599ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-CJDJbG
+✔ idle custom wakeup gets current request-local guidance (unforced) (16.364529ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-jyCrR0
+✔ idle custom wakeup gets current request-local guidance (forced) (17.122849ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-NLiAwz
+✔ idle custom wakeup gets current request-local guidance (forced-user-to-custom) (13.25099ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-h7DoTl
+✔ namespaced tools count toward the fresh handoff budget (38.197307ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-wSx1Vh
+✔ public mixed searches/list/reads stay below configured capacity (compaction=false, reads=4) (93.747605ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-bBAp0Q
+ℹ {"before":null,"after":98667,"enabled":false,"reads":4}
+✔ public mixed searches/list/reads stay below configured capacity (compaction=true, reads=4) (51.362547ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-sYjQwg
+ℹ {"before":null,"after":82252,"enabled":true,"reads":4}
+✔ public mixed searches/list/reads stay below configured capacity (compaction=false, reads=6) (48.466657ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-W7F6Pg
+ℹ {"before":null,"after":98796,"enabled":false,"reads":6}
+✔ public mixed searches/list/reads stay below configured capacity (compaction=false, reads=50) (52.836556ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-ch7Qun
+ℹ {"before":null,"after":99661,"enabled":false,"reads":50}
+✔ public answer in the reminder band preserves native settlement (continuation=none, stopReason=stop) (57.359646ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-U3WJgd
+✔ public answer in the reminder band preserves native settlement (continuation=none, stopReason=length) (20.351549ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-BokSVl
+✔ public answer in the reminder band preserves native settlement (continuation=steer, stopReason=stop) (22.634489ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-WNOMVB
+✔ public answer in the reminder band preserves native settlement (continuation=followUp, stopReason=stop) (24.752619ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-SO8kFA
+✔ public answer in the reminder band preserves native settlement (continuation=boundary, stopReason=stop) (25.871628ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-IxI1eg
+✔ public enabled-to-disabled policy removes the active reminder but keeps its journal entry (24.681859ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-ztLG2e
+✔ public checkpoint reminder reaches the model after Pi compacts inside a rollover window (19.604339ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-6PN2x6
+✔ public history search skips entries still in the active context (nativeCompact=false) (136.976482ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-EGMUIK
+✔ public history search skips entries still in the active context (nativeCompact=true) (121.069392ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-DBo6au
+✔ public search cursors finish despite appended lookup echoes (all=false) (27.603209ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-UNLm0t
+ℹ {"all":false,"originals":9,"returned":10}
+✔ public search cursors finish despite appended lookup echoes (all=true) (146.234251ms)
+ℹ fixture: /tmp/ph98v/posthorse-regression-MZOxyu
+ℹ {"all":true,"originals":9,"returned":10}
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ project package notes migrate outside the checkout and survive Pi's update cleanup (48.251907ms)
+✔ fresh project package notes are isolated by project, including symlinked project paths (49.686357ms)
+✔ project package migration preserves existing notes and timestamp collision entries (36.917988ms)
+✔ package storage detection leaves containers and similarly named ordinary repositories alone (24.725769ms)
+✔ linked project-package worktrees share relocated notes outside the outermost package tree (55.598556ms)
+✔ a blocked migration fails without modifying checkout notes or the destination (22.317619ms)
+✔ project package notes survive cleanup through a symlinked container (49.805107ms)
+✔ project package notes survive cleanup through a symlinked host (38.198458ms)
+✔ project package notes survive cleanup through a symlinked repository (32.747678ms)
+✔ project packages with separate Git metadata keep shared notes in that metadata directory (30.648568ms)
+✔ global package container symlink coverage remains explicit (8.082049ms)
+✔ global package repository symlink coverage remains explicit (7.60761ms)
+✔ global-nested notes preserve the existing store with checkout link=false (29.242308ms)
+✔ global-nested notes preserve the existing store with checkout link=true (24.690389ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ new_context requests a turn-boundary reset and automatic rollover builds a recovery record (19.064149ms)
+✔ a minimum-budget automatic record keeps a complete history pointer without nested evidence (0.89091ms)
+✔ automatic ancestry stops at the nearest owner window without resurrecting superseded intent (11.150939ms)
+✔ automatic recovery keeps owner anchors and visible coordination without stale transcript guesses (2.28442ms)
+✔ budget policy sends one best-effort reminder below the line and lets Pi own rollover (3.14048ms)
+✔ reminders respect live pending messages and tool calls even with a stop reason (2.28707ms)
+✔ a large reserve does not send checkpoint reminders in a fresh window (0.97911ms)
+✔ each safety evaluation reads native usage and policy once, including unknown pages and final handoff validation (50.836107ms)
+✔ reminder lookups are leaf-certified and preserve the full kept range (10 archived entries) (3.90783ms)
+✔ reminder lookups are leaf-certified and preserve the full kept range (43000 archived entries) (243.863316ms)
+✔ guidance uses request-local sections and preserves custom or forced prompts (1.10785ms)
+✔ disabled Pi compaction disables automatic Posthorse behavior but not new_context (1.17082ms)
+✔ disabling compaction filters persisted reminders without changing history or deduplication (0.71053ms)
+✔ reminder-free context and fork reminder filtering never read history (0.59781ms)
+✔ context filtering removes reminders from an older window or a different budget (0.61631ms)
+✔ history reads current entries without opening every archived session (2.708249ms)
+✔ all-session history recurses and returns newest matching entries first (32.208728ms)
+✔ history keeps the selected session after a cwd override but excludes foreign and unidentified archives (24.129008ms)
+✔ history searches normalized text and reports native window ids (2.72607ms)
+✔ history search skips entries already in the active context and says how many (1.51621ms)
+✔ history ranks matching original content before recovery and lookup echoes without hiding either (3.5715ms)
+✔ archived history preserves Unicode separators across chunks and an unterminated final record (35.043468ms)
+✔ history preserves assistant failures and ranks them ahead of recovery echoes (2.1466ms)
+Posthorse automatic rollover cancelled: Too little fresh context capacity for an automatic recovery record.
+✔ all-session ranking keeps older originals ahead of newer echoes before applying the result limit (80.600136ms)
+✔ a reminder before a native compaction does not suppress the next reminder (1.1827ms)
+✔ new_context beside a failed sibling tool does not suppress the reminder (1.001769ms)
+✔ automatic handoff carries trailing synchronous results, with entry ids and no base64 (7.085569ms)
+✔ retained edited async receipts are excluded by source identity while discarded edits keep history pointers (0.57796ms)
+✔ async receipt recovery shares the handoff header budget across earlier batches (9.69249ms)
+✔ history returns stored images for a requested entry and summarizes them elsewhere (3.176719ms)
+✔ history image continuations preserve order, text, and retry offsets (13.331699ms)
+✔ small-context configurations are unsupported; larger ones derive honest budgets (4.29332ms)
+✔ fresh payload budgets count the system prompt and cancel unsafe automatic recovery (0.73547ms)
+✔ read pages shrink to the remaining budget and refuse unsafe pages while preserving the offset (8.15996ms)
+✔ note and history pages share a batch budget without double-counting consumed pages (5.290109ms)
+✔ notes list and search page every result through the shared budget, including oversized paths (690.831729ms)
+✔ mixed search/list/read outputs and no-match refusals share one reservation (65.998496ms)
+✔ history cursors finish partial headers and progress past growing lookup echoes (6.20239ms)
+✔ all-session cursors retain ranking and per-file entries across pages (240.726526ms)
+✔ note replacement keeps the existing checkpoint on a real file-size failure (916.499845ms)
+✔ notes resolve the repository root from nested directories, worktrees, and plain folders (14.997669ms)
+✔ notes for Pi package checkouts move to the agent directory and survive pi update (20.846569ms)
+✔ generic Git URL prefix packages cannot disclose or overwrite each other's notes (30.684368ms)
+✔ nested project-package notes do not leak through outer package list or search (28.356178ms)
+✔ notes list and search follow aliases while skipping cycles and missing targets (6.5239ms)
+✔ notes list newest first with sizes, read folders as listings, and search only text notes (3.94042ms)
+✔ notes search stops reading at the requested page, skips notes over 1 MiB and still pages every match (440.783004ms)
+✔ separate Git directories share notes in the common Git directory (file) (34.771138ms)
+✔ separate Git directories share notes in the common Git directory (directory symlink) (28.878698ms)
+✔ long notes page fully, empty writes clear, appends stay separated, and search centers on the match (9.150369ms)
+✔ history flattens bashExecution entries and honors excludeFromContext (2.07432ms)
+✔ all-session search returns fork copies with their source-qualified references (25.112818ms)
+✔ all-session history reads the searched entry when independent sessions reuse an entry id (62.081067ms)
+✔ all-session history keeps identical entries from unrelated sessions separate (15.213929ms)
+✔ all-session history keeps new entries in sibling forks separate (17.778659ms)
+✔ all-session history cursors fit the declared limit for nested session files (26.632038ms)
+✔ all-session search finds the same entries with or without ripgrep, including text raw JSONL cannot show (179.112639ms)
+✔ all-session search still finds text that exists only in normalized entries (2610.560095ms)
+✔ session search and archived reads preserve modification-time ordering including ties (69.343616ms)
+✔ appends from concurrent Pi processes never merge records (1220.487767ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ node:test safe calls retain declaration identity, aliases and nearby Promise ownership (264.411734ms)
+✔ wrong-package configuration removes the real registration allowance (249.321185ms)
+✔ native Pi, TUI and compiler input allowances exclude local and unrelated package names (758.130855ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ setup-oxlint-engine.ts reuses verified outputs in separate fresh dependency trees (1026.556669ms)
+✔ setup-oxlint-engine.ts refuses corrupt outputs and invalidates changed patches (543.026408ms)
+✔ setup-quality-engine.ts reuses verified outputs in separate fresh dependency trees (1029.836019ms)
+✔ setup-quality-engine.ts refuses corrupt outputs and invalidates changed patches (546.246737ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ file-qualified safe calls use real declarations, not spelling or callable-type laundering (281.136553ms)
+✔ changing to another existing declaration file removes the original exemption (265.452235ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ unchecked JavaScript retains syntactic lint and Promise checks without semantic rules (263.724494ms)
+✔ TypeScript, inherited checkJs and per-file ts-check receive semantic lint (266.565055ms)
+✔ compiler diagnostics remain separate from semantic lint scope (362.333959ms)
+✔ compiler checking applies to inherited checkJs and ts-check, not unchecked JavaScript (282.038553ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ every configured native-library input allowance excludes mutable application names (275.290893ms)
+✔ SDK allowances cannot transfer to matching types from another installed package (260.454365ms)
+✔ native handles cannot hide mutable attached or nested application-owned state (836.401321ms)
+✔ native and SDK inputs check application-owned declaration augmentations deeply (4136.229713ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ unchecked-JavaScript overrides disable installed type-aware metadata, not namespaces (43.616127ms)
+✔ suppression policy parses actual comments, never strings, regexes or template text (128.496342ms)
+✔ suppression governance detects directives inside empty containers and punctuation gaps (1524.080489ms)
+✔ JSX text and template literals are not directives, but JSX expression comments are (112.217263ms)
+✔ arity directives require SDK declaration identity rather than method or interface names (3118.780434ms)
+✔ explained native directives preserve only authorized sites and generic callback shape (156.76762ms)
+✔ only described dedicated negative type tests may use expect-error (137.029041ms)
+✔ framework mutation allowances cannot exempt an ordinary input or another file (240.352786ms)
+✔ contract-required undefined options retain checks outside the two exact fixture files (252.638995ms)
+✔ maintained source inventory and effective projects remain covered in normal lint (797.322632ms)
+✔ semantic scope fails closed when an unchecked JavaScript fixture opts into ts-check (220.013817ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+▶ configured lint policy
+  ✔ configured rule boundary: explicit any includes rest arguments (714.487468ms)
+  ✔ configured rule boundary: non-null assertions (676.77394ms)
+  ✔ configured rule boundary: unsafe assertions cannot narrow unknown (750.612865ms)
+  ✔ configured rule boundary: unnecessary assertions include literal const assertions (688.214009ms)
+  ✔ configured rule boundary: object literal assertion style (746.227065ms)
+  ✔ configured rule boundary: array literal assertion style (720.025407ms)
+  ✔ configured rule boundary: unsafe JSON return (707.211438ms)
+  ✔ configured rule boundary: unsafe JSON assignment (645.809032ms)
+  ✔ configured rule boundary: unsafe JSON argument (716.471958ms)
+  ✔ configured rule boundary: unsafe JSON call (682.447399ms)
+  ✔ configured rule boundary: unsafe JSON member access (731.023456ms)
+  ✔ configured rule boundary: empty object types (699.068649ms)
+  ✔ configured rule boundary: unsafe Function types (720.072057ms)
+  ✔ configured rule boundary: wrapper object types (692.214959ms)
+  ✔ configured rule boundary: void belongs to return and generic contracts (727.442277ms)
+  ✔ configured rule boundary: type parameters must relate inputs and outputs (732.370606ms)
+  ✔ configured rule boundary: deprecated declarations (703.041578ms)
+  ✔ configured rule boundary: unbound methods preserve this ownership (702.178858ms)
+  ✔ configured rule boundary: spreading a Promise is not its result (637.151151ms)
+  ✔ configured rule boundary: for-in arrays uses numeric keys accidentally (728.850977ms)
+  ✔ configured rule boundary: numeric array sort requires comparison (629.359402ms)
+  ✔ configured rule boundary: primitive truthiness is explicit (629.106732ms)
+  ✔ configured rule boundary: nullable booleans cannot conflate false and absence (719.150127ms)
+  ✔ configured rule boundary: nullable numbers cannot conflate zero and absence (715.188308ms)
+  ✔ configured rule boundary: nullable strings cannot conflate empty and absence (748.562285ms)
+  ✔ configured rule boundary: genuine constant conditions remain checked (649.077581ms)
+  ✔ configured rule boundary: default does not make a union exhaustive (806.094943ms)
+  ✔ configured rule boundary: strict equality (674.42732ms)
+  ✔ configured rule boundary: implicit coercion (746.853575ms)
+  ✔ configured rule boundary: mixed plus operands (716.579327ms)
+  ✔ configured rule boundary: template arrays are not scalar text (650.258262ms)
+  ✔ configured rule boundary: unknown cannot stringify as a base object (726.453107ms)
+  ✔ configured rule boundary: floating native promises remain errors (712.890127ms)
+  ✔ configured rule boundary: void cannot waive floating ownership (711.259747ms)
+  ✔ configured rule boundary: misused Promise callbacks (651.163241ms)
+  ✔ configured rule boundary: await only thenables (677.26211ms)
+  ✔ configured rule boundary: return-await within catch boundaries (778.742464ms)
+  ✔ configured rule boundary: void callbacks cannot discard nonvoid implicitly (760.898274ms)
+  ✔ configured rule boundary: void-return expression is not a value (744.918985ms)
+  ✔ configured rule boundary: meaningless void (714.067278ms)
+  ✔ configured rule boundary: newly thrown failures are Errors (759.433325ms)
+  ✔ configured rule boundary: catch callback failure is unknown (708.724487ms)
+  ✔ configured rule boundary: Promise rejection requires Error (696.526589ms)
+  ✔ configured rule boundary: empty rejection is forbidden (674.97862ms)
+  ✔ configured rule boundary: parameter properties cannot mutate shared state (673.75548ms)
+  ✔ configured rule boundary: private fields written only at construction are readonly (704.166868ms)
+  ✔ configured rule boundary: public boundaries need explicit returns (673.3309ms)
+  ✔ configured rule boundary: application interface methods are readonly properties (687.831389ms)
+  ✔ configured rule boundary: imports cannot be side-effect-only after type removal (698.939589ms)
+  ✔ configured rule boundary: mutable exports (697.539699ms)
+  ✔ configured rule boundary: curly control flow (754.016966ms)
+  ✔ configured rule boundary: var declarations (747.912885ms)
+  ✔ configured rule boundary: prefer immutable local bindings (707.430237ms)
+  ✔ configured rule boundary: nested ternaries (769.429304ms)
+  ✔ configured rule boundary: return assignment (787.933303ms)
+  ✔ configured rule boundary: sequence expressions (712.240118ms)
+  ✔ configured rule boundary: multiple assignment (748.013356ms)
+  ✔ configured rule boundary: else after returning (736.880606ms)
+  ✔ configured rule boundary: debugger statements (639.999292ms)
+  ✔ configured rule boundary: unexpected control-character regex (725.197207ms)
+  ✔ configured rule boundary: empty catches do not swallow failure (723.908227ms)
+  ✔ configured rule boundary: no-op functions need explanations (652.221261ms)
+  ✔ configured rule boundary: unnecessary explicit undefined (709.736858ms)
+  ✔ configured rule boundary: any truthiness cannot bypass boolean intent (710.220458ms)
+  ✔ configured rule boundary: nullable enum truthiness cannot conflate zero and absence (659.704521ms)
+  ✔ configured rule boundary: readonly annotations include nested application values (701.294578ms)
+  ✔ configured rule boundary: readonly callbacks cannot carry mutable attached state (774.214744ms)
+  ✔ configured rule boundary: method declarations do not imply readonly properties (713.042487ms)
+  ✔ configured rule boundary: mixed plus compound assignment remains checked (752.016525ms)
+  ✔ configured rule boundary: boolean plus remains unsafe (717.440067ms)
+  ✔ configured rule boundary: nullish template interpolation remains checked (692.076299ms)
+  ✔ configured rule boundary: RegExp template interpolation remains checked (723.802947ms)
+  ✔ configured rule boundary: unknown new throws differ from caught rethrows (679.395639ms)
+  ✔ configured rule boundary: unknown rejections remain checked (706.081868ms)
+  ✔ configured rule boundary: IIFE does not waive Promise ownership (763.081655ms)
+  ✔ configured rule boundary: type-predicate constant tests remain enabled in production (731.863566ms)
+  ✔ configured structural boundary: modified production complexity (615.824993ms)
+  ✔ configured structural boundary: production nesting (671.7435ms)
+  ✔ configured structural boundary: production parameter count (727.139017ms)
+  ✔ configured structural boundary: production statements (720.162926ms)
+  ✔ configured structural boundary: production function lines (751.691965ms)
+  ✔ configured structural boundary: production file lines (697.717739ms)
+  ✔ test role retains branching and parameter limits while exempting size (2457.260053ms)
+  ✔ modified complexity counts one switch rather than every case (359.780059ms)
+  ✔ declaration files retain API safety without structural metrics (749.522075ms)
+  ✔ readonly application contracts expose only the read capabilities they need (326.37409ms)
+  ✔ native readonly collections check keys, values, mapped mutators and attached application state (436.478984ms)
+  ✔ application types named like native readonly containers retain mutation checks (366.462129ms)
+  ✔ nullable object presence checks and genuine void shorthand remain permitted (316.768892ms)
+  ✔ async interfaces may complete immediately and caught failures retain identity (352.706639ms)
+  ✔ sequencing is forbidden without a documented exception (684.22023ms)
+  ✔ terminal Promise callbacks may be void but interior callbacks must return (703.702428ms)
+  ✔ redundant catch rethrows remain detectable (367.303108ms)
+  ✔ local sort and reverse stay allowed while void generic contracts stay real (330.519321ms)
+  ✔ dynamic execution constructs remain forbidden (687.464399ms)
+  ✔ type imports and exports preserve runtime module contracts (705.569017ms)
+  ✔ duplicate and self imports remain detectable (721.691717ms)
+  ✔ runtime dependency cycles remain detectable in both modules (2243.316757ms)
+  ✔ type-only cycles are not exempt from import boundaries (541.491478ms)
+  ✔ string timer callbacks are implied evaluation (1090.268325ms)
+  ✔ allowed scalar interpolation and contextual void contracts stay valid (360.316988ms)
+  ✔ generic callback results retain their actual contract without artificial readonly wrappers (342.47917ms)
+  ✔ inferred callback inputs do not waive parameter-property mutation protection (375.507318ms)
+  ✔ native Promise executors deliberately discard timer handles using block bodies (339.337619ms)
+  ✔ PromiseLike values have readonly permission but no floating-Promise exemption (340.660599ms)
+  ✔ argument-presence and undefined-return exceptions stay in exact boundary files (915.673886ms)
+  ✔ normal lint fixes cannot manufacture unknown contracts from explicit any (354.881678ms)
+✔ configured lint policy (37458.865338ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ all four native cards identify pending calls and tolerate malformed streamed arguments (18.156979ms)
+✔ native cards cap actual wrapped rows and expose complete legacy text by click or global expansion (38.997628ms)
+✔ collapsed previews show exactly the first rows of the expanded text (142.307221ms)
+✔ notes show page range and next offset even when the preview fills the compact card (75.196756ms)
+✔ empty notes, no matches, actual errors, and submitted content stay distinct (4.519439ms)
+✔ empty history has one compact summary and keeps the returned text on expansion (32.398718ms)
+✔ history searches lead with content and retain every entry and recovery identifier expanded (7.866149ms)
+✔ paginated searches retain accurate counts, spans, identifiers and continuation in native cards (30.470908ms)
+✔ context summaries preserve approximation and native disabled, unsupported, unknown states (6.01837ms)
+✔ new_context remains a conditional request and only its committed message says the window started (4.212749ms)
+✔ native rendering preserves theme changes and leaves drag selection to Pi (2.64418ms)
+✔ partial and error results cannot inherit a success summary or terminal controls (2.22043ms)
+✔ history pages keep paging, metadata, and native image attachments without copied bodies (12.211199ms)
+✔ legacy history and malformed display spans fall back to the complete returned text (6.22526ms)
+✔ owned reminders are compact, expandable, and sanitize terminal control content (1.27146ms)
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ reserve scenario 64000 agrees with the native threshold (0.944619ms)
+✔ reserve scenario 32000 agrees with the native threshold (0.11102ms)
+✔ reserve scenario 24000 agrees with the native threshold (0.08962ms)
+✔ reserve frequency arithmetic separates capacity gain from cycle reduction (0.13715ms)
+✔ synthetic prices distinguish a cache read, fresh input, and both write lifetimes (0.70269ms)
+ℹ tests 344
+ℹ suites 1
+ℹ pass 344
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 77877.298568
+npm notice run pi-posthorse@0.10.0 build
+npm notice run npm pack --dry-run
+npm notice
+npm notice package: pi-posthorse@0.10.0
+npm notice Tarball Contents
+npm notice 1.1kB LICENSE
+npm notice 6.9kB README.md
+npm notice 2.0kB index.ts
+npm notice 2.3kB package.json
+npm notice 7.0kB src/budget.ts
+npm notice 4.7kB src/context-tools.ts
+npm notice 4.0kB src/contracts.ts
+npm notice 9.9kB src/files.ts
+npm notice 7.8kB src/history-entries.ts
+npm notice 5.9kB src/history-pages.ts
+npm notice 8.9kB src/history-search.ts
+npm notice 5.3kB src/history.ts
+npm notice 4.7kB src/message-text.ts
+npm notice 10.8kB src/notes.ts
+npm notice 5.2kB src/paging.ts
+npm notice 4.1kB src/recovery-results.ts
+npm notice 15.7kB src/recovery.ts
+npm notice 4.1kB src/reminders.ts
+npm notice 6.3kB src/retention.ts
+npm notice 13.4kB src/rollover.ts
+npm notice 13.7kB src/session-files.ts
+npm notice 10.2kB src/ui/cards.ts
+npm notice 9.6kB src/ui/display.ts
+npm notice 3.1kB src/ui/text.ts
+npm notice 3.0kB ui.ts
+npm notice Tarball Details
+npm notice name: pi-posthorse
+npm notice version: 0.10.0
+npm notice filename: pi-posthorse-0.10.0.tgz
+npm notice package size: 48.4 kB
+npm notice unpacked size: 169.8 kB
+npm notice shasum: 71ee06cb1f98b50c808ecd276b7e8fbfb0dbf9dc
+npm notice integrity: sha512-4Ib035/4pyolR[...]8dmrufL2LCgKQ==
+npm notice total files: 25
+npm notice
+pi-posthorse-0.10.0.tgz

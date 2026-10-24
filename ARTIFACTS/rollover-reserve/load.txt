@@ -1,0 +1,10 @@
+ 13:44:27 up 24 min,  0 users,  load average: 0.27, 2.48, 2.56
+2
+COMMAND         %CPU
+python3         42.8
+compile          1.8
+compile          1.7
+sleep            0.0
+git              0.0
+go               0.0
+git              0.0

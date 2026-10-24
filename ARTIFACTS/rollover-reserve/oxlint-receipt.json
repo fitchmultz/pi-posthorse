@@ -1,0 +1,9 @@
+{
+	"revision": "2bd08ebe8f36fcf1954a675ffdeb4c6d0129f609",
+	"patchSha256": "aa2aaf22c94f4d840f5ae30e8f9154296b10428d46182e309371ef4c0e2d3f99",
+	"target": "x86_64-unknown-linux-gnu",
+	"rustVersion": "rustc 1.99.0 (b940084d7 2026-09-28)\ncargo 1.99.0 (5f94df478 2026-08-27)",
+	"compiler": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+	"cargoLockSha256": "5abafec831a81ad407829fd4456fccde569df3d425c4f45c7d897e4a988d452c",
+	"binarySha256": "1e3bc2e01439cd025db809f7391702fba73e16841cf7c0adfa07885e219da816"
+}

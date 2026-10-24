@@ -1,0 +1,394 @@
+{
+	"verdict": "unchanged synthetic behavior; no runtime latency or billing claim",
+	"order": ["A1", "B1", "A2", "B2", "A3", "B3", "A4", "B4", "A5", "B5"],
+	"samples": [
+		{
+			"sample": "A1",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292572
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292568
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1988.848342
+		},
+		{
+			"sample": "B1",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292569
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1877.529878
+		},
+		{
+			"sample": "A2",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1767.486535
+		},
+		{
+			"sample": "B2",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292565
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292572
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1905.041546
+		},
+		{
+			"sample": "A3",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292572
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1867.287938
+		},
+		{
+			"sample": "B3",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292568
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292572
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292568
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1860.597289
+		},
+		{
+			"sample": "A4",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1878.594968
+		},
+		{
+			"sample": "B4",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292569
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292568
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1992.477851
+		},
+		{
+			"sample": "A5",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1827.712861
+		},
+		{
+			"sample": "B5",
+			"exit": 0,
+			"tests": 8,
+			"pass": 8,
+			"fail": 0,
+			"cancelled": 0,
+			"skipped": 0,
+			"sdkCases": [
+				{
+					"reserve": 24000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				},
+				{
+					"reserve": 32000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292572
+				},
+				{
+					"reserve": 64000,
+					"automaticBoundaries": 1,
+					"summaryChars": 4659,
+					"summaryUsageRecorded": false,
+					"journalBytes": 1292571
+				}
+			],
+			"deliberateUserPrompts": 9,
+			"fauxRequests": 9,
+			"externalProviderRequests": 0,
+			"reportedRunnerDurationMs": 1837.73464
+		}
+	],
+	"perSide": {
+		"A": {
+			"runs": 5,
+			"testsPassed": 40,
+			"nativeCases": 15,
+			"fauxRequests": 45,
+			"automaticBoundaries": 15,
+			"errors": 0,
+			"runnerDurationMs": {
+				"median": 1867.287938,
+				"min": 1767.486535,
+				"max": 1988.848342
+			}
+		},
+		"B": {
+			"runs": 5,
+			"testsPassed": 40,
+			"nativeCases": 15,
+			"fauxRequests": 45,
+			"automaticBoundaries": 15,
+			"errors": 0,
+			"runnerDurationMs": {
+				"median": 1877.529878,
+				"min": 1837.73464,
+				"max": 1992.477851
+			}
+		}
+	}
+}

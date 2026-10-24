@@ -1,0 +1,58 @@
+[
+	{
+		"file": "CPU.20261024.134142.11659.0.001.cpuprofile",
+		"sampleCount": 1239,
+		"topSelfSamples": [
+			{
+				"function": "(garbage collector)",
+				"file": "",
+				"samples": 50
+			},
+			{
+				"function": "compileSourceTextModule",
+				"file": "node:internal/modules/esm/utils",
+				"samples": 28
+			},
+			{
+				"function": "compileSourceTextModule",
+				"file": "node:internal/modules/esm/utils",
+				"samples": 26
+			},
+			{
+				"function": "(idle)",
+				"file": "",
+				"samples": 16
+			},
+			{
+				"function": "__require",
+				"file": "node:internal/deps/amaro/dist/index",
+				"samples": 15
+			},
+			{
+				"function": "compileSourceTextModule",
+				"file": "node:internal/modules/esm/utils",
+				"samples": 13
+			},
+			{
+				"function": "",
+				"file": "file:///workspace/issue-98/node_modules/@earendil-works/pi-tui/dist/utils.js",
+				"samples": 12
+			},
+			{
+				"function": "compileSourceTextModule",
+				"file": "node:internal/modules/esm/utils",
+				"samples": 11
+			},
+			{
+				"function": "_persist",
+				"file": "file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js",
+				"samples": 11
+			},
+			{
+				"function": "(program)",
+				"file": "",
+				"samples": 10
+			}
+		]
+	}
+]

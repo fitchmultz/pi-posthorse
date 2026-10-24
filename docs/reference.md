@@ -51,6 +51,8 @@ Automatic recovery is an emergency input record, not proof of progress. The fres
 
 ## Settings
 
+For the reserve's capacity, cache-cost, and headroom tradeoffs, see [Rollover frequency and cache cost](rollover-cache-cost.md). The 64k, 32k, and 24k examples are scenarios, not a recommendation to change settings.
+
 Posthorse follows Pi's effective `compaction` settings, including Pi's decision about whether project settings are trusted. Disabling `compaction.enabled` disables reminders and automatic rollover; `new_context` stays available. `keepRecentTokens` defaults to Pi's 20,000 tokens and supports runtime and per-model overrides. Existing injected policy readers that supply only `enabled` and `reserveTokens` remain compatible and use Pi's default retention on the turn-end fallback; the native hook always uses its resolved event settings.
 
 The model's context window minus `compaction.reserveTokens` must leave at least 10,000 usable tokens. Below that (for example an 8K or 16K model with the default 16,384 reserve) Posthorse reports an unsupported configuration in the guidance and in `get_context_remaining`, turns automatic behavior off for that model, and leaves Pi's own compaction in place. Lower the reserve or use a larger model. The checkpoint reminder band is the last 10% of usable context, capped at 32,000 tokens, so a large reserve cannot trigger a reminder immediately in a fresh window.

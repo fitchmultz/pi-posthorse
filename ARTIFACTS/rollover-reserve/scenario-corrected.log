@@ -1,0 +1,74 @@
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✖ reserve investigation preserves stable request inputs across automatic rollover (64000) (275.519284ms)
+ℹ isolated fixture: /tmp/ph98c/posthorse-official-3sZtDm
+✖ reserve investigation preserves stable request inputs across automatic rollover (32000) (83.648835ms)
+ℹ isolated fixture: /tmp/ph98c/posthorse-official-n22HaE
+✖ reserve investigation preserves stable request inputs across automatic rollover (24000) (82.400205ms)
+ℹ isolated fixture: /tmp/ph98c/posthorse-official-HFvw6z
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ reserve scenario 64000 agrees with the native threshold (1.44515ms)
+✔ reserve scenario 32000 agrees with the native threshold (0.21682ms)
+✔ reserve scenario 24000 agrees with the native threshold (0.18574ms)
+✔ reserve frequency arithmetic separates capacity gain from cycle reduction (0.18533ms)
+✔ synthetic prices distinguish a cache read, fresh input, and both write lifetimes (1.003329ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 5
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6263.280136
+
+✖ failing tests:
+
+test at test/official.test.mjs:653:2
+✖ reserve investigation preserves stable request inputs across automatic rollover (64000) (275.519284ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(!fresh.some((message) => textOf(message).startsWith("ARCHIVED_OWNER")))
+  
+      at TestContext.<anonymous> (file:///workspace/issue-98/test/official.test.mjs:701:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/official.test.mjs:653:2
+✖ reserve investigation preserves stable request inputs across automatic rollover (32000) (83.648835ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(!fresh.some((message) => textOf(message).startsWith("ARCHIVED_OWNER")))
+  
+      at TestContext.<anonymous> (file:///workspace/issue-98/test/official.test.mjs:701:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/official.test.mjs:653:2
+✖ reserve investigation preserves stable request inputs across automatic rollover (24000) (82.400205ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(!fresh.some((message) => textOf(message).startsWith("ARCHIVED_OWNER")))
+  
+      at TestContext.<anonymous> (file:///workspace/issue-98/test/official.test.mjs:701:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
