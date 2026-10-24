@@ -40,8 +40,10 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
-      - name: Use a job-private compilation cache
-        run: printf 'npm_config_cache=%s/npm-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Use job-private compilation cache and fixture evidence
+        run: |
+          printf 'npm_config_cache=%s/npm-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'PI_COMPAT_EVIDENCE_DIR=%s/posthorse-evidence\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -97,6 +99,21 @@ jobs:
           path: ${{ runner.temp }}/npm-cache/pi-quality-engine/tsgolint
           key: ${{ steps.tsgolint.outputs.cache-primary-key }}
       - run: npm run verify
+      - name: Hash retained native fixtures
+        if: always()
+        run: |
+          if test -d "$PI_COMPAT_EVIDENCE_DIR"; then
+            cd "$PI_COMPAT_EVIDENCE_DIR"
+            find . -type f ! -path './fixture-sha256sums.txt' -print0 | sort -z | xargs -0 -r sha256sum > fixture-sha256sums.txt
+          fi
+      - name: Retain strict quality evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: strict-quality-fixtures
+          path: ${{ runner.temp }}/posthorse-evidence
+          if-no-files-found: error
+          retention-days: 3
 
   resolve:
     uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@54c687228d840506555801b9db038373e697d901 # main
@@ -226,6 +243,15 @@ jobs:
           node automation/scripts/qualify.mjs \
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host fork --target "$RUNNER_TEMP/fork-package" --output "$RUNNER_TEMP/posthorse-fork"
+      - name: Hash retained qualification fixtures
+        if: always()
+        env:
+          EVIDENCE: ${{ runner.temp }}/posthorse-${{ matrix.host }}
+        run: |
+          if test -d "$EVIDENCE/probes/contracts"; then
+            cd "$EVIDENCE"
+            find probes/contracts -type f -print0 | sort -z | xargs -0 -r sha256sum > fixture-sha256sums.txt
+          fi
       - name: Retain qualification evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

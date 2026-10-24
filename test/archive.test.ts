@@ -6,6 +6,7 @@ import test from "node:test";
 import { Check } from "typebox/value";
 import { registerHistory } from "../src/history.ts";
 import { PageReservations } from "../src/paging.ts";
+import { retainFile } from "./fixture-files.ts";
 import { loadFixture, requireValue } from "./harness.ts";
 import { fixtureResult } from "./results.ts";
 
@@ -71,7 +72,10 @@ function message(id: string, content: unknown, parentId: string | null = null): 
 test("archive search and later reads pass a nonmatching image beyond V8's string limit", async (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "posthorse-giant-archive-"));
 	t.diagnostic(`generated public archive: ${dir}`);
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => {
+		retainFile(dir, join(dir, "synthetic.jsonl"), "original");
+		rmSync(dir, { recursive: true, force: true });
+	});
 	const file = openSync(join(dir, "synthetic.jsonl"), "wx");
 	try {
 		writeSync(file, header(dir));
@@ -134,7 +138,10 @@ test("archive search and later reads pass a nonmatching image beyond V8's string
 
 test("archive prefilter keeps boundary-spanning text and Unicode folds", async (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "posthorse-boundary-archive-"));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => {
+		retainFile(dir, join(dir, "synthetic.jsonl"), "original");
+		rmSync(dir, { recursive: true, force: true });
+	});
 	const file = openSync(join(dir, "synthetic.jsonl"), "wx");
 	const cases = [
 		["ascii", "small marker", "SMALL MARKER"],
