@@ -1,0 +1,55 @@
+{
+	"version": "0.10.0",
+	"name": "pi-posthorse",
+	"dependencies": {
+		"@earendil-works/pi-ai": {
+			"version": "1.3.0",
+			"resolved": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-1.3.0.tgz",
+			"overridden": false,
+			"dependencies": {
+				"typebox": {
+					"version": "1.3.27"
+				}
+			}
+		},
+		"@earendil-works/pi-coding-agent": {
+			"version": "1.3.0",
+			"resolved": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-1.3.0.tgz",
+			"overridden": false,
+			"dependencies": {
+				"@earendil-works/pi-agent-core": {
+					"version": "1.3.0",
+					"resolved": "https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-1.3.0.tgz",
+					"overridden": false,
+					"dependencies": {
+						"@earendil-works/pi-ai": {
+							"version": "1.3.0"
+						},
+						"typebox": {
+							"version": "1.3.27"
+						}
+					}
+				},
+				"@earendil-works/pi-ai": {
+					"version": "1.3.0"
+				},
+				"@earendil-works/pi-tui": {
+					"version": "1.3.0"
+				},
+				"typebox": {
+					"version": "1.3.27"
+				}
+			}
+		},
+		"@earendil-works/pi-tui": {
+			"version": "1.3.0",
+			"resolved": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-1.3.0.tgz",
+			"overridden": false
+		},
+		"typebox": {
+			"version": "1.3.27",
+			"resolved": "https://registry.npmjs.org/typebox/-/typebox-1.3.27.tgz",
+			"overridden": false
+		}
+	}
+}

@@ -1,0 +1,21 @@
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ reserve investigation preserves stable request inputs across automatic rollover (64000) (78.589306ms)
+ℹ isolated fixture: /tmp/ph98a/posthorse-official-j57iQT
+✔ reserve investigation preserves stable request inputs across automatic rollover (32000) (79.281145ms)
+ℹ isolated fixture: /tmp/ph98a/posthorse-official-qRDsg2
+✔ reserve investigation preserves stable request inputs across automatic rollover (24000) (45.554317ms)
+ℹ isolated fixture: /tmp/ph98a/posthorse-official-HwYLw3
+{"host":"local","version":"1.3.0","sdk":"file:///workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/dist/index.js","packageDir":"/workspace/issue-98/node_modules/@earendil-works/pi-coding-agent/"}
+✔ reserve scenario 64000 agrees with the native threshold (1.02404ms)
+✔ reserve scenario 32000 agrees with the native threshold (0.13633ms)
+✔ reserve scenario 24000 agrees with the native threshold (0.13415ms)
+✔ reserve frequency arithmetic separates capacity gain from cycle reduction (0.19982ms)
+✔ synthetic prices distinguish a cache read, fresh input, and both write lifetimes (0.79142ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1860.597289

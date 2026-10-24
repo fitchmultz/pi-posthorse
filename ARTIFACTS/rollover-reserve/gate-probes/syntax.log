@@ -1,0 +1,26 @@
+npm notice run pi-posthorse@0.10.0 verify
+npm notice run npm run lint && npm run format:check && npm run check:compat && npm run build
+npm notice run pi-posthorse@0.10.0 lint
+npm notice run npm run quality:prepare && npm run quality:policy && oxlint --deny-warnings .
+npm notice run pi-posthorse@0.10.0 quality:prepare
+npm notice run node scripts/quality-prepare.ts
+Corrected native Oxlint 1.87.0 ready: linux-x64-gnu
+Corrected quality engine ready: /workspace/issue-98/node_modules/.cache/pi-quality-engine/tsgolint/661d875a7caab22e012f7b35fc54f42f7fe8a2888304c253dab0d594c4cb706d/tsgolint
+npm notice run pi-posthorse@0.10.0 quality:policy
+npm notice run node scripts/quality-policy.ts
+file:///workspace/issue-98-baseline/scripts/quality-source.ts:39
+		throw new Error(
+		      ^
+
+Error: Could not parse src/budget.ts: Unexpected token
+    at parsedComments (file:///workspace/issue-98-baseline/scripts/quality-source.ts:39:9)
+    at file:///workspace/issue-98-baseline/scripts/quality-source.ts:110:22
+    at Array.map (<anonymous>)
+    at sourcePolicies (file:///workspace/issue-98-baseline/scripts/quality-source.ts:100:17)
+    at checkPolicy (file:///workspace/issue-98-baseline/scripts/quality-policy.ts:156:23)
+    at file:///workspace/issue-98-baseline/scripts/quality-policy.ts:183:20
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.22.1

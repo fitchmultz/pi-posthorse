@@ -1,0 +1,11 @@
+{
+	"revision": "eb9339115edde6811ca94c3433adf69ea9852880",
+	"typescriptRevision": "2bd066d87f5bafd315be9f40889d0a60b9e58e0b",
+	"patchSha256": "2d5a136231068e68da46c58374b16b71046947497a59e5e2367c91e73bf7f193",
+	"readonlyPatchSha256": "e9560fcd3eaacebee9b39d8a51de476cd06a4a49d21163161fecfc12d136fc64",
+	"readonlyArrayPatchSha256": "97fd4ffec6951e6ecb14586a1ea0e2257b50bd5c6c06b8fe216a5937327c41e5",
+	"platform": "linux",
+	"arch": "x64",
+	"goVersion": "go version go1.27.1 linux/amd64",
+	"binarySha256": "466e3a42e6b23580bac99974701af80526cfd9cc66818941707624072bdea755"
+}

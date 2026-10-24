@@ -1,0 +1,32 @@
+npm notice run pi-posthorse@0.10.0 verify
+npm notice run npm run lint && npm run format:check && npm run check:compat && npm run build
+npm notice run pi-posthorse@0.10.0 lint
+npm notice run npm run quality:prepare && npm run quality:policy && oxlint --deny-warnings .
+npm notice run pi-posthorse@0.10.0 quality:prepare
+npm notice run node scripts/quality-prepare.ts
+Corrected native Oxlint 1.87.0 ready: linux-x64-gnu
+Corrected quality engine ready: /workspace/issue-98/node_modules/.cache/pi-quality-engine/tsgolint/661d875a7caab22e012f7b35fc54f42f7fe8a2888304c253dab0d594c4cb706d/tsgolint
+npm notice run pi-posthorse@0.10.0 quality:policy
+npm notice run node scripts/quality-policy.ts
+Quality policy: maintained-code scope and suppression contracts passed.
+
+  [38;2;225;80;80;1m×[0m [38;2;225;80;80;1meslint(no-empty-function): Unexpected empty function `registration`[0m
+     ╭─[[38;2;92;157;255;1msrc/budget.ts[0m:151:34]
+ [2m150[0m │ 
+ [2m151[0m │ const registration = async () => {};
+     · [38;2;246;87;248m                                 ──[0m
+ [2m152[0m │ registration();
+     ╰────
+[38;2;106;159;181m  help: [0mConsider removing this function or adding logic to it.
+
+  [38;2;225;80;80;1m×[0m [38;2;225;80;80;1mtypescript(no-floating-promises): Promises must be awaited, add await operator.[0m
+     ╭─[[38;2;92;157;255;1msrc/budget.ts[0m:152:1]
+ [2m151[0m │ const registration = async () => {};
+ [2m152[0m │ registration();
+     · [38;2;246;87;248m───────┬──────[0m[38;2;30;201;212m─[0m
+     ·        [38;2;246;87;248m╰── [38;2;246;87;248mThis unhandled promise-like value has type `Promise<void>`.[0m[0m
+     ╰────
+[38;2;106;159;181m  help: [0mThe promise must end with a call to .catch, or end with a call to .then with a rejection handler.
+
+Found 0 warnings and 2 errors.
+Finished in 3.1s on 47 files with 225 rules using 2 threads.

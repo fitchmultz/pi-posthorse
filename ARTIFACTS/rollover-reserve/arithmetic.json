@@ -1,0 +1,72 @@
+{
+	"kind": "synthetic arithmetic, not observed billing or throughput",
+	"rows": [
+		{
+			"reserveTokens": 64000,
+			"rolloverAt": 271001,
+			"windowUsedPercent": 80.89582089552239,
+			"nominalHeadroom": 63999,
+			"relativeLineIncreasePercent": 0,
+			"additionalWindowPercentagePoints": 0,
+			"idealFrequencyReductionPercent": [
+				{
+					"freshTokens": 0,
+					"percent": 0
+				},
+				{
+					"freshTokens": 30000,
+					"percent": 0
+				}
+			]
+		},
+		{
+			"reserveTokens": 32000,
+			"rolloverAt": 303001,
+			"windowUsedPercent": 90.44805970149254,
+			"nominalHeadroom": 31999,
+			"relativeLineIncreasePercent": 11.80807450895015,
+			"additionalWindowPercentagePoints": 9.552238805970148,
+			"idealFrequencyReductionPercent": [
+				{
+					"freshTokens": 0,
+					"percent": 10.561021250754942
+				},
+				{
+					"freshTokens": 30000,
+					"percent": 11.721568785462322
+				}
+			]
+		},
+		{
+			"reserveTokens": 24000,
+			"rolloverAt": 311001,
+			"windowUsedPercent": 92.83611940298508,
+			"nominalHeadroom": 23999,
+			"relativeLineIncreasePercent": 14.76009313618769,
+			"additionalWindowPercentagePoints": 11.940298507462687,
+			"idealFrequencyReductionPercent": [
+				{
+					"freshTokens": 0,
+					"percent": 12.861694978472737
+				},
+				{
+					"freshTokens": 30000,
+					"percent": 14.234824787100397
+				}
+			]
+		}
+	],
+	"reportedAggregateChecks": {
+		"overlapTokens": 4737838,
+		"flaggedRequests": 29,
+		"expectedTransitionRequests": 5,
+		"rolloverCount": 20,
+		"meanAllFlaggedTokens": 163373.72413793104,
+		"mixedAggregateDividedByRollovers": 236891.9,
+		"estimatedDollars": 42.5,
+		"totalDollars": 261.2,
+		"sharePercent": 16.27105666156202,
+		"impliedMarginalDollarsPerMillion": 8.970336258859,
+		"syntheticInputPremiumAt9PerMillion": 42.640542
+	}
+}

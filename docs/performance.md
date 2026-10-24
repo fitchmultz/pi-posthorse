@@ -1,5 +1,11 @@
 # Performance
 
+For current-source reserve arithmetic and cache-cost attribution limits, see
+[Rollover frequency and cache cost](rollover-cache-cost.md). That investigation changes no runtime
+policy and claims no measured speedup or billed saving.
+
+## Historical optimization pass
+
 Baselines and results from the 0.9.2 optimization pass. Measured on an Apple M5 Pro (18 cores)
 with Node 24.21.0 and Pi 1.1.0, against real session archives. Times are medians.
 
