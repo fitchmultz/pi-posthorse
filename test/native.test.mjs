@@ -317,6 +317,199 @@ function countedArchive(cwd) {
 	return { manager, ids, windowId, accessed };
 }
 
+test("native history searches do not serialize unrelated active tool arguments twice", async (t) => {
+	const h = await loadedHistory(t);
+	const manager = SessionManager.inMemory(h.cwd);
+	const ids = Array.from({ length: 5 }, (_, index) =>
+		manager.appendMessage({
+			role: "user",
+			content: `PROJECTION_NEEDLE old:${index}.`,
+			timestamp: index,
+		}),
+	);
+	reset(manager, "Earlier entries archived.");
+	for (let index = 0; index < 64; index++) {
+		manager.appendMessage(
+			fauxAssistantMessage(
+				fauxToolCall("unrelated", {
+					historyProjectionProbe: true,
+					payload: "x".repeat(65_536),
+					index,
+				}),
+				{ stopReason: "toolUse" },
+			),
+		);
+	}
+	manager.appendMessage({ role: "user", content: "PROJECTION_NEEDLE visible.", timestamp: 100 });
+	let serialized = 0;
+	const stringify = JSON.stringify;
+	t.mock.method(JSON, "stringify", (value, replacer, space) => {
+		if (value?.historyProjectionProbe === true) {
+			serialized++;
+		}
+		return stringify(value, replacer, space);
+	});
+	const first = await h.call(manager, { op: "search", query: "PROJECTION_NEEDLE", limit: 2 });
+	assert.deepEqual(
+		textOf(first).split("\n").slice(0, 2),
+		[4, 3].map(
+			(index) =>
+				`${manager.getEntry(ids[index]).timestamp} [window initial] [${ids[index]}] [user] PROJECTION_NEEDLE old:${index}.`,
+		),
+	);
+	assert.equal(first.details.skipped, 1);
+	assert.equal(first.details.more, true);
+	assert.ok(
+		serialized <= 64,
+		`first page serialized ${serialized}/64 unrelated argument objects`,
+	);
+	serialized = 0;
+	const second = await h.call(manager, {
+		op: "search",
+		query: "PROJECTION_NEEDLE",
+		limit: 2,
+		cursor: nextCursor(textOf(first)),
+	});
+	assert.deepEqual(
+		textOf(second).split("\n").slice(0, 2),
+		[2, 1].map(
+			(index) =>
+				`${manager.getEntry(ids[index]).timestamp} [window initial] [${ids[index]}] [user] PROJECTION_NEEDLE old:${index}.`,
+		),
+	);
+	assert.equal(second.details.skipped, 1);
+	assert.ok(
+		serialized <= 64,
+		`second page serialized ${serialized}/64 unrelated argument objects`,
+	);
+	serialized = 0;
+	const absent = await h.call(manager, { op: "search", query: "NO_MATCH_102" });
+	assert.equal(textOf(absent), 'No history matches "NO_MATCH_102".');
+	assert.ok(
+		serialized <= 64,
+		`no-match search serialized ${serialized}/64 unrelated argument objects`,
+	);
+});
+
+for (const all of [false, true]) {
+	test(`native history normalizes a shared edit target only once (all=${all})`, async (t) => {
+		const h = await loadedHistory(t);
+		const manager = SessionManager.create(h.cwd, join(h.cwd, "sessions"));
+		const id = manager.appendMessage(fauxAssistantMessage("Before edits."));
+		let lastArguments;
+		for (let index = 0; index < 8; index++) {
+			lastArguments = { value: "MATCH_EDIT_ARGUMENT", payload: "x".repeat(4096) };
+			manager.appendContextEdit(id, {
+				content: [fauxToolCall("unrelated", lastArguments, { id: "same-call" })],
+			});
+		}
+		let serialized = 0;
+		const stringify = JSON.stringify;
+		t.mock.method(JSON, "stringify", (value, replacer, space) => {
+			if (value === lastArguments) {
+				serialized++;
+			}
+			return stringify(value, replacer, space);
+		});
+		const result = await h.call(manager, { op: "search", query: "MATCH_EDIT_ARGUMENT", all });
+		assert.match(textOf(result), /No history matches/);
+		assert.equal(result.details.skipped, 8);
+		assert.ok(
+			serialized <= (all ? 1 : 3),
+			`the same native projected target was serialized ${serialized} times`,
+		);
+		t.diagnostic(`shared target serializations: ${serialized}; edits: 8; all: ${all}`);
+	});
+}
+
+test("native all-session history keeps invocation-time context visibility across archive I/O", async (t) => {
+	const h = await loadedHistory(t);
+	const manager = SessionManager.create(h.cwd, join(h.cwd, "sessions"));
+	const id = manager.appendMessage({
+		role: "user",
+		content: "SNAPSHOT_NEEDLE original.",
+		timestamp: 1,
+	});
+	manager.appendMessage(fauxAssistantMessage("Acknowledged."));
+	const pending = h.call(manager, { op: "search", query: "SNAPSHOT_NEEDLE", all: true });
+	manager.appendContextEdit(id, null);
+	const initial = await pending;
+	assert.match(textOf(initial), /No history matches/);
+	assert.equal(initial.details.skipped, 1);
+	const updated = await h.call(manager, { op: "search", query: "SNAPSHOT_NEEDLE", all: true });
+	assert.match(textOf(updated), /\[user\] SNAPSHOT_NEEDLE original\./);
+	assert.equal(updated.details.skipped, 0);
+});
+
+for (const all of [false, true]) {
+	test(`native history visibility follows edits, branches and session replacements (all=${all})`, async (t) => {
+		const h = await loadedHistory(t);
+		const dir = join(h.cwd, "sessions");
+		const manager = SessionManager.create(h.cwd, dir);
+		const original = "EDIT_NEEDLE original.";
+		const id = manager.appendMessage({ role: "user", content: original, timestamp: 1 });
+		manager.appendMessage(fauxAssistantMessage("Acknowledged."));
+		const call = (selected = manager) =>
+			h.call(selected, { op: "search", query: original, all });
+		assert.match(textOf(await call()), /No history matches/);
+		manager.appendContextEdit(id, { content: "Replacement only." });
+		assert.match(textOf(await call()), /\[user\] EDIT_NEEDLE original\./);
+		const editedLeaf = manager.getLeafId();
+		manager.appendContextEdit(id, { content: original });
+		assert.match(textOf(await call()), /No history matches/);
+		manager.appendContextEdit(id, null);
+		assert.match(textOf(await call()), /\[user\] EDIT_NEEDLE original\./);
+		manager.branch(id);
+		manager.appendMessage(fauxAssistantMessage("Other branch."));
+		assert.match(textOf(await call()), /No history matches/);
+		manager.branch(editedLeaf);
+		assert.match(textOf(await call()), /\[user\] EDIT_NEEDLE original\./);
+		manager.appendCompaction("Native compact with retained tail.", id, 100);
+		assert.match(textOf(await call()), /\[user\] EDIT_NEEDLE original\./);
+		manager.appendContextEdit(id, { content: original });
+		assert.match(textOf(await call()), /No history matches/);
+		reset(manager, "Posthorse rollover.");
+		assert.match(textOf(await call()), /\[user\] EDIT_NEEDLE original\./);
+		const file = manager.getSessionFile();
+		assert.ok(file);
+		assert.match(
+			textOf(await call(SessionManager.open(file, dir))),
+			/\[user\] EDIT_NEEDLE original\./,
+		);
+		const rewritten = readFileSync(file, "utf8")
+			.split("\n")
+			.map((line) => {
+				if (line === "") {
+					return line;
+				}
+				const entry = JSON.parse(line);
+				return JSON.stringify(
+					entry.id === id
+						? {
+								...entry,
+								message: {
+									...entry.message,
+									content: "Rewritten synthetic entry.",
+								},
+							}
+						: entry,
+				);
+			})
+			.join("\n");
+		writeFileSync(file, rewritten);
+		assert.doesNotMatch(
+			textOf(await call(SessionManager.open(file, dir))),
+			new RegExp(`\\[${id}(?:@[^\\]]+)?\\]`),
+		);
+		const other = SessionManager.create(h.cwd, join(h.cwd, "replacement"));
+		other.appendMessage({ role: "user", content: original, timestamp: 1 });
+		other.appendMessage(fauxAssistantMessage("Different session."));
+		const replacement = await call(other);
+		assert.match(textOf(replacement), /No history matches/);
+		assert.equal(replacement.details.skipped, 1);
+	});
+}
+
 test("native loaded history extracts only early page hits and lookahead from a large archive", async (t) => {
 	const h = await loadedHistory(t);
 	const { manager, ids, windowId, accessed } = countedArchive(h.cwd);

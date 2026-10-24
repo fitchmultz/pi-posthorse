@@ -4,6 +4,34 @@ For current-source reserve arithmetic and cache-cost attribution limits, see
 [Rollover frequency and cache cost](rollover-cache-cost.md). That investigation changes no runtime
 policy and claims no measured speedup or billed saving.
 
+## Active-history search, 2026-10-24
+
+The registered history executor avoids a second text conversion of unrelated active entries.
+On a generated 37.2 MB v3 session with 12,290 entries, five alternating process pairs on Linux x64,
+Node 24.22.1 and official Pi 1.4.0 produced these tool-executor times:
+
+| Search               | Before median [range], ms | After median [range], ms |
+| -------------------- | ------------------------- | ------------------------ |
+| No match             | 284.27 [267.56, 331.85]   | 158.57 [153.02, 159.58]  |
+| First matching page  | 211.49 [202.93, 217.36]   | 126.12 [117.05, 150.28]  |
+| Second matching page | 210.13 [191.87, 232.76]   | 116.77 [109.97, 120.85]  |
+
+Every paired output agreed, including cursors and active-context exclusions. Separate work counts
+showed 4,096 rather than 8,192 tool-argument serializations per call. The no-match median live-heap
+increase at executor return was 90.6 MB before and 50.4 MB after. This is not total allocation,
+peak heap, or retained JS heap inferred from RSS.
+
+Pi still owns edits and compaction. Matching searches still build its native projection; all-session
+searches also retain that projection before archive I/O to preserve invocation-time visibility.
+Each candidate ID needs text conversion at most once per search. There is no persistent cache. The remaining branch
+scan is linear. These synthetic Linux results do not predict performance on private journals,
+installed macOS, or provider requests.
+
+[Raw commands, samples, profiles, generated journals, and host API evidence](https://github.com/fitchmultz/pi-posthorse/blob/32230f506403a6b17732e5f9d78fb661523ea17b/.evidence/issue-102-final-measurements.tar.gz)
+are retained in PR #104's final evidence commit `32230f5`, separately from the distributed package.
+The [original evidence](https://github.com/fitchmultz/pi-posthorse/blob/1ac82580b08b91cbee16113dda44cede9b76687b/.evidence/issue-102-measurements.tar.gz)
+remains in PR #104's evidence commit `1ac8258`.
+
 ## Historical optimization pass
 
 Baselines and results from the 0.9.2 optimization pass. Measured on an Apple M5 Pro (18 cores)
