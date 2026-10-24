@@ -41,7 +41,7 @@
 		"format": "oxfmt --write .",
 		"format:check": "oxfmt --check .",
 		"build": "npm pack --dry-run",
-		"verify": "npm run lint && npm run format:check && npm run check:compat && npm run build",
+		"verify": "node scripts/toolchain-policy.ts && npm run lint && npm run format:check && npm run check:compat && npm run build",
 		"check:compat": "npm run check && npm test",
 		"test:native": "node --import ./test/pi-loader.ts --test test/host.test.mjs",
 		"test": "npm run quality:prepare && node --import ./test/pi-loader.ts --test test/*.test.ts test/host.test.mjs",

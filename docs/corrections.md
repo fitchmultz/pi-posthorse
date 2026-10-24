@@ -90,3 +90,31 @@ npm run verify
 future update, environment shadowing, stale or overriding floor rules, duplicate YAML authority
 keys and missing policy.
 It uses disposable semantic fixtures, not snapshots or source-text matching.
+
+## Declared tools are not necessarily the tools that ran
+
+Evidence:
+
+- [PR #105](https://github.com/fitchmultz/pi-posthorse/pull/105) records earlier npm 11.19.1
+  attempts separately from its correctly pinned Node 24.22.1/npm 12.2.0 qualification. Those
+  later valid receipts remain valid; this safeguard does not require repeating them.
+- This correction task initially ran acceptance with globally selected npm 12.2.1 despite
+  `packageManager: "npm@12.2.0"`. The workflow accepted the wrong tool. A first isolated attempt
+  also showed shell startup could replace the intended PATH; its version assertion failed
+  before acceptance ran. Final acceptance was rerun with the actual declared version.
+
+**Level: verification-entrypoint check.** `scripts/toolchain-policy.ts` resolves the invoking
+npm's own manifest from `npm_execpath`, compares its identity to `packageManager`, and checks
+Node 24 before any acceptance child runs. Missing provenance fails rather than guessing from
+PATH or trusting an advisory user-agent. The declared npm version remains the single authority.
+
+The native `packageManager` field is advisory. Native `devEngines` checks also run before install
+and ci; Pi installs dependencies inside Git-package checkouts. Applying the development npm pin
+there would constrain otherwise-supported consumers, so the gate belongs only to verification.
+It neither modifies global tools nor raises the extension's runtime floor.
+
+The real global npm 12.2.1 now fails immediately with both required and actual versions in the
+error. The declared npm 12.2.0 passes the same entrypoint. The regression test copies the actual
+repository `verify` command into a disposable project with a deliberately incompatible pin:
+before the gate, its lint sentinel executes; afterward, npm is rejected before lint. Another
+negative control verifies that missing invoking-tool provenance cannot silently pass.

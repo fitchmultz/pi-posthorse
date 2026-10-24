@@ -4,6 +4,10 @@ Oxlint owns code-quality checks; Oxfmt owns formatting. TypeScript, behavior tes
 and code review remain independent gates. Correctness, maintainability and trustworthy enforcement
 have equal weight.
 
+`npm run verify` first checks Node 24 and the invoking npm's actual version against `packageManager`.
+The check applies to repository acceptance, not package installation. It does not change global
+tools or the extension's supported runtime floor. See [Correction safeguards](corrections.md).
+
 ## Commands
 
 Use Node 24 and npm 12.2.0. Install the committed dependencies with `npm ci --ignore-scripts`, then
