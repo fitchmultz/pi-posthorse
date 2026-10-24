@@ -28,7 +28,9 @@ scan is linear. These synthetic Linux results do not predict performance on priv
 installed macOS, or provider requests.
 
 [Raw commands, samples, profiles, generated journals, and host API evidence](https://github.com/fitchmultz/pi-posthorse/blob/32230f506403a6b17732e5f9d78fb661523ea17b/.evidence/issue-102-final-measurements.tar.gz)
-are retained in an ancestor commit, separately from the distributed package.
+are retained in PR #104's final evidence commit `32230f5`, separately from the distributed package.
+The [original evidence](https://github.com/fitchmultz/pi-posthorse/blob/1ac82580b08b91cbee16113dda44cede9b76687b/.evidence/issue-102-measurements.tar.gz)
+remains in PR #104's evidence commit `1ac8258`.
 
 ## Historical optimization pass
 
