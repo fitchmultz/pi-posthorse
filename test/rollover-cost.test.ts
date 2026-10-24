@@ -32,20 +32,6 @@ for (const scenario of scenarios) {
 	});
 }
 
-test("reserve frequency arithmetic separates capacity gain from cycle reduction", () => {
-	const baseline = 271_001;
-	assert.equal((303_001 - baseline) / WINDOW, 32_000 / WINDOW);
-	assert.equal((311_001 - baseline) / WINDOW, 40_000 / WINDOW);
-	for (const freshTokens of [0, 30_000]) {
-		for (const line of [303_001, 311_001]) {
-			const oldGrowth = baseline - freshTokens;
-			const newGrowth = line - freshTokens;
-			assert.ok(newGrowth > oldGrowth);
-			assert.equal(newGrowth - oldGrowth, line - baseline);
-		}
-	}
-});
-
 test("synthetic prices distinguish a cache read, fresh input, and both write lifetimes", () => {
 	const model = {
 		...fauxProvider().getModel(),

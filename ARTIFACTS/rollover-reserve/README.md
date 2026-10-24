@@ -5,6 +5,20 @@ It changes documentation and regression tests only. No runtime speedup, provider
 saving is measured. The [explanation](../../docs/rollover-cache-cost.md) separates those claims from
 capacity arithmetic.
 
+## Parent review correction
+
+[The parent review](https://github.com/fitchmultz/pi-posthorse/pull/100#issuecomment-6385193130)
+identified a new arithmetic-only test with no production or dependency call. That self-comparison
+has been removed. No production seam replaces it. The current focused suite has three native
+`budgetFor`/`shouldCompact` threshold cases and one actual `calculateCost` contract case, next to
+three real-SDK rollover request/tail cases. The full current suite has 343 tests.
+
+The original comparative runs, profiles, failed attempts, and `verify.log` below describe head
+`ee9ce629c8f662887f6760e335b228dd4b76ce58` before that removal. Their recorded 344-test full suite,
+eight-test focused runs, and timing ranges are historical evidence, not counts for the corrected
+suite. They have not been rewritten. Removing the test does not change runtime/package bytes,
+reserve behavior, the native fixtures, or the arithmetic reproduction and artifact.
+
 ## Identities and authority
 
 - Admission `origin/main` resolved once to `b3d621451553eddfbdbdc1ad6ce76eda0e49a7a9`.
@@ -98,13 +112,13 @@ runtime source and dependency bytes. Their comparison checks unchanged behavior,
 Full synthetic Pi JSONL journals and raw CPU profiles remain retained in the task evidence archive.
 Latest-host CI also copies the three new native journals into its qualification artifact.
 
-## Alternating unchanged-runtime proof
+## Historical alternating unchanged-runtime proof
 
 [paired-results.json](paired-results.json) contains five alternating samples per side in the order
 A1, B1, A2, B2, A3, B3, A4, B4, A5, B5. [Raw logs](runs/) retain every Node-runner result.
 A is admission main with the candidate's test-only harness copied in. B is this candidate.
 The production files, lockfile, Node process options, and installed SDK graph are identical.
-Both sides pass 40/40 tests with 15 native reserve cases, 45 faux requests, 15 automatic boundaries,
+Both original sides passed 40/40 tests with 15 native reserve cases, 45 faux requests, 15 automatic boundaries,
 and zero errors, cancellations, or skipped tests. Every native case observes three deliberate requests
 and one boundary before and after. No provider request is made outside the faux provider.
 
@@ -114,7 +128,9 @@ journal I/O, and test execution. They are test-process durations, not rollover o
 The ranges overlap. No runtime performance difference is claimed, and no runtime code changed.
 [The load snapshot](load.txt) was taken after the native compiler jobs completed.
 
-The actual loop used separate cloud worktrees and this command for each side, alternating five times:
+The original loop used separate cloud worktrees and this command for each side, alternating five times.
+Reproducing its eight-test counters requires the test files from the initial head above; the corrected
+focused suite has seven tests because the arithmetic-only test is gone.
 
 ```sh
 cd "$side_worktree"
@@ -152,13 +168,26 @@ unavailable rather than inferred from a unit timing.
   not threshold. The second observed the last full-window request, before the next user request.
   Corrected inputs remain below the window and above all reserve thresholds, then explicitly resume.
   The positive suite passes. Those failed logs and generated synthetic journals remain retained.
-- An exact floating-point identity differed in the final binary digit. Its test now checks the
-  exact integer numerator relation. This is a fixture arithmetic correction, not a production fix.
+- An exact floating-point identity differed in the final binary digit. It was initially replaced
+  by an integer identity. Parent review then identified that neither version exercised an owner
+  contract, and the test was removed. Both failed attempts and the original passing runs are retained.
 - Two deliberate regressions in a disposable baseline worktree each failed all three native cases.
   One added changing usage to the guidance. The other dropped the retained tail.
   The original production files were restored before comparative proof.
 
-## Acceptance results before PR review
+## Acceptance after parent review
+
+The actual `npm run verify` exited 0 after the test removal. Its
+[complete follow-up log](verify-parent-fix.log) records 343 passed tests, zero failures or skips,
+and the required compiler, strict lint, policy, format, native SDK, renderer, and package gates.
+The three real reserve scenarios and the four owner-contract cases remain in that suite.
+Formatting and changed-hunk cleanup were checked again. No production file changed.
+
+Only invalidated acceptance was rerun locally. The original A/B runs, CPU profile, and deliberate
+mutation probes remain historical rather than being relabeled as measurements of the corrected
+harness. Current-head CI and enabled review checks must complete again for the follow-up commit.
+
+## Historical acceptance before parent review
 
 The actual `npm run verify` exited 0 with the corrected native engines. Its [full log](verify.log)
 records policy, strict lint, formatting, compiler checks, 344 passed tests, zero skipped tests,
