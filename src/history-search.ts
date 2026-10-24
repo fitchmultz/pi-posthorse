@@ -1,4 +1,5 @@
 import { relative, resolve } from "node:path";
+import type { LineMatcher } from "./session-lines.ts";
 import {
 	isReminderType,
 	requireValue,
@@ -12,7 +13,6 @@ import { shortKey } from "./message-text.ts";
 import {
 	needleLines,
 	prefilterNeedles,
-	type RawLine,
 	scopedSessionFiles,
 	sessionWindowEntries,
 } from "./session-files.ts";
@@ -202,14 +202,19 @@ async function scanArchive(
 		readonly source: string;
 		readonly query: string;
 		readonly signal?: AbortSignal;
-		readonly wanted?: (bytes: RawLine) => boolean;
+		readonly wanted?: LineMatcher;
 		readonly inContext: (entry: EntryLike) => boolean;
 	},
 	accumulator: SearchProgress,
 ): Promise<{ readonly groups: readonly (readonly HistoryHit[])[]; readonly skipped: number }> {
 	const collector = archiveCollector(accumulator);
 	let skipped = 0;
-	for await (const item of sessionWindowEntries(file, options.signal, options.wanted)) {
+	for await (const item of sessionWindowEntries(
+		file,
+		options.signal,
+		undefined,
+		options.wanted,
+	)) {
 		const hit = historyHit(item, options.query, options.source);
 		if (hit === undefined) {
 			continue;
