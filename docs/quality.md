@@ -4,6 +4,10 @@ Oxlint owns code-quality checks; Oxfmt owns formatting. TypeScript, behavior tes
 and code review remain independent gates. Correctness, maintainability and trustworthy enforcement
 have equal weight.
 
+`npm run verify` first checks Node 24 and the invoking npm's actual version against `packageManager`.
+The check applies to repository acceptance, not package installation. It does not change global
+tools or the extension's supported runtime floor. See [Correction safeguards](corrections.md).
+
 ## Commands
 
 Use Node 24 and npm 12.2.0. Install the committed dependencies with `npm ci --ignore-scripts`, then
@@ -11,19 +15,19 @@ prepare the corrected native quality engine before linting or opening the editor
 pinned sources, patches and reproducible builds are documented in
 [Corrected native checkers](quality-engine.md).
 
-| Command                  | Purpose                                                                                         |
-| ------------------------ | ----------------------------------------------------------------------------------------------- |
-| `npm run quality:policy` | Comment-aware suppression governance and actual maintained-source/project inventory             |
-| `npm run quality:probes` | Installed native CLI configuration, language scope, declaration isolation and regression probes |
-| `npm run lint`           | Policy check and strict code-quality/type-aware/compiler diagnostics                            |
-| `npm run lint:agent`     | Identical scope, structured agent diagnostics                                                   |
-| `npm run lint:fix`       | Identical scope and reviewed safe fixes; no dangerous-fix mode                                  |
-| `npm run format`         | Oxfmt writes maintained supported files                                                         |
-| `npm run format:check`   | Non-modifying formatting check                                                                  |
-| `npm run check`          | Canonical TypeScript compiler check, independently of Oxlint                                    |
-| `npm run check:compat`   | Compiler, unit/rendering tests and real native-host tests                                       |
-| `npm run build`          | npm package dry-run; this source-distributed extension has no emitted build                     |
-| `npm run verify`         | All acceptance gates, preserving each child process's failure status                            |
+| Command                  | Purpose                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `npm run quality:policy` | Parsed configuration coherence, comment-aware suppression governance and maintained-source/project inventory |
+| `npm run quality:probes` | Installed native CLI configuration, language scope, declaration isolation and regression probes              |
+| `npm run lint`           | Policy check and strict code-quality/type-aware/compiler diagnostics                                         |
+| `npm run lint:agent`     | Identical scope, structured agent diagnostics                                                                |
+| `npm run lint:fix`       | Identical scope and reviewed safe fixes; no dangerous-fix mode                                               |
+| `npm run format`         | Oxfmt writes maintained supported files                                                                      |
+| `npm run format:check`   | Non-modifying formatting check                                                                               |
+| `npm run check`          | Canonical TypeScript compiler check, independently of Oxlint                                                 |
+| `npm run check:compat`   | Compiler, unit/rendering tests and real native-host tests                                                    |
+| `npm run build`          | npm package dry-run; this source-distributed extension has no emitted build                                  |
+| `npm run verify`         | All acceptance gates, preserving each child process's failure status                                         |
 
 CI runs acceptance independently of the existing latest-official/latest-fork qualification. The
 release workflow calls that CI workflow, and `prepublishOnly` also requires acceptance.
