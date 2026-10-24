@@ -1,8 +1,10 @@
 # Rollover frequency and cache cost
 
-A smaller reserve delays automatic rollover, but the extra working space is not a measured saving.
-This investigation of [#98](https://github.com/fitchmultz/pi-posthorse/issues/98) keeps current behavior,
-settings, and prompt contracts unchanged. No reserve reduction is recommended from these data.
+The issue's 64k reserve targets rollover before an owner-specified input-pricing boundary.
+A smaller reserve delays rollover but can defeat that policy. Extra working space is not a measured
+saving. This investigation of [#98](https://github.com/fitchmultz/pi-posthorse/issues/98) keeps current
+behavior, settings, and prompt contracts unchanged. Reducing the 64k reserve is not recommended for
+this policy.
 
 ## What the reported session establishes
 
@@ -71,10 +73,15 @@ actual cache writes, and incremental billed cost are different quantities. A sma
 also reduce future cache-read volume. A proper cost comparison includes all requests and any
 recovery, retries, output, and changes in completion quality.
 
-## The 64k, 32k, and 24k reserve scenarios
+## The 64k policy and smaller-reserve counterfactuals
 
 Here `k` means 1,000 tokens. The 64,000-token reserve is the issue's setting, not Posthorse's default.
 Posthorse uses Pi's effective compaction policy. The inspected Pi default is 16,384 tokens.
+
+After [PR100](https://github.com/fitchmultz/pi-posthorse/pull/100) merged, Mitch clarified why he chose
+64,000 for his custom 335,000-token window: rollover should happen before 272,000 tokens because some
+providers he uses charge more above that input tier. This establishes his policy intent, not verified
+per-provider prices or invoices. The 32k and 24k settings below are counterfactuals, not recommendations.
 
 For context window `W` and reserve `R`, native Pi triggers at `used > W - R`.
 Posthorse reports the first integer crossing as `T = W - R + 1`.
@@ -85,6 +92,10 @@ At a 335,000-token configured window:
 |  64,000 |                     271,001 |    80.8958% |                63,999 |                 Baseline |
 |  32,000 |                     303,001 |    90.4481% |                31,999 |                 11.8081% |
 |  24,000 |                     311,001 |    92.8361% |                23,999 |                 14.7601% |
+
+The 64k line is 271,001, which is 999 tokens below 272,000. The 32k and 24k lines are both above that
+boundary. For routes whose applicable input-pricing tier rises above 272,000 tokens, these smaller
+reserves relax the tier-avoidance policy. They are not equivalent cheaper alternatives.
 
 The additional 32,000 or 40,000 tokens occupy 9.5522 or 11.9403 percentage points of the full window.
 Those percentages are not the relative delay from the old rollover line. The issue's "9-13% later"
@@ -103,7 +114,12 @@ Fewer boundaries can carry larger individual rewrites and leave large contexts i
 Provider cache lifetimes, long-context price tiers, large tool batches, recovery calls, and retries
 can change both cost and latency. The synthetic results do not predict either direction.
 
-## Why the smaller reserve is not a readiness guarantee
+## Why the rollover line is not a request cap
+
+The line is a trigger threshold, not a hard cap on provider-priced input. Discrete turns, large tool
+results, and queued input can overshoot it before an eligible pre-request compaction occurs.
+Provider input accounting and the allowance for output also affect physical request sizing.
+The 999-token gap does not guarantee that every request stays below the pricing boundary.
 
 The nominal margin at the first crossing is `R - 1`. An overshoot of `d` tokens leaves `R - 1 - d`
 before accounting for pending additions, desired output, or estimation error. Several tool results
