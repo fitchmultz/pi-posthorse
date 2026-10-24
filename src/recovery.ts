@@ -265,6 +265,7 @@ function skippedRecords(ids: readonly string[], limit: number): string | undefin
 function projectedToolEntries(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
+	retained: ReadonlySet<string>,
 ): RecoveryEntry[] {
 	const edits = contextEdits(entries);
 	return projected.flatMap(({ sourceEntry, messages }) =>
@@ -272,8 +273,8 @@ function projectedToolEntries(
 			.filter((message) => message.role === "assistant" || message.role === "toolResult")
 			.map((message) => ({
 				type: "message",
-				// Retention follows the source; history reads follow the effective replacement.
-				sourceEntryId: sourceEntry.id,
+				// Resolve retention before replacing identity with the history-read reference.
+				retained: retained.has(sourceEntry.id ?? ""),
 				id: edits.get(sourceEntry.id ?? "")?.id ?? sourceEntry.id,
 				message,
 			})),
@@ -442,7 +443,7 @@ export function buildAutoHandoff(
 		fixed.length > 0
 			? "Selected owner and coordination inputs (chronological):"
 			: emptyInputHeader;
-	const batch = recoverableToolResults(projectedToolEntries(entries, projected), retained);
+	const batch = recoverableToolResults(projectedToolEntries(entries, projected, retained));
 	const header = batchHeader(batch);
 	const minimum = [
 		preamble,

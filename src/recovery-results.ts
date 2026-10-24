@@ -9,7 +9,7 @@ import {
 	toolIdentity,
 } from "./message-text.ts";
 
-export type RecoveryEntry = EntryLike & { readonly sourceEntryId: string | undefined };
+export type RecoveryEntry = EntryLike & { readonly retained: boolean };
 type LinkedCall = { readonly entry: EntryLike; readonly block: ToolCallLike };
 export type RecoveryBlock = { readonly header: string; readonly text: string };
 export type RecoveryBatch = { readonly callId?: string; readonly blocks: readonly RecoveryBlock[] };
@@ -85,17 +85,12 @@ function resultBlock(
 /** Async receipts may arrive after a response; completion does not establish receipt delivery. */
 export function recoverableToolResults(
 	entries: readonly RecoveryEntry[],
-	retained: ReadonlySet<string>,
 ): RecoveryBatch | undefined {
 	const calls = callsById(entries);
 	const start = trailingStart(entries);
 	const results = entries.filter((entry, index) => {
 		const message = entry.message;
-		if (
-			message?.role !== "toolResult" ||
-			message.toolCallId === undefined ||
-			retained.has(entry.sourceEntryId ?? "")
-		) {
+		if (message?.role !== "toolResult" || message.toolCallId === undefined || entry.retained) {
 			return false;
 		}
 		const call = calls.get(message.toolCallId);

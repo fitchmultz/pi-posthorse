@@ -11,6 +11,17 @@ npm run verify                        # strict policy, lint, formatting, typeche
 npm run check:compat                   # typecheck, unit tests, and the real-SDK suite for the installed host
 ```
 
+Acceptance checks the actual invoking npm against `package.json`'s `packageManager` before running
+its child gates. Select that npm in the task environment; do not change a global installation just
+to verify this checkout. For an isolated selection without shell startup rewriting PATH:
+
+```bash
+BASH_ENV=/dev/null npm exec --yes --package=npm@12.2.0 -- npm run verify
+```
+
+The npm version in this example follows `packageManager`; update them together when upgrading.
+This verification-only check does not constrain normal npm or Git-package consumers' installers.
+
 Oxlint owns code quality; Oxfmt owns formatting. See [Code quality](quality.md) for coverage,
 exception governance, editor setup, and the enforced acceptance workflow.
 
