@@ -681,6 +681,7 @@ test("all-session history scopes project sessions and their nested subagents", a
 				const other = SessionManager.create(cwd, dir);
 				const id = other.appendMessage({ role: "user", content, timestamp: Date.now() });
 				other.appendMessage(fauxAssistantMessage("Archive saved."));
+				retainSession(dirname(manager.getCwd()), other, "archive");
 				const source = relative(manager.getSessionDir(), other.getSessionFile());
 				return {
 					id: `${id}@${createHash("sha256").update(source).digest("base64url")}`,
