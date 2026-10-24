@@ -46,6 +46,16 @@ Report configuration changes, formatting, maintainability improvements, checker 
 repairs, and runtime bugs separately. Report commands, results, coverage, exceptions, and
 verification limits accurately.
 
+## Repeated-correction safeguards
+
+| Rule                                                                                          | Enforcement                                                                                                                                                                                                      |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resolve receipt retention against its source before substituting an edited history reference. | `projectedToolEntries` owns the decision; `recoverableToolResults` receives a required boolean, never the retention set or source ID. The retained/discarded edited-receipt regression runs in `npm run verify`. |
+
+Evidence and historical failure reproduction: [Correction safeguards](docs/corrections.md).
+Keep this table paired with executable enforcement when a correction repeats. Remove obsolete
+rules rather than preserving instructions for paths the architecture has eliminated.
+
 ## Dependency maintenance
 
 - Frequently and proactively check releases and make appropriate upgrades across maintained packages and all runtime, development, build, test, and tool dependencies, prioritizing the latest stable official Pi and the intended maintained Pi fork. Routine in-scope maintenance needs no repeated approval; delivery remains subject to existing authority and gates. Keep the complete official-Pi path and distinguish any fork-enhanced capabilities.
