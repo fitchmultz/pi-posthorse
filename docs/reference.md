@@ -49,6 +49,34 @@ Reminder lookup follows by-id ancestry to the latest Posthorse boundary and the 
 
 Automatic recovery is an emergency input record, not proof of progress. The fresh model is told to restore notes and todo state, inspect history when needed, and verify live state before taking stateful or external action.
 
+### Idle sessions and cache expiry
+
+Posthorse has no idle timer, provider-cache deadline, or cache-expiry setting. The optional
+[pre-expiry scheduler proposed in #99](https://github.com/fitchmultz/pi-posthorse/issues/99) is
+not implemented. Pi's automatic compaction lifecycle remains the scheduling boundary for
+normal no-summary rollover, alongside Posthorse's completed-turn threshold fallback.
+
+An idle session below the ordinary threshold keeps its active context even after a provider cache
+expires. Its next request can therefore resend that large context at cold-input prices.
+Below-threshold cold resumes remain unresolved; this does not mean that earlier context reduction
+cannot save money. A pre-expiry policy would need a safe scheduling boundary and evidence of an
+advantage over a request-time decision: Posthorse's local rollover itself neither calls a model
+nor refreshes the provider cache.
+
+The public `ctx.compact()` entry point is manual compaction, not a non-aborting automatic
+checkpoint. In [official Pi 1.4.0](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/src/core/agent-session.ts)
+it aborts the current operation before `session_before_compact`; the
+[maintained fork](https://github.com/fitchmultz/pi/blob/44204bdc05cca88b74b55302bd2c324aff47dee0/packages/coding-agent/src/core/agent-session.ts)
+also cancels and joins native `runInBackground` tools there. Those tools can still be running
+while `isIdle()` is true. Cancelling in the later hook cannot undo that cancellation, and
+Posthorse deliberately leaves manual compaction on Pi's summarization path.
+
+For a deliberate clean context, ask the model to save task state and call `new_context` with a
+handoff. It retains no prior messages and still waits for its foreground batch to succeed.
+Use `/compact` when you want native summarization, with Pi's normal abort behavior; it is not a
+background-preserving substitute. No configuration migration is needed because the proposed
+scheduler was never shipped.
+
 ## Settings
 
 For the reserve's capacity, cache-cost, and headroom tradeoffs, see [Rollover frequency and cache cost](rollover-cache-cost.md). The owner's 64k reserve targets rollover before a 272k input-pricing boundary with a custom 335k window. The 32k and 24k examples cross that policy boundary and are counterfactuals, not equivalent cheaper settings or recommendations. The rollover threshold is not a hard request-size cap.

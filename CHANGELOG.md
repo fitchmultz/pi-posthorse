@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Clarify idle rollover and manual `/compact` boundaries (#99): the proposed cache-expiry
+  scheduler is not implemented, below-threshold cold resumes remain unresolved, and native manual
+  compaction can abort background work unlike Posthorse's automatic and explicit rollover paths.
+  No runtime behavior or settings change.
+
 ## 0.10.0
 
 - Require official Pi 1.3.0 or later, or the maintained `fitchmultz/pi` fork with the same

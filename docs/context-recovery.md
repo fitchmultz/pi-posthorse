@@ -80,9 +80,15 @@ the nudge.
 
 `new_context` is admitted only after its own successful callback and successful foreground sibling
 tools; errors, aborted turns or a handoff that no longer fits can prevent commitment. Its request
-card is not confirmation. Look for Pi's committed compaction card. Background work outside that
-foreground batch is neither stopped nor serialized by rollover; inspect its actual status before
-repeating an operation.
+card is not confirmation. Look for Pi's committed compaction card. Posthorse's automatic and
+explicit rollovers neither stop nor serialize background work outside that foreground batch;
+inspect its actual status before repeating an operation. Manual `/compact` instead follows Pi's
+abort behavior, which cancels native background tools on the maintained fork.
+
+Idle time and provider-cache expiry do not trigger a Posthorse rollover. Below-threshold idle
+sessions keep their context, so a cold resume can still send a large request. See
+[idle sessions and cache expiry](reference.md#idle-sessions-and-cache-expiry) for the scheduling
+limitation and the supported explicit alternatives.
 
 Cancellation is not a rollback guarantee. In official Pi 1.3.0, explicit resets and the eager
 turn-end threshold fallback return boundary drafts before later handlers finish. The host commits
