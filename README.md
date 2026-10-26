@@ -27,6 +27,10 @@ Posthorse can nudge the model to update task notes before rollover, then continu
 
 Automatic rollover retains a safe recent-message tail using Pi's `compaction.keepRecentTokens`, alongside a bounded recovery record for discarded inputs and tool evidence. It never calls a summarization model. The model must restore notes and check live state before it continues. Optional `new_context` deliberately retains no prior messages; manual `/compact` uses Pi's normal summarization.
 
+Posthorse does not schedule rollover when a provider cache expires. An idle session below the
+rollover threshold keeps its context; use an explicit `new_context` when a deliberate clean reset
+is useful. See [idle sessions and cache expiry](docs/reference.md#idle-sessions-and-cache-expiry).
+
 Safe recent-tail retention and the notes-only reminder are part of the [0.10.0 changes](CHANGELOG.md#0100). Match these docs to your installed version using the changelog; default-branch documentation may describe changes not yet published.
 
 Recoverable history is not guaranteed model recall. See the [practical guarantees and limits](docs/context-recovery.md) for the stock-Pi comparison, search scope, checkpoints, privacy, concurrency and cost, or the [rollover reference](docs/reference.md#how-it-works) for implementation details.
@@ -60,7 +64,7 @@ Two Posthorse copies can register the same tools and compete for rollover. Keep 
 
 Multiple compaction-policy extensions can make rollover depend on load order. Enable only one.
 
-Oversized input and some overflow or truncated responses can reach the provider before automatic recovery. Save task state in notes. Background work outside the foreground tool batch continues across rollover.
+Oversized input and some overflow or truncated responses can reach the provider before automatic recovery. Save task state in notes. Posthorse's automatic and explicit rollovers do not stop background work outside the foreground tool batch. Manual `/compact` follows Pi's abort behavior instead.
 
 See [size limits and extension order](docs/reference.md#settings).
 Check the [legacy-session details](docs/reference.md#official-pi-and-the-fork) before you move old fork sessions to official Pi.
