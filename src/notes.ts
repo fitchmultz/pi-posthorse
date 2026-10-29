@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, type Stats } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, sep } from "node:path";
 import { setImmediate } from "node:timers/promises";
@@ -42,8 +42,10 @@ const SEARCH_FILE_BYTES = 1024 * 1024;
 /** Overlapping reads cut a full search of a 212,000-file notes tree from 39 s to 14 s. */
 const SEARCH_BATCH = 16;
 /**
- * Stats overlapped per batch. On a 212,751-note tree, 16, 64 and 256 took equal time within host
- * noise. The walk enters one folder at a time, so this also bounds pending stats at any depth.
+ * Maximum explicit `stat` calls overlapped per batch. On a 212,751-note tree, 16, 64 and 256 took
+ * equal time within host noise. The walk enters one folder at a time, so this bounds our pending
+ * `stat` calls at any depth. On filesystems that report unknown entry types, Node 24's
+ * `readdir({ withFileTypes: true })` also issues its own `lstat` for every entry at once.
  */
 const WALK_BATCH = 64;
 /** Formatting all 212,751 rows of one listing at once stalled Pi for 156-163 ms. */
@@ -69,23 +71,34 @@ async function statIfPresent(path: string) {
 	}
 }
 /** A folder's present entries in listing order. */
-async function folderEntries(directory: string, signal: AbortSignal | undefined) {
-	const names = await readdir(directory);
-	const entries: Array<{ readonly path: string; readonly info: Stats }> = [];
-	for (let start = 0; start < names.length; start += WALK_BATCH) {
+async function* folderEntries(directory: string, signal: AbortSignal | undefined) {
+	const entries = await readdir(directory, { withFileTypes: true });
+	let start = 0;
+	while (start < entries.length) {
 		signal?.throwIfAborted();
-		const paths = names.slice(start, start + WALK_BATCH).map((name) => join(directory, name));
-		// Each batch overlaps its stats, then keeps their listing order.
+		const batch = entries.slice(start, start + WALK_BATCH);
+		const firstFolder = batch.findIndex(
+			(entry) => entry.isDirectory() || entry.isSymbolicLink(),
+		);
+		const paths = batch
+			.slice(0, firstFolder === -1 ? batch.length : firstFolder + 1)
+			.map((entry) => join(directory, entry.name));
+		// Stats overlap only up to the next entry that may be a folder.
 		// oxlint-disable-next-line no-await-in-loop
 		const infos = await Promise.all(paths.map(statIfPresent));
 		for (const [index, path] of paths.entries()) {
+			start += 1;
 			const info = infos[index];
 			if (info !== undefined) {
-				entries.push({ path, info });
+				yield { path, info };
+			}
+			if (info?.isDirectory() === true) {
+				// Stat later entries only after this folder's subtree is walked, discarding any
+				// already taken, so entries removed meanwhile are skipped.
+				break;
 			}
 		}
 	}
-	return entries;
 }
 /** Files depth-first in directory-listing order, yielding between filesystem calls. */
 async function walk(
@@ -100,10 +113,8 @@ async function walk(
 	}
 	const next = [...ancestors, root];
 	const files: NoteFile[] = [];
-	for (const { path, info } of await folderEntries(directory, signal)) {
+	for await (const { path, info } of folderEntries(directory, signal)) {
 		if (info.isDirectory()) {
-			// One folder at a time keeps the order and bounds pending calls at any depth.
-			// oxlint-disable-next-line no-await-in-loop
 			for (const file of await walk(path, signal, next)) {
 				files.push(file);
 			}

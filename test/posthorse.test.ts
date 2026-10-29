@@ -15,10 +15,13 @@ import {
 	unlinkSync,
 	utimesSync,
 	writeFileSync,
+	type StatOptions,
 } from "node:fs";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { createEditTool, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fixturePolicy, loadFixture, requireValue, record, stringValue } from "./harness.ts";
 import { createPosthorse } from "../index.ts";
@@ -3532,6 +3535,69 @@ test("notes list and search follow aliases while skipping cycles and missing tar
 	}
 });
 
+/** Runs `during` while each completed `fs.promises.stat` also reports its path to `observe`. */
+async function withObservedStats<T>(
+	observe: (path: string) => void,
+	during: () => Promise<T>,
+): Promise<T> {
+	const { stat } = fsPromises;
+	const observed = mock.method(
+		fsPromises,
+		"stat",
+		async (path: string, options?: Readonly<StatOptions>) => {
+			const info = await stat(path, options);
+			observe(path);
+			return info;
+		},
+	);
+	syncBuiltinESMExports();
+	try {
+		return await during();
+	} finally {
+		observed.mock.restore();
+		syncBuiltinESMExports();
+	}
+}
+
+test("notes list and search skip entries removed while an earlier folder is walked", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-notes-cleanup-"));
+	try {
+		const root = join(dir, ".pi", "notes");
+		mkdirSync(join(root, "a-many"), { recursive: true });
+		writeFileSync(join(root, "a-many", "first.md"), "needle in a-many");
+		const { tools, context } = await setup();
+		// Another session's cleanup removes later entries once the walk is inside a-many.
+		const cleanupDuring = async (params: Readonly<Record<string, unknown>>) => {
+			mkdirSync(join(root, "z-doomed"), { recursive: true });
+			writeFileSync(join(root, "z-doomed", "note.md"), "needle in a removed folder");
+			writeFileSync(join(root, "z-doomed.md"), "needle in a removed note");
+			let removed = false;
+			const result = await withObservedStats(
+				(path) => {
+					if (path === join(root, "a-many", "first.md") && !removed) {
+						rmSync(join(root, "z-doomed"), { recursive: true });
+						rmSync(join(root, "z-doomed.md"));
+						removed = true;
+					}
+				},
+				async () => run(tools, "notes", params, { ...context, cwd: dir }),
+			);
+			assert.equal(removed, true, "the cleanup ran during the walk");
+			return toolText(result);
+		};
+		assert.match(
+			await cleanupDuring({ op: "list" }),
+			/^Notes directory: .+\na-many\/first\.md {2}16B {2}\S+$/,
+		);
+		assert.equal(
+			await cleanupDuring({ op: "search", query: "needle" }),
+			"a-many/first.md:1: needle in a-many",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("notes list, folder reads and search let Pi keep running and stop when cancelled mid-walk", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-notes-walk-"));
 	try {
@@ -3561,13 +3627,19 @@ test("notes list, folder reads and search let Pi keep running and stop when canc
 			});
 			const result = toolText(await execute(params, new AbortController().signal));
 			assert.equal(turned, true, `${JSON.stringify(params)} let Pi run other work meanwhile`);
-
-			const controller = new AbortController();
-			setImmediate(() => {
-				controller.abort();
-			});
-			await assert.rejects(execute(params, controller.signal), { name: "AbortError" });
 			return result;
+		};
+		const cancelMidWalk = async (params: Readonly<Record<string, unknown>>) => {
+			const controller = new AbortController();
+			await withObservedStats(
+				(path) => {
+					if (path.endsWith("note-0.md")) {
+						controller.abort();
+					}
+				},
+				async () =>
+					assert.rejects(execute(params, controller.signal), { name: "AbortError" }),
+			);
 		};
 		const listed = /^project\/topic-\d+\/note-\d+\.md {2}10B /m;
 		assert.match(await exercise({ op: "list" }), listed);
@@ -3576,6 +3648,12 @@ test("notes list, folder reads and search let Pi keep running and stop when canc
 			await exercise({ op: "search", query: "checkpoint" }),
 			/^project\/topic-\d+\/note-\d+\.md:1: checkpoint$/m,
 		);
+
+		// A walk that continues after the abort reaches this loop and fails with ELOOP instead.
+		symlinkSync("zz-loop", join(root, "zz-loop"));
+		await cancelMidWalk({ op: "list" });
+		await cancelMidWalk({ op: "read", path: "project" });
+		await cancelMidWalk({ op: "search", query: "checkpoint" });
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
