@@ -3532,6 +3532,55 @@ test("notes list and search follow aliases while skipping cycles and missing tar
 	}
 });
 
+test("notes list, folder reads and search let Pi keep running and stop when cancelled mid-walk", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-notes-walk-"));
+	try {
+		const root = join(dir, ".pi", "notes", "project");
+		for (let topic = 0; topic < 20; topic++) {
+			mkdirSync(join(root, `topic-${topic}`), { recursive: true });
+			for (let note = 0; note < 50; note++) {
+				writeFileSync(join(root, `topic-${topic}`, `note-${note}.md`), "checkpoint");
+			}
+		}
+		const { tools, context } = await setup();
+		const notes = requireValue(tools.get("notes"));
+		const execute = (params: Readonly<Record<string, unknown>>, signal: AbortSignal) =>
+			notes.execute(
+				"id",
+				params,
+				signal,
+				() => {
+					// Listings do not stream updates.
+				},
+				{ ...context, cwd: dir },
+			);
+		const exercise = async (params: Readonly<Record<string, unknown>>) => {
+			let turned = false;
+			setImmediate(() => {
+				turned = true;
+			});
+			const result = toolText(await execute(params, new AbortController().signal));
+			assert.equal(turned, true, `${JSON.stringify(params)} let Pi run other work meanwhile`);
+
+			const controller = new AbortController();
+			setImmediate(() => {
+				controller.abort();
+			});
+			await assert.rejects(execute(params, controller.signal), { name: "AbortError" });
+			return result;
+		};
+		const listed = /^project\/topic-\d+\/note-\d+\.md {2}10B /m;
+		assert.match(await exercise({ op: "list" }), listed);
+		assert.match(await exercise({ op: "read", path: "project" }), listed);
+		assert.match(
+			await exercise({ op: "search", query: "checkpoint" }),
+			/^project\/topic-\d+\/note-\d+\.md:1: checkpoint$/m,
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("notes list newest first with sizes, read folders as listings, and search only text notes", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-notes-listing-"));
 	try {

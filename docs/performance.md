@@ -32,6 +32,40 @@ are retained in PR #104's final evidence commit `32230f5`, separately from the d
 The [original evidence](https://github.com/fitchmultz/pi-posthorse/blob/1ac82580b08b91cbee16113dda44cede9b76687b/.evidence/issue-102-measurements.tar.gz)
 remains in PR #104's evidence commit `1ac8258`.
 
+## Notes listing responsiveness, 2026-10-29
+
+Notes `list`, folder reads and `search` used to walk the notes tree with synchronous filesystem
+calls, then format every listing row in one step. Pi could not draw or take input until the walk
+finished, and cancelling did not stop a listing. The walk now uses Node's asynchronous filesystem
+calls, and listings format rows in batches between event-loop turns.
+
+Workload: a generated tree with 212,751 notes, the count of a real notes tree measured earlier.
+It has about 100 short notes per folder. Host: Apple M5 Pro (18 cores), macOS 27.0.1 on APFS,
+Node 24.22.1, official Pi 1.3.0 SDK, real registered `notes` tool. The host was shared, with load
+averages of 18-32, so ranges are wide. "Longest pause" is the longest gap between 1 ms timer ticks
+during the call; a fully synchronous call is one pause as long as the call.
+
+| Call (alternating runs)             | Before: total, ms           | Before: longest pause | After: total, ms            | After: longest pause |
+| ----------------------------------- | --------------------------- | --------------------- | --------------------------- | -------------------- |
+| `list`, 212,751 notes (3 pairs)     | 4,352 median [3,152, 5,307] | the whole call        | 4,405 median [3,651, 4,657] | 16-22 ms             |
+| Folder read, 10,000 notes (3 pairs) | 158 median [134, 159]       | the whole call        | 156 median [141, 227]       | 8-10 ms              |
+| `search` with no match (1 run each) | 40,026                      | 3,724 ms              | 37,979                      | 14 ms                |
+
+Total time did not change beyond host noise; the gain is responsiveness, not speed. Formatting all
+212,751 rows in one step paused Pi for 156-163 ms, which is why rows are batched. Stat batches of
+16, 64 and 256 took equal time within noise.
+
+Output is unchanged: every page of `list`, a folder read and `search` hashed identically before and
+after on a 5,000-note tree with timestamp ties, an alias folder, a symlink cycle and a dangling
+link. Sampled first, middle and last pages of the 212,751-note listing also matched. Missing
+folders still list as empty; permission and symlink-loop errors are unchanged. Cancelling on the
+first event-loop turn now stops `list`, folder reads and `search`, including searches whose notes
+are all over 1 MiB and so are never read.
+
+Limits: the tree is synthetic, with small notes and uniform folders. The real tree was not
+measured. Sorting all entries newest-first remains one synchronous step; a separate measurement
+with shuffled timestamps put it at 35-40 ms for 212,751 entries.
+
 ## Historical optimization pass
 
 Baselines and results from the 0.9.2 optimization pass. Measured on an Apple M5 Pro (18 cores)
