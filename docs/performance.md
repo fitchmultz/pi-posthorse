@@ -32,6 +32,68 @@ are retained in PR #104's final evidence commit `32230f5`, separately from the d
 The [original evidence](https://github.com/fitchmultz/pi-posthorse/blob/1ac82580b08b91cbee16113dda44cede9b76687b/.evidence/issue-102-measurements.tar.gz)
 remains in PR #104's evidence commit `1ac8258`.
 
+## Notes listing responsiveness, 2026-10-29
+
+Notes `list`, folder reads and `search` used to walk the notes tree with synchronous filesystem
+calls, then format every listing row in one step. Pi could not draw or take input until the walk
+finished, and cancelling did not stop a listing. The walk now uses Node's asynchronous filesystem
+calls, and listings format rows in batches between event-loop turns. Within a folder, up to 64
+entries are stat'd together, and a batch ends at the next entry that may be a folder. Entries after
+a folder are listed from stats taken after its subtree has been walked, as in the synchronous walk,
+so a note or folder removed meanwhile, for example by another session, is skipped instead of
+failing the call or appearing as a stale row.
+
+Workload: a generated tree with 212,751 notes, the count of a real notes tree measured earlier.
+It has about 100 short notes per folder. Host: Apple M5 Pro (18 cores), macOS 27.0.1 on APFS,
+Node 24.22.1, official Pi 1.3.0 SDK, real registered `notes` tool. The host was shared, with load
+averages of 27-30 during these runs, so ranges are wide. "Longest pause" is the longest gap
+between 1 ms timer ticks during the call; a fully synchronous call is one pause as long as the
+call. "CPU" is the process's user plus system time, including Node's filesystem worker threads.
+
+| Call (3 alternating runs each) | Before: total, ms           | Before: CPU, ms             | Before: longest pause | After: total, ms            | After: CPU, ms              | After: longest pause |
+| ------------------------------ | --------------------------- | --------------------------- | --------------------- | --------------------------- | --------------------------- | -------------------- |
+| `list`, 212,751 notes          | 4,326 median [3,229, 6,126] | 3,145 median [3,029, 3,785] | the whole call        | 2,913 median [2,899, 3,071] | 7,288 median [7,104, 7,335] | 16-18 ms             |
+| Folder read, 10,000 notes      | 170 median [137, 193]       | 188 median [159, 209]       | the whole call        | 140 median [85, 145]        | 375 median [199, 380]       | 8-9 ms               |
+
+The gain is responsiveness, and it costs CPU time: in these runs the asynchronous walk used about
+twice the CPU of the synchronous walk, 7.1-7.3 s against 3.0-3.8 s for `list`. CPU time also
+varied across runs: four `list` runs of the final walk with stat batches of 16, 64 and 256
+used 3.5-7.8 s, including 3.6 s and 7.8 s for the two runs with 16. `list` totals were lower after
+in all three runs and folder-read totals overlapped, but three runs on a loaded host do not
+establish a speedup.
+
+`search` was not re-measured on the final walk. On an earlier revision of this change, with the
+same read phase, one unpaired no-match search of this tree took 40,026 ms before and 37,979 ms
+after, and its longest pause fell from 3,724 ms to 14 ms. One run each cannot compare search
+totals. These searches read tiny notes that never match. The real 212,751-file tree holds 44 GB,
+and its recorded failure was a broad search with many matches (commit `9077fe5`), so these timings
+do not predict searches there.
+
+Formatting all 212,751 rows in one step paused Pi for 156-163 ms, which is why rows are batched.
+Stat batches of 16, 64 and 256 took equal time within noise, in an earlier sweep and in one round
+on the final walk.
+
+Output is unchanged: every page of `list`, a folder read and `search` hashed identically before and
+after on a 5,000-note tree with timestamp ties, an alias folder, a symlink cycle and a dangling
+link. Sampled first, middle and last pages of the 212,751-note listing also matched. Missing
+folders still list as empty. A single permission or symlink-loop error is reported as before. When
+several entries stat'd in the same batch fail at once, the call may report a different one of those
+errors than the synchronous walk, which reported the first in listing order. Cancelling now stops
+`list`, folder reads and `search` mid-walk, and stops searches whose notes are all over 1 MiB and
+so are never read.
+
+Limits: the tree is synthetic, with small notes and uniform folders, and the new walk was not
+measured on a real tree. A separate read-only replay of the old synchronous walk and sort over a
+real notes tree, currently 29,210 files, took 1,269 and 1,344 ms; this shows the blocking on real
+data but does not measure search. Sorting all entries newest-first remains one synchronous step; a
+separate measurement with shuffled timestamps put it at 35-40 ms for 212,751 entries. Folder
+candidates come from the entry types that the directory read reports. On a filesystem that reports
+unknown entry types, Node's `readdir({ withFileTypes: true })` issues its own `lstat` for every
+entry of the folder at once, outside the 64-stat limit, and an entry removed between the directory
+read and that `lstat` fails the call with `ENOENT` instead of being skipped (Node 24.22.1
+`lib/internal/fs/promises.js:137,1658-1681` and `lib/internal/fs/utils.js:245-277`). The APFS volume
+measured here reported a type for every entry.
+
 ## Historical optimization pass
 
 Baselines and results from the 0.9.2 optimization pass. Measured on an Apple M5 Pro (18 cores)

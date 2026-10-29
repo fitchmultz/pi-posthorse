@@ -1,13 +1,7 @@
-import {
-	appendFileSync,
-	existsSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	realpathSync,
-	statSync,
-} from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, sep } from "node:path";
+import { setImmediate } from "node:timers/promises";
 import {
 	formatSize,
 	withFileMutationQueue,
@@ -18,6 +12,7 @@ import { Type } from "typebox";
 import { toolCards } from "../ui.ts";
 import {
 	MAX_PAGE_CHARS,
+	isRecord,
 	requireValue,
 	textResult,
 	type PolicyContext,
@@ -36,10 +31,25 @@ export type NotesParams = {
 };
 type NoteFile = { readonly path: string; readonly size: number; readonly mtimeMs: number };
 type NoteHits = { readonly rows: string[]; readonly more: boolean; readonly skipped: number };
+/** Paged operations take a fresh policy snapshot after their filesystem awaits. */
+type NotesAccess = {
+	readonly host: () => PolicyContext;
+	readonly pages: PageAccess;
+	readonly signal: AbortSignal | undefined;
+};
 /** Larger files are logs or evidence rather than notes; reading them would dominate a search. */
 const SEARCH_FILE_BYTES = 1024 * 1024;
 /** Overlapping reads cut a full search of a 212,000-file notes tree from 39 s to 14 s. */
 const SEARCH_BATCH = 16;
+/**
+ * Maximum explicit `stat` calls overlapped per batch. On a 212,751-note tree, 16, 64 and 256 took
+ * equal time within host noise. The walk enters one folder at a time, so this bounds our pending
+ * `stat` calls at any depth. On filesystems that report unknown entry types, Node 24's
+ * `readdir({ withFileTypes: true })` also issues its own `lstat` for every entry at once.
+ */
+const WALK_BATCH = 64;
+/** Formatting all 212,751 rows of one listing at once stalled Pi for 156-163 ms. */
+const FORMAT_BATCH = 10_000;
 /** Search rescans up to the requested offset, so this also caps the matches one call keeps. */
 const SEARCH_OFFSET_LIMIT = 1_000_000;
 function safeJoin(dir: string, path: string): string {
@@ -49,46 +59,105 @@ function safeJoin(dir: string, path: string): string {
 	}
 	return join(dir, relative);
 }
-function walk(directory: string, ancestors: readonly string[] = []): NoteFile[] {
-	const root = realpathSync(directory);
+/** Like `statSync(path, { throwIfNoEntry: false })`: an entry deleted mid-walk is skipped. */
+async function statIfPresent(path: string) {
+	try {
+		return await stat(path);
+	} catch (error) {
+		if (isRecord(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+			return;
+		}
+		throw error;
+	}
+}
+/** A folder's present entries in listing order. */
+async function* folderEntries(directory: string, signal: AbortSignal | undefined) {
+	const entries = await readdir(directory, { withFileTypes: true });
+	let start = 0;
+	while (start < entries.length) {
+		signal?.throwIfAborted();
+		const batch = entries.slice(start, start + WALK_BATCH);
+		const firstFolder = batch.findIndex(
+			(entry) => entry.isDirectory() || entry.isSymbolicLink(),
+		);
+		const paths = batch
+			.slice(0, firstFolder === -1 ? batch.length : firstFolder + 1)
+			.map((entry) => join(directory, entry.name));
+		// Stats overlap only up to the next entry that may be a folder.
+		// oxlint-disable-next-line no-await-in-loop
+		const infos = await Promise.all(paths.map(statIfPresent));
+		for (const [index, path] of paths.entries()) {
+			start += 1;
+			const info = infos[index];
+			if (info !== undefined) {
+				yield { path, info };
+			}
+			if (info?.isDirectory() === true) {
+				// Stat later entries only after this folder's subtree is walked, discarding any
+				// already taken, so entries removed meanwhile are skipped.
+				break;
+			}
+		}
+	}
+}
+/** Files depth-first in directory-listing order, yielding between filesystem calls. */
+async function walk(
+	directory: string,
+	signal: AbortSignal | undefined,
+	ancestors: readonly string[] = [],
+): Promise<NoteFile[]> {
+	signal?.throwIfAborted();
+	const root = await realpath(directory);
 	if (ancestors.includes(root)) {
 		return [];
 	}
 	const next = [...ancestors, root];
-	return readdirSync(directory).flatMap((file) => {
-		const path = join(directory, file);
-		const info = statSync(path, { throwIfNoEntry: false });
-		if (info === undefined) {
-			return [];
+	const files: NoteFile[] = [];
+	for await (const { path, info } of folderEntries(directory, signal)) {
+		if (info.isDirectory()) {
+			for (const file of await walk(path, signal, next)) {
+				files.push(file);
+			}
+		} else {
+			files.push({ path, size: info.size, mtimeMs: info.mtimeMs });
 		}
-		return info.isDirectory()
-			? walk(path, next)
-			: [{ path, size: info.size, mtimeMs: info.mtimeMs }];
-	});
+	}
+	return files;
 }
-function notesUnder(target: string): NoteFile[] {
-	const info = statSync(target, { throwIfNoEntry: false });
+async function notesUnder(target: string, signal: AbortSignal | undefined): Promise<NoteFile[]> {
+	const info = await statIfPresent(target);
+	signal?.throwIfAborted();
 	if (info === undefined) {
 		return [];
 	}
 	const files = info.isDirectory()
-		? walk(target)
+		? await walk(target, signal)
 		: [{ path: target, size: info.size, mtimeMs: info.mtimeMs }];
+	signal?.throwIfAborted();
 	return files.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
-function listNotes(
+async function listNotes(
 	dir: string,
 	params: NotesParams,
-	host: PolicyContext,
-	pages: PageAccess,
-): TextResult {
+	access: NotesAccess,
+): Promise<TextResult> {
+	const { host, pages, signal } = access;
 	const folder = params.path;
 	const target = folder === undefined || folder === "" ? dir : safeJoin(dir, folder);
-	const rows = notesUnder(target).map(
-		(file) =>
-			`${file.path.slice(dir.length + 1)}  ${formatSize(file.size)}  ${new Date(file.mtimeMs).toISOString().slice(0, 16)}Z`,
-	);
-	return pages.notes(host, {
+	const files = await notesUnder(target, signal);
+	const rows: string[] = [];
+	for (let start = 0; start < files.length; start += FORMAT_BATCH) {
+		// Pi gets an event-loop turn before each batch of rows.
+		// oxlint-disable-next-line no-await-in-loop
+		await setImmediate();
+		signal?.throwIfAborted();
+		for (const file of files.slice(start, start + FORMAT_BATCH)) {
+			rows.push(
+				`${file.path.slice(dir.length + 1)}  ${formatSize(file.size)}  ${new Date(file.mtimeMs).toISOString().slice(0, 16)}Z`,
+			);
+		}
+	}
+	return pages.notes(host(), {
 		rows,
 		offset: params.offset ?? 0,
 		kind: "notes-list",
@@ -99,9 +168,9 @@ function listNotes(
 async function readNote(
 	dir: string,
 	params: NotesParams,
-	getHost: () => PolicyContext,
-	pages: PageAccess,
+	access: NotesAccess,
 ): Promise<TextResult> {
+	const { pages } = access;
 	const relative = requireValue(params.path, "path", params.op);
 	const path = safeJoin(dir, relative);
 	const info = statSync(path, { throwIfNoEntry: false });
@@ -109,7 +178,7 @@ async function readNote(
 		throw new Error(`No note at ${relative}. Use op "list" to see available notes.`);
 	}
 	if (info.isDirectory()) {
-		return listNotes(dir, params, getHost(), pages);
+		return listNotes(dir, params, access);
 	}
 	if (await isBinaryFile(path)) {
 		throw new Error(
@@ -122,7 +191,7 @@ async function readNote(
 		throw new Error(`Offset ${offset} is past the end of ${relative} (${text.length} chars).`);
 	}
 	const header = `File: ${path}\n`;
-	const host = getHost();
+	const host = access.host();
 	const chars = pages.size(host, { offset }) - header.length;
 	if (chars <= 0) {
 		pages.error(
@@ -197,11 +266,13 @@ async function noteHits(
 	limit: number,
 	signal?: AbortSignal,
 ): Promise<NoteHits> {
-	const notes = notesUnder(dir);
+	const notes = await notesUnder(dir, signal);
 	const rows: string[] = [];
 	let length = -1;
 	let skipped = 0;
 	for (let start = 0; start < notes.length; start += SEARCH_BATCH) {
+		// A batch of notes over 1 MiB reads nothing that would notice cancellation.
+		signal?.throwIfAborted();
 		// Batches keep note order, so a search stops within one batch of the page limit.
 		// oxlint-disable-next-line no-await-in-loop
 		const batch = await Promise.all(
@@ -231,21 +302,20 @@ async function noteHits(
 async function searchNotes(
 	dir: string,
 	params: NotesParams,
-	access: { readonly host: PolicyContext; readonly pages: PageAccess },
-	signal?: AbortSignal,
+	access: NotesAccess,
 ): Promise<TextResult> {
 	const { host, pages } = access;
 	const query = requireValue(params.query, "query", params.op);
 	const offset = params.offset ?? 0;
 	if (offset >= SEARCH_OFFSET_LIMIT) {
 		pages.error(
-			host,
+			host(),
 			`Notes search pages end before offset ${SEARCH_OFFSET_LIMIT}; search for something more specific.`,
 		);
 	}
-	const hits = await noteHits(dir, query.toLowerCase(), offset + MAX_PAGE_CHARS, signal);
+	const hits = await noteHits(dir, query.toLowerCase(), offset + MAX_PAGE_CHARS, access.signal);
 	const skipped = hits.skipped === 1 ? "1 note" : `${hits.skipped} notes`;
-	return pages.notes(host, {
+	return pages.notes(host(), {
 		rows: hits.rows,
 		more: hits.more,
 		offset,
@@ -297,17 +367,18 @@ export function registerNotes(
 		// oxlint-disable-next-line max-params
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const dir = notesDir(ctx.cwd);
+			const access: NotesAccess = { host: () => policy(ctx), pages, signal };
 			switch (params.op) {
 				case "list":
-					return listNotes(dir, params, policy(ctx), pages);
+					return listNotes(dir, params, access);
 				case "read":
-					return readNote(dir, params, () => policy(ctx), pages);
+					return readNote(dir, params, access);
 				case "write":
 					return writeNote(dir, params, signal);
 				case "append":
 					return appendNote(dir, params, signal);
 				case "search":
-					return searchNotes(dir, params, { host: policy(ctx), pages }, signal);
+					return searchNotes(dir, params, access);
 			}
 		},
 	});
