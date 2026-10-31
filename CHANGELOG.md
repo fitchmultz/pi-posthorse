@@ -2,11 +2,15 @@
 
 ## Unreleased
 
+## 0.10.1
+
 - Keep Pi responsive while notes `list`, folder reads and `search` walk a large notes tree. The
   walk now uses asynchronous filesystem calls and listings format rows in batches, so a
   212,751-note listing no longer freezes the interface for seconds. Cancelling now stops these
   calls mid-walk. Output, order and paging are unchanged. Measured listing times did not rise, but
   the walk used about twice the CPU time. See [performance](docs/performance.md).
+- Prefilter large archive records in bounded segments and normalize active-context messages only
+  for history search candidates. Defer page-tool estimates when Pi reports native usage.
 - Clarify idle rollover and manual `/compact` boundaries (#99): the proposed cache-expiry
   scheduler is not implemented, below-threshold cold resumes remain unresolved, and native manual
   compaction can abort background work unlike Posthorse's automatic and explicit rollover paths.
