@@ -71,7 +71,6 @@ function run(
 		cwd,
 		env,
 		encoding: "utf8",
-		timeout: 600_000,
 		maxBuffer: 64 * 1024 * 1024,
 	});
 	if (result.error !== undefined) {
