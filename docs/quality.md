@@ -29,8 +29,11 @@ pinned sources, patches and reproducible builds are documented in
 | `npm run build`          | npm package dry-run; this source-distributed extension has no emitted build                                  |
 | `npm run verify`         | All acceptance gates, preserving each child process's failure status                                         |
 
-CI runs acceptance independently of the existing latest-official/latest-fork qualification. The
-release workflow calls that CI workflow, and `prepublishOnly` also requires acceptance.
+CI runs acceptance independently of the existing latest-official/latest-fork qualification. Its
+reusable release-qualification workflow checks out the supplied candidate commit and runs
+`npm run verify`. It exercises the negative controls in a disposable worktree and retains the diagnostics
+and both safe-fix diffs as CI evidence. The release workflow supplies its planned source commit to
+CI, and `prepublishOnly` also requires acceptance.
 
 ## Coverage and limits
 
