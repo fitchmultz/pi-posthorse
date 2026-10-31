@@ -28,6 +28,7 @@ jobs:
     if: needs.plan.outputs.release == 'true'
     uses: ./.github/workflows/ci.yml
     with:
+      source-ref: ${{ needs.plan.outputs.source }}
       official-version: ${{ needs.plan.outputs.official-version }}
       fork-ref: ${{ needs.plan.outputs.fork-ref }}
 
