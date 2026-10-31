@@ -2,11 +2,11 @@
 
 Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks without an automatic model-generated summary. Stock Pi already preserves the session journal and retains a recent tail during compaction; Posthorse adds explicit notes and history retrieval, with a handoff or bounded recovery record instead of the automatic summary.
 
-![A Pi conversation rolls into a fresh context window. Task notes and the complete session transcript remain available.](.github/readme/context-rollover.png)
+![A Pi conversation rolls into a fresh context window. Task notes and the complete session transcript remain available.](https://raw.githubusercontent.com/fitchmultz/pi-posthorse/main/.github/readme/context-rollover.png)
 
 ## Install and start
 
-Use Node 24.12.0 or later and Pi 1.3.0 or later. Posthorse supports official Pi and [fitchmultz/pi](https://github.com/fitchmultz/pi).
+Check the [Node.js and Pi requirements](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#install) before installing. Posthorse supports official Pi and [fitchmultz/pi](https://github.com/fitchmultz/pi).
 
 Update an older Pi installation before you install Posthorse. Run these commands:
 
@@ -29,11 +29,11 @@ Automatic rollover retains a safe recent-message tail using Pi's `compaction.kee
 
 Posthorse does not schedule rollover when a provider cache expires. An idle session below the
 rollover threshold keeps its context; use an explicit `new_context` when a deliberate clean reset
-is useful. See [idle sessions and cache expiry](docs/reference.md#idle-sessions-and-cache-expiry).
+is useful. See [idle sessions and cache expiry](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#idle-sessions-and-cache-expiry).
 
-Safe recent-tail retention and the notes-only reminder are part of the [0.10.0 changes](CHANGELOG.md#0100). Match these docs to your installed version using the changelog; default-branch documentation may describe changes not yet published.
+See the [changelog](https://github.com/fitchmultz/pi-posthorse/blob/main/CHANGELOG.md) for release history. Default-branch documentation may describe changes not yet published.
 
-Recoverable history is not guaranteed model recall. See the [practical guarantees and limits](docs/context-recovery.md) for the stock-Pi comparison, search scope, checkpoints, privacy, concurrency and cost, or the [rollover reference](docs/reference.md#how-it-works) for implementation details.
+Recoverable history is not guaranteed model recall. See the [practical guarantees and limits](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/context-recovery.md) for the stock-Pi comparison, search scope, checkpoints, privacy, concurrency and cost, or the [rollover reference](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#how-it-works) for implementation details.
 
 ## Tools
 
@@ -48,7 +48,7 @@ These tools are available to the model:
 
 Expand a tool card with Ctrl+O. In fullscreen mode, click a tool card to expand it. A `new_context` card shows a request. Pi's `Compacted from … tokens` card confirms the rollover.
 
-See [tool examples and paging details](docs/reference.md#tools).
+See [tool examples and paging details](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#tools).
 
 ## Settings and limits
 
@@ -66,8 +66,8 @@ Multiple compaction-policy extensions can make rollover depend on load order. En
 
 Oversized input and some overflow or truncated responses can reach the provider before automatic recovery. Save task state in notes. Posthorse's automatic and explicit rollovers do not stop background work outside the foreground tool batch. Manual `/compact` follows Pi's abort behavior instead.
 
-See [size limits and extension order](docs/reference.md#settings).
-Check the [legacy-session details](docs/reference.md#official-pi-and-the-fork) before you move old fork sessions to official Pi.
+See [size limits and extension order](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#settings).
+Check the [legacy-session details](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#official-pi-and-the-fork) before you move old fork sessions to official Pi.
 
 ## Update or remove
 
@@ -76,7 +76,7 @@ pi update npm:pi-posthorse
 pi remove npm:pi-posthorse
 ```
 
-Removal leaves notes and Pi session history in place. See the [installation reference](docs/reference.md#install) for Git sources.
+Removal leaves notes and Pi session history in place. See the [installation reference](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#install) for Git sources.
 
 ## Data and privacy
 
@@ -84,14 +84,14 @@ Posthorse makes no network requests. Notes are plaintext files under `.pi/notes/
 
 History can include user messages, assistant thinking, tool arguments, errors, and images. Content you retrieve enters the context of your selected model and provider.
 
-See [storage and privacy details](docs/reference.md#data-and-privacy).
-For cost diagnosis, see the [cached-token investigation](ARTIFACTS/investigation-report.md).
+See [storage and privacy details](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#data-and-privacy).
+For cost diagnosis, see the [cached-token investigation](https://github.com/fitchmultz/pi-posthorse/blob/main/ARTIFACTS/investigation-report.md).
 It does not establish the cause of a production bill or a measured cost improvement.
 
 ## Development
 
-See [development and host qualification](docs/development.md) for setup, tests, and releases.
-See [code quality](docs/quality.md) for the required checks.
+See [development and host qualification](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/development.md) for setup, tests, and releases.
+See [code quality](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/quality.md) for the required checks.
 
 ## License
 

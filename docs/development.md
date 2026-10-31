@@ -16,11 +16,11 @@ its child gates. Select that npm in the task environment; do not change a global
 to verify this checkout. For an isolated selection without shell startup rewriting PATH:
 
 ```bash
-BASH_ENV=/dev/null npm exec --yes --package=npm@12.2.0 -- npm run verify
+BASH_ENV=/dev/null npm exec --yes --package="$(node -p 'require("./package.json").packageManager')" -- npm run verify
 ```
 
-The npm version in this example follows `packageManager`; update them together when upgrading.
-This verification-only check does not constrain normal npm or Git-package consumers' installers.
+This selects the version in `packageManager` for verification without constraining normal npm or
+Git-package consumers' installers.
 
 Oxlint owns code quality; Oxfmt owns formatting. See [Code quality](quality.md) for coverage,
 exception governance, editor setup, and the enforced acceptance workflow.
@@ -46,6 +46,6 @@ For latest-host qualification, run `node /path/to/automation/scripts/qualify.mjs
 
 ## Automatic npm releases (maintainers)
 
-Follow the [shared release procedure](https://github.com/fitchmultz/.github#automatic-npm-releases): merge a reviewed PR into `main` with an intentional `package.json` version bump and a matching versioned `CHANGELOG.md` section. Once configured and enabled, publication is unattended after the full existing CI workflow and candidate-tarball qualification pass. Complete any applicable package-specific release evidence before merging the bump. Automation never bumps versions, overwrites releases, or republishes an existing version; existing manual publisher instructions remain valid.
+The [shared release workflow](https://github.com/fitchmultz/.github#automatic-npm-releases) publishes matching npm and GitHub releases from reviewed changes on `main`. The full existing CI workflow and candidate-tarball qualification must pass. Complete any applicable package-specific release evidence before publication.
 
-Failed/unpublished candidates can retry daily at 12:17 UTC or via manual dispatch of `npm release` on `main`, without another bump. Set repository variable `NPM_RELEASE_ENABLED` to anything other than `true` to stop new release plans; cancel pending runs separately when needed. Workflow validation is not evidence of a completed real OIDC publication.
+Follow the shared procedure for retries. Set `NPM_RELEASE_ENABLED` to anything other than `true` to stop new release plans; cancel pending runs separately when needed. Verify the actual npm and GitHub releases; workflow validation alone is not evidence of a completed OIDC publication.
