@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Let the corrected Go quality engine finish building on slower hosts instead of stopping it after
+  ten minutes.
+
 ## 0.10.1
 
 - Keep Pi responsive while notes `list`, folder reads and `search` walk a large notes tree. The
