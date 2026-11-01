@@ -1,19 +1,12 @@
-import {
-	AUTO_HANDOFF_PREFIX,
-	isRecord,
-	isReminderType,
-	type EntryLike,
-	type ProjectedEntry,
-} from "./contracts.ts";
+import { AUTO_HANDOFF_PREFIX, isRecord, type EntryLike, type ProjectedEntry } from "./contracts.ts";
 import { contextEdits, contextStart, windowHandoff } from "./history-entries.ts";
+import { boundedBlock, excerpt, toolCalls } from "./message-text.ts";
 import {
-	boundedBlock,
-	excerpt,
-	imageSummary,
-	imagesOf,
-	textOf,
-	toolCalls,
-} from "./message-text.ts";
+	formatRecord,
+	indexLine,
+	recoveryRecord,
+	type RecoveryRecord,
+} from "./recovery-records.ts";
 import { renderSessionNotes, type RetainedSpan } from "./recovery-notes.ts";
 import {
 	recoverableToolResults,
@@ -65,90 +58,6 @@ function buildRolloverPreamble(span: RetainedSpan | undefined): string {
 			? `entry ${span.firstId} above is the carried-over recent turn`
 			: `entries ${span.firstId} through ${span.lastId} above are the carried-over recent tail`;
 	return `${PREAMBLE}\n${RETAINED_MARKER_PREFIX}${span.lastId}. Earlier turns before entry ${span.firstId} were compacted into session history; ${range} from before this rollover. Recent messages follow separately; their inputs and tool evidence are not repeated in this record. Start the new context window from here.`;
-}
-type RecoveryRecord = {
-	readonly id: string;
-	readonly timestamp: string;
-	readonly kind: "owner" | "coordination";
-	readonly label: string;
-	readonly text: string;
-};
-type RecordSource = {
-	readonly kind: RecoveryRecord["kind"];
-	readonly label: string;
-	readonly content: unknown;
-};
-function ownerAnswer(entry: EntryLike, ownerQuestion: boolean): boolean {
-	const message = entry.message;
-	return (
-		ownerQuestion &&
-		entry.type === "message" &&
-		message?.role === "toolResult" &&
-		message.toolName === "ask_question" &&
-		message.namespace === undefined &&
-		message.isError !== true
-	);
-}
-function recordSource(entry: EntryLike, ownerQuestion: boolean): RecordSource | undefined {
-	if (entry.type === "message" && entry.message?.role === "user") {
-		return { kind: "owner", label: "owner input", content: entry.message.content };
-	}
-	if (ownerAnswer(entry, ownerQuestion)) {
-		return {
-			kind: "owner",
-			label: "owner answer via ask_question",
-			content: entry.message?.content,
-		};
-	}
-	if (
-		entry.type === "custom_message" &&
-		entry.display === true &&
-		!isReminderType(entry.customType)
-	) {
-		return {
-			kind: "coordination",
-			label: `visible ${(entry.customType ?? "custom").slice(0, 80)} coordination input (not direct owner input)`,
-			content: entry.content,
-		};
-	}
-	return;
-}
-function recoveryRecord(entry: EntryLike, ownerQuestion: boolean): RecoveryRecord | undefined {
-	const source = recordSource(entry, ownerQuestion);
-	if (source === undefined) {
-		return undefined;
-	}
-	const id = entry.id?.slice(0, 120) ?? "unknown";
-	const text = textOf({ content: source.content }).trim();
-	const summary =
-		source.label === "owner answer via ask_question"
-			? ""
-			: imageSummary(imagesOf(source.content));
-	const body = [text, summary === "" ? "" : `${summary} — recover with history read id ${id}`]
-		.filter((part) => part !== "")
-		.join("\n");
-	return {
-		id,
-		timestamp: entry.timestamp?.slice(0, 80) ?? "unknown time",
-		kind: source.kind,
-		label: source.label,
-		text: body === "" ? "(non-text content; recover the entry from history)" : body,
-	};
-}
-function formatRecord(record: RecoveryRecord, limit: number): string {
-	return boundedBlock(
-		`[${record.label} | ${record.timestamp} | entry ${record.id}]`,
-		record.text,
-		limit,
-	);
-}
-function indexLine(record: RecoveryRecord): string {
-	const header = formatRecord(record, 0);
-	if (record.kind !== "owner") {
-		return header;
-	}
-	const preview = record.text.replace(/\s+/g, " ").trim();
-	return `${header} ${preview.length > 120 ? `${preview.slice(0, 119)}…` : preview}`;
 }
 function priorCheckpoint(entry: EntryLike | undefined, limit: number): string | undefined {
 	const handoff = windowHandoff(entry)?.trim();
@@ -265,7 +174,7 @@ function recoveryAncestry(
 	ownerQuestionRegistered: boolean,
 	retained: ReadonlySet<string>,
 ): {
-	readonly checkpoint?: EntryLike;
+	readonly checkpoint?: EntryLike | undefined;
 	readonly carried: readonly RecoveryRecord[];
 	readonly skipped: readonly string[];
 } {
@@ -296,13 +205,15 @@ function recoveryAncestry(
 	return { checkpoint: boundary, carried: [], skipped };
 }
 function skippedRecords(ids: readonly string[], limit: number): string | undefined {
-	if (ids.length === 0) {
+	const remaining = ids.values();
+	const first = remaining.next();
+	if (first.done === true) {
 		return undefined;
 	}
-	let names = ids[0];
+	let names = first.value;
 	let count = 1;
-	while (count < ids.length) {
-		const next = `, ${ids[count]}`;
+	for (const id of remaining) {
+		const next = `, ${id}`;
 		if (names.length + next.length > limit) {
 			break;
 		}
@@ -335,7 +246,7 @@ function joined(parts: readonly (string | undefined)[]): string {
 }
 type BatchPlan = {
 	readonly header?: string;
-	readonly omission?: string;
+	readonly omission?: string | undefined;
 	readonly blocks: readonly RecoveryBlock[];
 	readonly bare?: string;
 };
@@ -359,8 +270,8 @@ function planBatch(
 	}
 	let budget = available;
 	let first = batch.blocks.length;
-	while (first > 0) {
-		const length = batch.blocks[first - 1].header.length + 2;
+	for (const block of batch.blocks.toReversed()) {
+		const length = block.header.length + 2;
 		if (length > budget) {
 			break;
 		}
@@ -417,8 +328,8 @@ function renderIndex(records: readonly RecoveryRecord[], available: number): str
 	}
 	let budget = available;
 	const listed: string[] = [];
-	for (let i = records.length - 1; i >= 0; i--) {
-		const line = indexLine(records[i]);
+	for (const record of records.toReversed()) {
+		const line = indexLine(record);
 		if (line.length + 1 > budget) {
 			break;
 		}

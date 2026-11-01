@@ -10,9 +10,13 @@ import {
 } from "./message-text.ts";
 
 export type RecoveryEntry = EntryLike & { readonly retained: boolean };
+const INCOMPLETE_STOPS = new Set(["error", "aborted", "length"]);
 type LinkedCall = { readonly entry: EntryLike; readonly block: ToolCallLike };
 export type RecoveryBlock = { readonly header: string; readonly text: string };
-export type RecoveryBatch = { readonly callId?: string; readonly blocks: readonly RecoveryBlock[] };
+export type RecoveryBatch = {
+	readonly callId?: string | undefined;
+	readonly blocks: readonly RecoveryBlock[];
+};
 function callsById(entries: readonly EntryLike[]): Map<string, LinkedCall> {
 	const calls = new Map<string, LinkedCall>();
 	for (const entry of entries) {
@@ -30,14 +34,11 @@ function callsById(entries: readonly EntryLike[]): Map<string, LinkedCall> {
 function trailingStart(entries: readonly EntryLike[]): number {
 	let hasTrailingResult = false;
 	for (let i = entries.length - 1; i >= 0; i--) {
-		const message = entries[i].message;
+		const message = entries[i]?.message;
 		if (message?.role === "toolResult") {
 			hasTrailingResult = true;
 		} else if (message?.role === "assistant") {
-			const invalid =
-				message.stopReason === "error" ||
-				message.stopReason === "aborted" ||
-				message.stopReason === "length";
+			const invalid = INCOMPLETE_STOPS.has(message.stopReason ?? "");
 			if (!invalid || hasTrailingResult) {
 				return i;
 			}

@@ -84,7 +84,6 @@ async function* folderEntries(directory: string, signal: AbortSignal | undefined
 			.slice(0, firstFolder === -1 ? batch.length : firstFolder + 1)
 			.map((entry) => join(directory, entry.name));
 		// Stats overlap only up to the next entry that may be a folder.
-		// oxlint-disable-next-line no-await-in-loop
 		const infos = await Promise.all(paths.map(statIfPresent));
 		for (const [index, path] of paths.entries()) {
 			start += 1;
@@ -148,7 +147,6 @@ async function listNotes(
 	const rows: string[] = [];
 	for (let start = 0; start < files.length; start += FORMAT_BATCH) {
 		// Pi gets an event-loop turn before each batch of rows.
-		// oxlint-disable-next-line no-await-in-loop
 		await setImmediate();
 		signal?.throwIfAborted();
 		for (const file of files.slice(start, start + FORMAT_BATCH)) {
@@ -274,7 +272,6 @@ async function noteHits(
 		// A batch of notes over 1 MiB reads nothing that would notice cancellation.
 		signal?.throwIfAborted();
 		// Batches keep note order, so a search stops within one batch of the page limit.
-		// oxlint-disable-next-line no-await-in-loop
 		const batch = await Promise.all(
 			notes
 				.slice(start, start + SEARCH_BATCH)
@@ -364,7 +361,7 @@ export function registerNotes(
 			),
 		}),
 		// Pi's fixed tool contract supplies id, params, signal, updates, and context.
-		// oxlint-disable-next-line max-params
+		// oxlint-disable-next-line max-params -- QX-002: Pi supplies five fixed positional tool arguments.
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const dir = notesDir(ctx.cwd);
 			const access: NotesAccess = { host: () => policy(ctx), pages, signal };

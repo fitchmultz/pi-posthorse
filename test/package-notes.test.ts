@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import test from "node:test";
+import { test as nodeTest } from "node:test";
 import { notesDir } from "../src/files.ts";
 
 function projectStore(project: string, identity = "github.com/acme/tool"): string {
@@ -61,123 +61,147 @@ function updateCheckout(checkout: string): void {
 	git(checkout, "clean", "-fdx");
 }
 
-test("project package notes migrate outside the checkout and survive Pi's update cleanup", () => {
-	const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-project-package-")));
-	try {
-		const checkout = packageCheckout(project);
-		const legacy = writeLegacy(checkout, "before migration");
-		const moved = projectStore(project);
-		assert.equal(notesDir(join(checkout, "src")), moved);
-		assert.equal(readFileSync(join(moved, "task", "state.md"), "utf8"), "before migration");
-		assert.equal(lstatSync(legacy).isSymbolicLink(), true);
-		writeFileSync(join(legacy, "task", "older-session.md"), "through compatibility link");
-		updateCheckout(checkout);
-		assert.equal(existsSync(legacy), false);
-		assert.equal(notesDir(checkout), moved);
-		assert.equal(readFileSync(join(moved, "task", "state.md"), "utf8"), "before migration");
-		assert.equal(
-			readFileSync(join(moved, "task", "older-session.md"), "utf8"),
-			"through compatibility link",
-		);
-		assert.equal(readFileSync(join(checkout, "tracked.txt"), "utf8"), "package source");
-	} finally {
-		rmSync(project, { recursive: true, force: true });
-	}
-});
+nodeTest(
+	"project package notes migrate outside the checkout and survive Pi's update cleanup",
+	() => {
+		const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-project-package-")));
+		try {
+			const checkout = packageCheckout(project);
+			const legacy = writeLegacy(checkout, "before migration");
+			const moved = projectStore(project);
+			assert.equal(notesDir(join(checkout, "src")), moved);
+			assert.equal(readFileSync(join(moved, "task", "state.md"), "utf8"), "before migration");
+			assert.equal(lstatSync(legacy).isSymbolicLink(), true);
+			writeFileSync(join(legacy, "task", "older-session.md"), "through compatibility link");
+			updateCheckout(checkout);
+			assert.equal(existsSync(legacy), false);
+			assert.equal(notesDir(checkout), moved);
+			assert.equal(readFileSync(join(moved, "task", "state.md"), "utf8"), "before migration");
+			assert.equal(
+				readFileSync(join(moved, "task", "older-session.md"), "utf8"),
+				"through compatibility link",
+			);
+			assert.equal(readFileSync(join(checkout, "tracked.txt"), "utf8"), "package source");
+		} finally {
+			rmSync(project, { recursive: true, force: true });
+		}
+	},
+);
 
-test("fresh project package notes are isolated by project, including symlinked project paths", () => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-isolation-")));
-	try {
-		const first = join(dir, "first");
-		const second = join(dir, "second");
-		const firstCheckout = packageCheckout(first);
-		const secondCheckout = packageCheckout(second);
-		symlinkSync(first, join(dir, "alias"), "dir");
-		const moved = notesDir(firstCheckout);
-		assert.equal(moved, projectStore(first));
-		assert.equal(
-			notesDir(join(dir, "alias", ".pi", "git", "github.com", "acme", "tool", "src")),
-			moved,
-		);
-		assert.notEqual(notesDir(secondCheckout), moved);
-		mkdirSync(moved, { recursive: true });
-		writeFileSync(join(moved, "fresh.md"), "new notes");
-		updateCheckout(firstCheckout);
-		assert.equal(readFileSync(join(notesDir(firstCheckout), "fresh.md"), "utf8"), "new notes");
-		assert.equal(existsSync(join(notesDir(secondCheckout), "fresh.md")), false);
-		assert.equal(existsSync(join(firstCheckout, ".pi")), false);
-		assert.equal(notesDir(first), join(first, ".pi", "notes"));
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
+nodeTest(
+	"fresh project package notes are isolated by project, including symlinked project paths",
+	() => {
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-isolation-")));
+		try {
+			const first = join(dir, "first");
+			const second = join(dir, "second");
+			const firstCheckout = packageCheckout(first);
+			const secondCheckout = packageCheckout(second);
+			symlinkSync(first, join(dir, "alias"), "dir");
+			const moved = notesDir(firstCheckout);
+			assert.equal(moved, projectStore(first));
+			assert.equal(
+				notesDir(join(dir, "alias", ".pi", "git", "github.com", "acme", "tool", "src")),
+				moved,
+			);
+			assert.notEqual(notesDir(secondCheckout), moved);
+			mkdirSync(moved, { recursive: true });
+			writeFileSync(join(moved, "fresh.md"), "new notes");
+			updateCheckout(firstCheckout);
+			assert.equal(
+				readFileSync(join(notesDir(firstCheckout), "fresh.md"), "utf8"),
+				"new notes",
+			);
+			assert.equal(existsSync(join(notesDir(secondCheckout), "fresh.md")), false);
+			assert.equal(existsSync(join(firstCheckout, ".pi")), false);
+			assert.equal(notesDir(first), join(first, ".pi", "notes"));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	},
+);
 
-test("project package migration preserves existing notes and timestamp collision entries", (context) => {
-	const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-collision-")));
-	context.mock.method(Date, "now", () => 1234);
-	try {
-		const checkout = packageCheckout(project);
-		const moved = projectStore(project);
-		mkdirSync(join(moved, "task"), { recursive: true });
-		writeFileSync(join(moved, "task", "state.md"), "canonical");
-		mkdirSync(join(moved, "from-checkout-1234"));
-		symlinkSync("missing", join(moved, "from-checkout-1234-1"), "dir");
-		const legacy = writeLegacy(checkout, "older session one");
-		assert.equal(notesDir(checkout), moved);
-		assert.equal(
-			readFileSync(join(moved, "from-checkout-1234-2", "task", "state.md"), "utf8"),
-			"older session one",
-		);
-		assert.deepEqual(readdirSync(join(moved, "from-checkout-1234")), []);
-		assert.equal(lstatSync(join(moved, "from-checkout-1234-1")).isSymbolicLink(), true);
-		updateCheckout(checkout);
-		writeLegacy(checkout, "older session two");
-		assert.equal(notesDir(checkout), moved);
-		assert.equal(
-			readFileSync(join(moved, "from-checkout-1234-3", "task", "state.md"), "utf8"),
-			"older session two",
-		);
-		assert.equal(readFileSync(join(legacy, "task", "state.md"), "utf8"), "canonical");
-	} finally {
-		rmSync(project, { recursive: true, force: true });
-	}
-});
+nodeTest(
+	"project package migration preserves existing notes and timestamp collision entries",
+	(context) => {
+		const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-collision-")));
+		context.mock.method(Date, "now", () => 1234);
+		try {
+			const checkout = packageCheckout(project);
+			const moved = projectStore(project);
+			mkdirSync(join(moved, "task"), { recursive: true });
+			writeFileSync(join(moved, "task", "state.md"), "canonical");
+			mkdirSync(join(moved, "from-checkout-1234"));
+			symlinkSync("missing", join(moved, "from-checkout-1234-1"), "dir");
+			const legacy = writeLegacy(checkout, "older session one");
+			assert.equal(notesDir(checkout), moved);
+			assert.equal(
+				readFileSync(join(moved, "from-checkout-1234-2", "task", "state.md"), "utf8"),
+				"older session one",
+			);
+			assert.deepEqual(readdirSync(join(moved, "from-checkout-1234")), []);
+			assert.equal(lstatSync(join(moved, "from-checkout-1234-1")).isSymbolicLink(), true);
+			updateCheckout(checkout);
+			writeLegacy(checkout, "older session two");
+			assert.equal(notesDir(checkout), moved);
+			assert.equal(
+				readFileSync(join(moved, "from-checkout-1234-3", "task", "state.md"), "utf8"),
+				"older session two",
+			);
+			assert.equal(readFileSync(join(legacy, "task", "state.md"), "utf8"), "canonical");
+		} finally {
+			rmSync(project, { recursive: true, force: true });
+		}
+	},
+);
 
-test("package storage detection leaves containers and similarly named ordinary repositories alone", () => {
-	const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-boundary-")));
-	try {
-		packageCheckout(project);
-		const owner = join(project, ".pi", "git", "github.com", "acme");
-		assert.equal(notesDir(owner), join(owner, ".pi", "notes"));
-		const ordinary = join(project, ".pi", "git-other", "github.com", "acme", "tool");
-		mkdirSync(ordinary, { recursive: true });
-		git(ordinary, "init", "-q");
-		assert.equal(notesDir(ordinary), join(ordinary, ".pi", "notes"));
-	} finally {
-		rmSync(project, { recursive: true, force: true });
-	}
-});
+nodeTest(
+	"package storage detection leaves containers and similarly named ordinary repositories alone",
+	() => {
+		const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-boundary-")));
+		try {
+			packageCheckout(project);
+			const owner = join(project, ".pi", "git", "github.com", "acme");
+			assert.equal(notesDir(owner), join(owner, ".pi", "notes"));
+			const ordinary = join(project, ".pi", "git-other", "github.com", "acme", "tool");
+			mkdirSync(ordinary, { recursive: true });
+			git(ordinary, "init", "-q");
+			assert.equal(notesDir(ordinary), join(ordinary, ".pi", "notes"));
+		} finally {
+			rmSync(project, { recursive: true, force: true });
+		}
+	},
+);
 
-test("linked project-package worktrees share relocated notes outside the outermost package tree", () => {
-	const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-worktree-")));
-	try {
-		const checkout = packageCheckout(project);
-		const worktree = join(project, "worktree");
-		git(checkout, "worktree", "add", "--detach", worktree);
-		assert.equal(notesDir(worktree), notesDir(checkout));
-		const nested = packageCheckout(checkout);
-		const legacy = writeLegacy(nested, "nested package notes");
-		const moved = projectStore(project, "github.com/acme/tool/.pi/git/github.com/acme/tool");
-		assert.equal(notesDir(nested), moved);
-		assert.equal(lstatSync(legacy).isSymbolicLink(), true);
-		updateCheckout(nested);
-		assert.equal(readFileSync(join(moved, "task", "state.md"), "utf8"), "nested package notes");
-	} finally {
-		rmSync(project, { recursive: true, force: true });
-	}
-});
+nodeTest(
+	"linked project-package worktrees share relocated notes outside the outermost package tree",
+	() => {
+		const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-worktree-")));
+		try {
+			const checkout = packageCheckout(project);
+			const worktree = join(project, "worktree");
+			git(checkout, "worktree", "add", "--detach", worktree);
+			assert.equal(notesDir(worktree), notesDir(checkout));
+			const nested = packageCheckout(checkout);
+			const legacy = writeLegacy(nested, "nested package notes");
+			const moved = projectStore(
+				project,
+				"github.com/acme/tool/.pi/git/github.com/acme/tool",
+			);
+			assert.equal(notesDir(nested), moved);
+			assert.equal(lstatSync(legacy).isSymbolicLink(), true);
+			updateCheckout(nested);
+			assert.equal(
+				readFileSync(join(moved, "task", "state.md"), "utf8"),
+				"nested package notes",
+			);
+		} finally {
+			rmSync(project, { recursive: true, force: true });
+		}
+	},
+);
 
-test("a blocked migration fails without modifying checkout notes or the destination", () => {
+nodeTest("a blocked migration fails without modifying checkout notes or the destination", () => {
 	const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-blocked-")));
 	try {
 		const checkout = packageCheckout(project);
@@ -199,7 +223,7 @@ for (const [segment, parts] of [
 	["host", ["github.com"]],
 	["repository", ["github.com", "acme", "tool"]],
 ] as const) {
-	test(`project package notes survive cleanup through a symlinked ${segment}`, () => {
+	nodeTest(`project package notes survive cleanup through a symlinked ${segment}`, () => {
 		const dir = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-linked-")));
 		try {
 			const project = join(dir, "project");
@@ -234,28 +258,33 @@ for (const [segment, parts] of [
 	});
 }
 
-test("project packages with separate Git metadata keep shared notes in that metadata directory", () => {
-	const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-separate-git-")));
-	try {
-		const checkout = packageCheckout(project);
-		const metadata = join(project, "metadata");
-		git(checkout, "init", `--separate-git-dir=${metadata}`);
-		const moved = join(metadata, ".pi", "notes");
-		assert.equal(notesDir(checkout), moved);
-		mkdirSync(moved, { recursive: true });
-		writeFileSync(join(moved, "state.md"), "external metadata notes");
-		updateCheckout(checkout);
-		assert.equal(
-			readFileSync(join(notesDir(checkout), "state.md"), "utf8"),
-			"external metadata notes",
+nodeTest(
+	"project packages with separate Git metadata keep shared notes in that metadata directory",
+	() => {
+		const project = realpathSync(
+			mkdtempSync(join(tmpdir(), "posthorse-package-separate-git-")),
 		);
-	} finally {
-		rmSync(project, { recursive: true, force: true });
-	}
-});
+		try {
+			const checkout = packageCheckout(project);
+			const metadata = join(project, "metadata");
+			git(checkout, "init", `--separate-git-dir=${metadata}`);
+			const moved = join(metadata, ".pi", "notes");
+			assert.equal(notesDir(checkout), moved);
+			mkdirSync(moved, { recursive: true });
+			writeFileSync(join(moved, "state.md"), "external metadata notes");
+			updateCheckout(checkout);
+			assert.equal(
+				readFileSync(join(notesDir(checkout), "state.md"), "utf8"),
+				"external metadata notes",
+			);
+		} finally {
+			rmSync(project, { recursive: true, force: true });
+		}
+	},
+);
 
 for (const segment of ["container", "repository"]) {
-	test(`global package ${segment} symlink coverage remains explicit`, () => {
+	nodeTest(`global package ${segment} symlink coverage remains explicit`, () => {
 		const dir = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-global-linked-")));
 		const previous = process.env.PI_CODING_AGENT_DIR;
 		const agent = join(dir, "agent");
@@ -286,7 +315,7 @@ for (const segment of ["container", "repository"]) {
 }
 
 for (const linked of [false, true]) {
-	test(`global-nested notes preserve the existing store with checkout link=${linked}`, () => {
+	nodeTest(`global-nested notes preserve the existing store with checkout link=${linked}`, () => {
 		const dir = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-global-nested-")));
 		const previousAgent = process.env.PI_CODING_AGENT_DIR;
 		const agent = join(dir, "agent");

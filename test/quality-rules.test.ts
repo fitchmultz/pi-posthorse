@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { suite, test } from "node:test";
-import { objectValue } from "../scripts/quality-policy.ts";
+import { suite, test as nodeTest } from "node:test";
+import { objectValue } from "../scripts/quality-settings.ts";
 import { ruleCases } from "./quality-rule-cases.ts";
 import { optionCases } from "./quality-rule-options.ts";
 import {
@@ -11,7 +11,6 @@ import {
 	probeConcurrency,
 	repository,
 	runCli,
-	type Finding,
 } from "./quality-support.ts";
 
 function branches(count: number): string {
@@ -71,15 +70,15 @@ const structuralCases = [
 	{
 		name: "production file lines",
 		code: "eslint/max-lines",
-		pass: fileLines(600),
-		fail: fileLines(601),
+		pass: fileLines(500),
+		fail: fileLines(501),
 	},
 ];
 
 // Every probe owns a temporary project, so independent CLI runs can overlap.
 await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 	for (const example of [...ruleCases, ...optionCases]) {
-		test(`configured rule boundary: ${example.name}`, async () => {
+		nodeTest(`configured rule boundary: ${example.name}`, async () => {
 			await expectFindings(
 				{ compiler: { types: ["node"] }, files: { "pass.ts": example.pass } },
 				[],
@@ -97,14 +96,14 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 	}
 
 	for (const example of structuralCases) {
-		test(`configured structural boundary: ${example.name}`, async () => {
+		nodeTest(`configured structural boundary: ${example.name}`, async () => {
 			await expectFindings(
 				{ compiler: { types: ["node"] }, files: { "pass.ts": example.pass } },
 				[],
 			);
 			const specialLocations: Readonly<Record<string, number>> = {
 				"eslint/max-depth": 5,
-				"eslint/max-lines": 601,
+				"eslint/max-lines": 501,
 			};
 			const expectedLine = specialLocations[example.code] ?? 1;
 			await expectFindings(
@@ -114,7 +113,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		});
 	}
 
-	test("test role retains branching and parameter limits while exempting size", async () => {
+	nodeTest("test role retains branching and parameter limits while exempting size", async () => {
 		await expectFindings({ files: { "pass.test.ts": branches(14) } }, []);
 		await expectFindings({ files: { "fail.test.ts": branches(15) } }, [
 			{ code: "eslint/complexity", file: "fail.test.ts", line: 1 },
@@ -137,7 +136,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("modified complexity counts one switch rather than every case", async () => {
+	nodeTest("modified complexity counts one switch rather than every case", async () => {
 		const cases = Array.from(
 			{ length: 20 },
 			(_, index) => `case ${index}: return ${index};`,
@@ -152,7 +151,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("declaration files retain API safety without structural metrics", async () => {
+	nodeTest("declaration files retain API safety without structural metrics", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -168,242 +167,98 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("readonly application contracts expose only the read capabilities they need", async () => {
+	nodeTest(
+		"defined baseline choices retain accurate resource and diagnostic contracts",
+		async () => {
+			await expectFindings(
+				{
+					files: {
+						"pass.ts": [
+							"export function read(input: { count: number }): number { return input.count; }",
+							"export const callback: () => void = () => Math.abs(1);",
+							"export function diagnostic(input: unknown): string { return String(input); }",
+							"export async function forward(input: unknown): Promise<void> { await Promise.reject(input); }",
+							"export const controls = /[\\u0000]/u;",
+							"export function isString(input: unknown): input is string { return typeof input === 'string'; }",
+							"export function alreadyString(input: string): boolean { if (isString(input)) { return true; } return false; }",
+						].join("\n"),
+					},
+				},
+				[],
+			);
+		},
+	);
+
+	nodeTest(
+		"nullable object presence checks and genuine void shorthand remain permitted",
+		async () => {
+			await expectFindings(
+				{
+					files: {
+						"presence.ts":
+							"export function value(input: { readonly count: number } | undefined): number { if (input) { return input.count; } return 0; }",
+						"void.ts": "export const value: () => void = () => console.log('done');",
+					},
+				},
+				[],
+			);
+		},
+	);
+
+	nodeTest(
+		"async interfaces may complete immediately and caught failures retain identity",
+		async () => {
+			await expectFindings(
+				{
+					files: {
+						"pass.ts":
+							"export async function value(): Promise<number> { return 1; } export function propagate(): void { try { console.log('done'); } catch (error) { console.log('failed'); throw error; } }",
+					},
+				},
+				[],
+			);
+		},
+	);
+
+	nodeTest("sequential asynchronous work retains native await ownership", async () => {
 		await expectFindings(
 			{
 				files: {
 					"pass.ts":
-						"export function value(input: { readonly get: (key: string) => number | undefined }): number { return input.get('key') ?? 0; }",
+						"export async function persist(items: readonly number[]): Promise<void> { for (const item of items) { await Promise.resolve(item); } }",
 				},
 			},
 			[],
 		);
 	});
 
-	test("native readonly collections check keys, values, mapped mutators and attached application state", async () => {
-		const accepted = [
-			"ReadonlyMap<string, number>",
-			"ReadonlySet<number>",
-			"ReadonlyMap<string, () => void>",
-			"ReadonlyMap<{ readonly key: number }, { readonly count: number }>",
-			"ReadonlySet<{ readonly count: number }>",
-			"Readonly<ReadonlyMap<string, number>>",
-			"Readonly<ReadonlySet<number>>",
-			"ReadonlyMap<string, number> & { readonly counter: number }",
-			"Readonly<Pick<Map<string, number>, 'get' | 'size'>>",
-			"Readonly<Pick<Set<number>, 'has' | 'size'>>",
-			"Pick<ReadonlyMap<string, number>, 'values' | 'size'>",
-			"Pick<ReadonlyMap<string, { readonly count: number }>, 'entries' | 'forEach' | 'size'>",
-			"Pick<ReadonlySet<{ readonly count: number }>, 'values' | 'size'>",
-			"Pick<ReadonlyMap<string, { count: number }>, 'size'>",
-			"Pick<ReadonlySet<{ count: number }>, 'size'>",
-			"Pick<ReadonlySet<{ readonly count: number }>, 'union' | 'intersection' | 'difference' | 'symmetricDifference' | 'size'>",
-			"Partial<ReadonlyMap<string, number>>",
-			"Partial<ReadonlySet<string>>",
-			"Partial<Pick<ReadonlyMap<string, { readonly count: number }>, 'values' | 'size'>>",
-			"Readonly<Partial<Pick<Map<string, number>, 'get' | 'has' | 'size'>>>",
-			"Readonly<Partial<Pick<Set<number>, 'has' | 'size'>>>",
-			"Pick<ReadonlySet<{ readonly count: number }>, 'isSubsetOf' | 'isDisjointFrom' | 'size'>",
-			"Pick<ReadonlySet<{ count: number }>, 'isSupersetOf' | 'size'>",
-		];
-		const rejected = [
-			"Map<string, number>",
-			"Set<number>",
-			"Readonly<Map<string, number>>",
-			"Readonly<Set<number>>",
-			"ReadonlyMap<string, { count: number }>",
-			"ReadonlyMap<{ key: number }, number>",
-			"ReadonlySet<{ count: number }>",
-			"Readonly<ReadonlyMap<string, { count: number }>>",
-			"Readonly<ReadonlySet<{ count: number }>>",
-			"ReadonlyMap<string, (() => void) & { counter: number }>",
-			"ReadonlyMap<string, number> & { counter: number }",
-			"ReadonlySet<number> & { counter: number }",
-			"Readonly<Pick<Map<string, number>, 'get' | 'set' | 'size'>>",
-			"Readonly<Pick<Map<string, { count: number }>, 'get' | 'size'>>",
-			"Pick<ReadonlyMap<string, { count: number }>, 'values' | 'size'>",
-			"Pick<ReadonlySet<{ count: number }>, 'values' | 'size'>",
-			"Pick<ReadonlyMap<string, { count: number }>, 'forEach' | 'size'>",
-			"Omit<ReadonlyMap<string, { count: number }>, 'get'>",
-			"Pick<ReadonlyMap<{ key: number }, number>, 'entries' | 'size'>",
-			"Pick<ReadonlyMap<{ key: number }, number>, 'keys' | 'size'>",
-			"Pick<ReadonlyMap<{ key: number }, number>, 'forEach' | 'size'>",
-			"Pick<ReadonlyMap<string, { count: number }>, typeof Symbol.iterator | 'size'>",
-			"Pick<ReadonlySet<{ count: number }>, typeof Symbol.iterator | 'size'>",
-			"Pick<ReadonlyMap<string, [number, number]>, 'values' | 'size'>",
-			"Pick<ReadonlyMap<string, readonly [number, { count: number }]>, 'values' | 'size'>",
-			"Pick<ReadonlySet<{ count: number }>, 'union' | 'size'>",
-			"Pick<ReadonlySet<{ count: number }>, 'intersection' | 'size'>",
-			"Pick<ReadonlySet<{ count: number }>, 'difference' | 'size'>",
-			"Pick<ReadonlySet<{ count: number }>, 'symmetricDifference' | 'size'>",
-			"Partial<ReadonlyMap<string, { count: number }>>",
-			"Partial<ReadonlySet<{ count: number }>>",
-			"Partial<Pick<ReadonlyMap<string, { count: number }>, 'values' | 'size'>>",
-			"Readonly<Partial<Pick<Map<string, { count: number }>, 'get' | 'has' | 'size'>>>",
-			"Pick<ReadonlySet<{ count: number }>, 'isSubsetOf' | 'size'>",
-			"Pick<ReadonlySet<{ count: number }>, 'isDisjointFrom' | 'size'>",
-			"Pick<Map<string, number>, 'get' | 'size'>",
-			"Partial<Pick<Map<string, number>, 'get' | 'size'>>",
-			"Pick<Set<number>, 'has' | 'size'>",
-			"Partial<Pick<Set<number>, 'has' | 'size'>>",
-			"Readonly<Partial<Map<string, number>>>",
-			"Readonly<Partial<Set<number>>>",
-		];
-		const source = (types: readonly string[]) =>
-			types
-				.map(
-					(type, index) =>
-						`export function lookup${index}(input: ${type}): number { return input.size${type.includes("Partial<") ? " ?? 0" : ""}; }`,
-				)
-				.join("\n");
-		const arrayTypes = [
-			{ type: "readonly number[]", mutable: false },
-			{ type: "readonly { readonly count: number }[]", mutable: false },
-			{ type: "Pick<readonly number[], 'map' | 'length'>", mutable: false },
-			{ type: "Partial<Pick<readonly number[], 'map'>>", mutable: false },
-			{ type: "readonly { count: number }[]", mutable: true },
-			{ type: "Pick<readonly { count: number }[], 'map' | 'length'>", mutable: true },
-			{ type: "Partial<Pick<readonly { count: number }[], 'map'>>", mutable: true },
-		];
-		await expectFindings(
-			{
-				files: {
-					"pass.ts": source(accepted),
-					"fail.ts": source(rejected),
-					"mixed.ts":
-						"interface Mixed extends Pick<ReadonlyMap<string, number>, 'get'>, Pick<ReadonlyMap<string, { count: number }>, 'values' | 'size'> {} export function value(input: Mixed): number { return input.size; }",
-					"node_modules/@quality/methods/package.json": JSON.stringify({
-						name: "@quality/methods",
-						type: "module",
-						exports: "./index.d.ts",
-					}),
-					"node_modules/@quality/methods/index.d.ts":
-						"export interface Mutable { get(): number; }",
-					"methods.ts": [
-						"import type { Mutable } from '@quality/methods';",
-						"export function replace(input: Partial<Pick<Mutable, 'get'>>): void { const view = input; view.get = () => 123; }",
-						"export function read(input: Readonly<Partial<Pick<Mutable, 'get'>>>): number { return input.get?.() ?? 0; }",
-					].join("\n"),
-					"array-views.ts": arrayTypes
-						.map(
-							({ type }, index) =>
-								`export function view${index}(input: ${type}): unknown { return input; }`,
-						)
-						.join("\n"),
-					"flatmap.ts": [
-						"export function read(input: readonly number[]): readonly number[] { return input.flatMap((value) => [value]); }",
-						"export function mutate(input: readonly number[]): readonly number[] { return input.flatMap((value, _index, array) => { const original = array; original.push(value); return [value]; }); }",
-						"export const mutable = [1, 2].flatMap((value, _index, array) => { const original = array; original.push(value); return [value]; });",
-					].join("\n"),
+	nodeTest(
+		"terminal Promise callbacks may be void but interior callbacks must return",
+		async () => {
+			await expectFindings(
+				{
+					compiler: { types: ["node"] },
+					files: {
+						"pass.ts":
+							"export async function value(): Promise<void> { await Promise.resolve(1).then((input) => { console.log(input); }); }",
+					},
 				},
-			},
-			[
-				...rejected.map((_type, index) => ({
-					code: "typescript/prefer-readonly-parameter-types",
-					file: "fail.ts",
-					line: index + 1,
-				})),
-				{ code: "typescript/prefer-readonly-parameter-types", file: "mixed.ts", line: 1 },
-				{ code: "typescript/prefer-readonly-parameter-types", file: "methods.ts", line: 2 },
-				...arrayTypes.flatMap(({ mutable }, index) =>
-					mutable
-						? [
-								{
-									code: "typescript/prefer-readonly-parameter-types",
-									file: "array-views.ts",
-									line: index + 1,
-								},
-							]
-						: [],
-				),
-				{ code: "typescript/TS2339", file: "flatmap.ts", line: 2 },
-				{ code: "typescript/no-unsafe-call", file: "flatmap.ts", line: 2 },
-			],
-		);
-	});
+				[],
+			);
+			await expectFindings(
+				{
+					compiler: { types: ["node"] },
+					files: {
+						"fail.ts":
+							"export async function value(): Promise<void> { await Promise.resolve(1).then((input) => { console.log(input); }).then(() => 1); }",
+					},
+				},
+				[{ code: "promise/always-return", file: "fail.ts", line: 1 }],
+			);
+		},
+	);
 
-	test("application types named like native readonly containers retain mutation checks", async () => {
-		await expectFindings(
-			{
-				files: {
-					"fail.ts":
-						"export interface ReadonlyMap<K, V> { values: [K, V][] } export function value(input: ReadonlyMap<string, number>): number { return input.values.length; }",
-				},
-			},
-			[{ code: "typescript/prefer-readonly-parameter-types", file: "fail.ts", line: 1 }],
-		);
-	});
-
-	test("nullable object presence checks and genuine void shorthand remain permitted", async () => {
-		await expectFindings(
-			{
-				files: {
-					"presence.ts":
-						"export function value(input: { readonly count: number } | undefined): number { if (input) { return input.count; } return 0; }",
-					"void.ts": "export const value: () => void = () => console.log('done');",
-				},
-			},
-			[],
-		);
-	});
-
-	test("async interfaces may complete immediately and caught failures retain identity", async () => {
-		await expectFindings(
-			{
-				files: {
-					"pass.ts":
-						"export async function value(): Promise<number> { return 1; } export function propagate(): void { try { console.log('done'); } catch (error) { console.log('failed'); throw error; } }",
-				},
-			},
-			[],
-		);
-	});
-
-	test("sequencing is forbidden without a documented exception", async () => {
-		await expectFindings(
-			{
-				files: {
-					"fail.ts":
-						"export async function value(input: readonly number[]): Promise<void> {\nfor (const item of input) {\nawait Promise.resolve(item);\n}\n}",
-				},
-			},
-			[{ code: "eslint/no-await-in-loop", file: "fail.ts", line: 3 }],
-		);
-		await expectFindings(
-			{
-				files: {
-					"pass.ts":
-						"export async function value(input: readonly number[]): Promise<void> {\nfor (const item of input) {\n// Each commit must finish before the next journal record.\n// oxlint-disable-next-line no-await-in-loop\nawait Promise.resolve(item);\n}\n}",
-				},
-			},
-			[],
-		);
-	});
-
-	test("terminal Promise callbacks may be void but interior callbacks must return", async () => {
-		await expectFindings(
-			{
-				compiler: { types: ["node"] },
-				files: {
-					"pass.ts":
-						"export async function value(): Promise<void> { await Promise.resolve(1).then((input) => { console.log(input); }); }",
-				},
-			},
-			[],
-		);
-		await expectFindings(
-			{
-				compiler: { types: ["node"] },
-				files: {
-					"fail.ts":
-						"export async function value(): Promise<void> { await Promise.resolve(1).then((input) => { console.log(input); }).then(() => 1); }",
-				},
-			},
-			[{ code: "promise/always-return", file: "fail.ts", line: 1 }],
-		);
-	});
-
-	test("redundant catch rethrows remain detectable", async () => {
+	nodeTest("redundant catch rethrows remain detectable", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -415,19 +270,22 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("local sort and reverse stay allowed while void generic contracts stay real", async () => {
-		await expectFindings(
-			{
-				files: {
-					"pass.ts":
-						"export const sorted = [2, 1].sort((a, b) => a - b); export const reversed = [1, 2].reverse(); export const pending: PromiseWithResolvers<void> = Promise.withResolvers();",
+	nodeTest(
+		"local sort and reverse stay allowed while void generic contracts stay real",
+		async () => {
+			await expectFindings(
+				{
+					files: {
+						"pass.ts":
+							"export const sorted = [2, 1].sort((a, b) => a - b); export const reversed = [1, 2].reverse(); export const pending: PromiseWithResolvers<void> = Promise.withResolvers();",
+					},
 				},
-			},
-			[],
-		);
-	});
+				[],
+			);
+		},
+	);
 
-	test("dynamic execution constructs remain forbidden", async () => {
+	nodeTest("dynamic execution constructs remain forbidden", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -446,7 +304,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("type imports and exports preserve runtime module contracts", async () => {
+	nodeTest("type imports and exports preserve runtime module contracts", async () => {
 		await expectFindings(
 			{
 				compiler: { types: ["node"] },
@@ -469,7 +327,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("duplicate and self imports remain detectable", async () => {
+	nodeTest("duplicate and self imports remain detectable", async () => {
 		await expectFindings(
 			{
 				compiler: { types: ["node"] },
@@ -490,7 +348,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("runtime dependency cycles remain detectable in both modules", async () => {
+	nodeTest("native import analysis detects static dependency cycles", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -503,75 +361,42 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 				{ code: "import/no-cycle", file: "b.ts", line: 1 },
 			],
 		);
-		await expectFindings(
-			{
-				files: {
-					"a.ts": "export async function a(): Promise<number> { const { b } = await import('./b.ts'); return b(); }",
-					"b.ts": "import { a } from './a.ts'; export async function b(): Promise<number> { return a(); }",
-				},
-			},
-			[
-				{ code: "import/no-cycle", file: "a.ts", line: 1 },
-				{ code: "import/no-cycle", file: "b.ts", line: 1 },
-			],
-		);
-		const wrappedImports = [
-			{ source: "('./b.ts')", additionalRules: [] },
-			{ source: "(`./b.ts`)", additionalRules: [] },
-			{ source: "('./b.ts' as const)", additionalRules: [] },
-			{
-				source: "(<string>'./b.ts')",
-				additionalRules: [
-					"typescript/consistent-type-assertions",
-					"typescript/no-unnecessary-type-assertion",
-				],
-			},
-			{
-				source: "('./b.ts'!)",
-				additionalRules: [
-					"typescript/no-non-null-assertion",
-					"typescript/no-unnecessary-type-assertion",
-				],
-			},
-		];
-		await Promise.all(
-			wrappedImports.map((example) =>
-				expectFindings(
-					{
-						files: {
-							"a.ts": `export async function a(): Promise<void> { await import(${example.source}); }`,
-							"b.ts": "import { a } from './a.ts'; export async function b(): Promise<void> { return a(); }",
-						},
-					},
-					[
-						{ code: "import/no-cycle", file: "a.ts", line: 1 },
-						{ code: "import/no-cycle", file: "b.ts", line: 1 },
-						...example.additionalRules.map((code) => ({ code, file: "a.ts", line: 1 })),
-					],
-				),
-			),
-		);
-		await expectFindings(
-			{
-				files: {
-					"external.ts":
-						"import { foreign } from '@quality/cycle'; export function external(): number { return foreign(); }",
-					"node_modules/@quality/cycle/package.json": JSON.stringify({
-						name: "@quality/cycle",
-						version: "1.0.0",
-						type: "module",
-						exports: "./index.ts",
-					}),
-					"node_modules/@quality/cycle/index.ts":
-						"import { external } from '../../../external.ts'; export function foreign(): number { return external(); }",
-				},
-				paths: ["external.ts"],
-			},
-			[{ code: "import/no-cycle", file: "external.ts", line: 1 }],
-		);
 	});
 
-	test("type-only cycles are not exempt from import boundaries", async () => {
+	nodeTest(
+		"QX-011 records the published importer's external and awaited-dynamic cycle limits",
+		async () => {
+			await expectFindings(
+				{
+					files: {
+						"external.ts":
+							"import { foreign } from '@quality/cycle'; export function external(): number { return foreign(); }",
+						"node_modules/@quality/cycle/package.json": JSON.stringify({
+							name: "@quality/cycle",
+							version: "1.0.0",
+							type: "module",
+							exports: "./index.ts",
+						}),
+						"node_modules/@quality/cycle/index.ts":
+							"import { external } from '../../../external.ts'; export function foreign(): number { return external(); }",
+					},
+					paths: ["external.ts"],
+				},
+				[],
+			);
+			await expectFindings(
+				{
+					files: {
+						"a.ts": "export async function a(): Promise<number> { const { b } = await import('./b.ts'); return b(); }",
+						"b.ts": "import { a } from './a.ts'; export async function b(): Promise<number> { return a(); }",
+					},
+				},
+				[],
+			);
+		},
+	);
+
+	nodeTest("type-only cycles are not exempt from import boundaries", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -586,7 +411,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("string timer callbacks are implied evaluation", async () => {
+	nodeTest("string timer callbacks are implied evaluation", async () => {
 		await expectFindings(
 			{
 				compiler: { types: ["node"] },
@@ -605,7 +430,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("allowed scalar interpolation and contextual void contracts stay valid", async () => {
+	nodeTest("allowed scalar interpolation and contextual void contracts stay valid", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -617,110 +442,107 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	test("generic callback results retain their actual contract without artificial readonly wrappers", async () => {
-		await expectFindings(
-			{
-				files: {
-					"pass.ts":
-						"export function invoke<T>(operation: () => T): T { return operation(); }",
-					"fail.ts":
-						"export function invoke<T>(operation: () => T): T { console.log(JSON.parse('null').name); return operation(); }",
+	nodeTest(
+		"generic callback results retain their actual contract without artificial readonly wrappers",
+		async () => {
+			await expectFindings(
+				{
+					files: {
+						"pass.ts":
+							"export function invoke<T>(operation: () => T): T { return operation(); }",
+						"fail.ts":
+							"export function invoke<T>(operation: () => T): T { console.log(JSON.parse('null').name); return operation(); }",
+					},
 				},
-			},
-			[{ code: "typescript/no-unsafe-member-access", file: "fail.ts", line: 1 }],
-		);
-	});
-
-	test("inferred callback inputs do not waive parameter-property mutation protection", async () => {
-		await expectFindings(
-			{
-				files: {
-					"pass.ts": "export const values = [{ count: 1 }].map((item) => item.count);",
-					"fail.ts":
-						"export const values = [{ count: 1 }].map((item) => { item.count += 1; return item.count; });",
-				},
-			},
-			[{ code: "eslint/no-param-reassign", file: "fail.ts", line: 1 }],
-		);
-	});
-
-	test("native Promise executors deliberately discard timer handles using block bodies", async () => {
-		await expectFindings(
-			{
-				compiler: { types: ["node"] },
-				files: {
-					"pass.ts":
-						"export const work = new Promise<void>((resolve) => { setTimeout(resolve, 1); });",
-					"fail.ts":
-						"export const work = new Promise<void>((resolve) => setTimeout(resolve, 1));",
-				},
-			},
-			[{ code: "typescript/strict-void-return", file: "fail.ts", line: 1 }],
-		);
-	});
-
-	test("PromiseLike values have readonly permission but no floating-Promise exemption", async () => {
-		await expectFindings(
-			{
-				files: {
-					"pass.ts":
-						"export declare const work: PromiseLike<number>; export async function value(): Promise<number> { return await work; }",
-					"fail.ts":
-						"export declare const work: PromiseLike<number>; export function value(): void { work; }",
-				},
-			},
-			[
-				{ code: "typescript/no-floating-promises", file: "fail.ts", line: 1 },
-				{ code: "eslint/no-unused-expressions", file: "fail.ts", line: 1 },
-			],
-		);
-	});
-
-	test("argument-presence and undefined-return exceptions stay in exact boundary files", async () => {
-		const argumentsCase = "export const value = JSON.stringify(1, undefined);";
-		const arrowCase = "export const value: () => undefined = () => undefined;";
-		const expected: readonly Finding[] = [
-			{ code: "unicorn/no-useless-undefined", file: "ordinary.test.ts", line: 1 },
-		];
-		await expectFindings({ files: { "ordinary.test.ts": argumentsCase } }, expected);
-		await expectFindings({ files: { "ordinary.test.ts": arrowCase } }, expected);
-		await expectFindings(
-			{
-				files: {
-					"test/posthorse.test.ts": argumentsCase,
-					"test/renderers.test.ts": arrowCase,
-				},
-			},
-			[],
-		);
-	});
-
-	test("normal lint fixes cannot manufacture unknown contracts from explicit any", async () => {
-		const text = "export type Value = any;";
-		const project = fixture({ files: { "fail.ts": text } });
-		try {
-			const result = await runCli(
-				join(repository, "node_modules/.bin/oxlint"),
-				["--fix", "--format=json", "fail.ts"],
-				project.root,
+				[{ code: "typescript/no-unsafe-member-access", file: "fail.ts", line: 1 }],
 			);
-			assert.equal(result.signal, null);
-			assert.equal(result.stderr, "");
-			assert.equal(result.status, 1);
-			const output: unknown = JSON.parse(result.stdout);
-			assert.ok(objectValue(output) && Array.isArray(output.diagnostics));
-			const locations = output.diagnostics.map((value: unknown) => {
-				assert.ok(objectValue(value) && Array.isArray(value.labels));
-				const label: unknown = value.labels[0];
-				assert.ok(objectValue(label) && objectValue(label.span));
-				return { code: value.code, file: value.filename, line: label.span.line };
-			});
-			assert.deepEqual(locations, [
-				{ code: "typescript(no-explicit-any)", file: "fail.ts", line: 1 },
-			]);
-			assert.equal(readFileSync(join(project.root, "fail.ts"), "utf8"), text);
-		} finally {
-			project.dispose();
-		}
-	});
+		},
+	);
+
+	nodeTest(
+		"inferred callback inputs do not waive parameter-property mutation protection",
+		async () => {
+			await expectFindings(
+				{
+					files: {
+						"pass.ts":
+							"export const values = [{ count: 1 }].map((item) => item.count);",
+						"fail.ts":
+							"export const values = [{ count: 1 }].map((item) => { item.count += 1; return item.count; });",
+					},
+				},
+				[{ code: "eslint/no-param-reassign", file: "fail.ts", line: 1 }],
+			);
+		},
+	);
+
+	nodeTest(
+		"native Promise executors deliberately discard timer handles using block bodies",
+		async () => {
+			await expectFindings(
+				{
+					compiler: { types: ["node"] },
+					files: {
+						"pass.ts":
+							"export const work = new Promise<void>((resolve) => { setTimeout(resolve, 1); });",
+						"fail.ts":
+							"export const work = new Promise<void>((resolve) => setTimeout(resolve, 1));",
+					},
+				},
+				[{ code: "eslint/no-promise-executor-return", file: "fail.ts", line: 1 }],
+			);
+		},
+	);
+
+	nodeTest(
+		"PromiseLike values have readonly permission but no floating-Promise exemption",
+		async () => {
+			await expectFindings(
+				{
+					files: {
+						"pass.ts":
+							"export declare const work: PromiseLike<number>; export async function value(): Promise<number> { return await work; }",
+						"fail.ts":
+							"export declare const work: PromiseLike<number>; export function value(): void { work; }",
+					},
+				},
+				[
+					{ code: "typescript/no-floating-promises", file: "fail.ts", line: 1 },
+					{ code: "eslint/no-unused-expressions", file: "fail.ts", line: 1 },
+				],
+			);
+		},
+	);
+
+	nodeTest(
+		"normal lint fixes cannot manufacture unknown contracts from explicit any",
+		async () => {
+			const text = "export type Value = any;";
+			const project = fixture({ files: { "fail.ts": text } });
+			try {
+				const result = await runCli(
+					join(repository, "node_modules/.bin/oxlint"),
+					["--fix", "--format=json", "fail.ts"],
+					project.root,
+				);
+				assert.equal(result.signal, null);
+				assert.equal(result.stderr, "");
+				assert.equal(result.status, 1);
+				const output: unknown = JSON.parse(result.stdout);
+				assert.ok(objectValue(output) && Array.isArray(output.diagnostics));
+				const locations = output.diagnostics.map((value: unknown) => {
+					assert.ok(objectValue(value) && Array.isArray(value.labels));
+					const label: unknown = value.labels[0];
+					assert.ok(objectValue(label) && objectValue(label.span));
+					return { code: value.code, file: value.filename, line: label.span.line };
+				});
+				assert.deepEqual(locations, [
+					{ code: "typescript(no-explicit-any)", file: "fail.ts", line: 1 },
+				]);
+				assert.equal(readFileSync(join(project.root, "fail.ts"), "utf8"), text);
+			} finally {
+				project.dispose();
+			}
+		},
+	);
 });

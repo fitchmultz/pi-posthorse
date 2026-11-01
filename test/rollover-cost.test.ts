@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test as nodeTest } from "node:test";
 import { calculateCost, fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { shouldCompact } from "@earendil-works/pi-coding-agent";
 import { budgetFor } from "../src/budget.ts";
@@ -12,7 +12,7 @@ const scenarios = [
 ] as const;
 
 for (const scenario of scenarios) {
-	test(`reserve scenario ${scenario.reserve} agrees with the native threshold`, () => {
+	nodeTest(`reserve scenario ${scenario.reserve} agrees with the native threshold`, () => {
 		const settings = {
 			enabled: true,
 			reserveTokens: scenario.reserve,
@@ -32,7 +32,7 @@ for (const scenario of scenarios) {
 	});
 }
 
-test("synthetic prices distinguish a cache read, fresh input, and both write lifetimes", () => {
+nodeTest("synthetic prices distinguish a cache read, fresh input, and both write lifetimes", () => {
 	const model = {
 		...fauxProvider().getModel(),
 		cost: { input: 10, output: 30, cacheRead: 1, cacheWrite: 12.5 },

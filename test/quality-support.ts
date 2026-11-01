@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { objectValue, readObject } from "../scripts/quality-policy.ts";
+import { objectValue, readObject } from "../scripts/quality-settings.ts";
+import { parseDocument } from "yaml";
 
 export const repository = resolve(import.meta.dirname, "..");
 export const policy = readObject(join(repository, ".oxlintrc.json"));
@@ -53,23 +54,22 @@ export function fixture(options: FixtureOptions): {
 		}
 		writeFileSync(join(root, "package.json"), JSON.stringify({ type: "module" }));
 		writeFileSync(join(root, ".gitignore"), "node_modules/\n");
+		const compiler = readObject(join(repository, "tsconfig.json"));
+		assert.ok(objectValue(compiler.compilerOptions));
 		writeFileSync(
 			join(root, "tsconfig.json"),
 			JSON.stringify({
-				compilerOptions: {
-					target: "ESNext",
-					module: "NodeNext",
-					types: ["node"],
-					strict: true,
-					noImplicitReturns: true,
-					noEmit: true,
-					allowJs: true,
-					checkJs: false,
-					allowImportingTsExtensions: true,
-					skipLibCheck: true,
-					...options.compiler,
-				},
-				include: ["**/*.ts", "**/*.js", "**/*.mjs"],
+				compilerOptions: { ...compiler.compilerOptions, ...options.compiler },
+				include: [
+					"**/*.ts",
+					"**/*.tsx",
+					"**/*.mts",
+					"**/*.cts",
+					"**/*.js",
+					"**/*.jsx",
+					"**/*.mjs",
+					"**/*.cjs",
+				],
 			}),
 		);
 		if (!objectValue(policy.rules)) {
@@ -182,6 +182,20 @@ export async function expectFindings(
 	const sort = (items: readonly Finding[]) =>
 		items.map((item) => `${item.file}:${item.line}:${item.code}`).toSorted();
 	assert.deepEqual(sort(actual), sort(expected));
+}
+
+export function changeConfiguration(
+	root: string,
+	file: string,
+	path: readonly (string | number)[],
+	value: unknown,
+): void {
+	const document = parseDocument(readFileSync(join(root, file), "utf8"));
+	document.setIn(path, value);
+	writeFileSync(
+		join(root, file),
+		file.endsWith(".json") ? JSON.stringify(document.toJS()) : document.toString(),
+	);
 }
 
 export function fileText(path: string): string {

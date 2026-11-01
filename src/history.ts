@@ -10,7 +10,10 @@ import type { PageAccess } from "./paging.ts";
 import { scopedSessionFiles, sessionWindowEntries } from "./session-files.ts";
 
 type LocatedEntry = { readonly item: WindowedEntry; readonly source: string };
-function entryReference(id: string): { readonly entryId: string; readonly fileKey?: string } {
+function entryReference(id: string): {
+	readonly entryId: string;
+	readonly fileKey?: string | undefined;
+} {
 	const separator = id.indexOf("@");
 	return {
 		entryId: separator < 0 ? id : id.slice(0, separator),
@@ -125,7 +128,7 @@ export function registerHistory(
 			),
 		}),
 		// Pi's fixed tool contract supplies id, params, signal, updates, and context.
-		// oxlint-disable-next-line max-params
+		// oxlint-disable-next-line max-params -- QX-002: Pi supplies five fixed positional tool arguments.
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const source = historySource(ctx);
 			if (params.op === "search") {

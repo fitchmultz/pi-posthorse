@@ -30,7 +30,7 @@ export type HistoryParams = {
 export type HistorySource = {
 	readonly dir: string;
 	readonly cwd: string;
-	readonly currentFile?: string;
+	readonly currentFile?: string | undefined;
 	readonly branch: () => readonly EntryLike[];
 	readonly projection: () => readonly ProjectedEntry[];
 };
@@ -38,7 +38,7 @@ export type HistoryCursor = readonly [id: string, priority: 0 | 1, offset: numbe
 export type HistoryMatches = {
 	readonly hits: readonly HistoryHit[];
 	readonly skipped: number;
-	readonly cursor?: HistoryCursor;
+	readonly cursor?: HistoryCursor | undefined;
 	readonly key: string;
 	readonly limit: number;
 };
@@ -109,7 +109,7 @@ function contextVisibility(project: HistorySource["projection"]): (entry: EntryL
 	};
 }
 type SearchProgress = {
-	readonly cursor?: HistoryCursor;
+	readonly cursor?: HistoryCursor | undefined;
 	readonly limit: number;
 	readonly add: (hit: HistoryHit) => void;
 	readonly seeking: (priority: 0 | 1) => boolean;
@@ -201,8 +201,8 @@ async function scanArchive(
 	options: {
 		readonly source: string;
 		readonly query: string;
-		readonly signal?: AbortSignal;
-		readonly wanted?: LineMatcher;
+		readonly signal?: AbortSignal | undefined;
+		readonly wanted?: LineMatcher | undefined;
 		readonly inContext: (entry: EntryLike) => boolean;
 	},
 	accumulator: SearchProgress,
@@ -231,7 +231,7 @@ async function archivedMatches(
 	source: HistorySource,
 	search: {
 		readonly query: string;
-		readonly signal?: AbortSignal;
+		readonly signal?: AbortSignal | undefined;
 		readonly inContext: (entry: EntryLike) => boolean;
 	},
 	accumulator: SearchProgress,

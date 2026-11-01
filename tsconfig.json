@@ -6,12 +6,19 @@
 		"strict": true,
 		"noImplicitReturns": true,
 		"allowJs": true,
-		"checkJs": false,
+		"checkJs": true,
 		"noEmit": true,
 		"allowImportingTsExtensions": true,
 		"erasableSyntaxOnly": true,
 		"verbatimModuleSyntax": true,
-		"skipLibCheck": true
+		"skipLibCheck": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitOverride": true,
+		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true,
+		"noUncheckedSideEffectImports": true,
+		"forceConsistentCasingInFileNames": true,
+		"noCheck": false
 	},
 	"include": [
 		"index.ts",

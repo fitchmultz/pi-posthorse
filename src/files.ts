@@ -45,22 +45,18 @@ export async function resolveFileTarget(absolutePath: string): Promise<string> {
 		if (target.endsWith(sep) || target.endsWith("/")) {
 			// Trailing separators require an existing directory, never a new regular file.
 			// Resolution follows dependent links in filesystem order.
-			// oxlint-disable-next-line no-await-in-loop
 			await stat(target);
 			return realpath(target);
 		}
 		const parentInput = dirname(target);
 		// stat enforces regular-file/.. traversal that macOS realpath alone accepts.
-		// oxlint-disable-next-line no-await-in-loop
 		if (!(await stat(parentInput)).isDirectory()) {
 			throw Object.assign(new Error(`Not a directory: ${parentInput}`), { code: "ENOTDIR" });
 		}
 		// Each parent must resolve before its child link can be examined.
-		// oxlint-disable-next-line no-await-in-loop
 		const parent = await realpath(parentInput);
 		target = join(parent, basename(target));
 		// Link targets cannot be known before examining the current link.
-		// oxlint-disable-next-line no-await-in-loop
 		const info = await lstatOrMissing(target);
 		if (info === undefined) {
 			return target;
@@ -73,7 +69,6 @@ export async function resolveFileTarget(absolutePath: string): Promise<string> {
 		}
 		links.add(target);
 		// Preserve .. until the preceding directory symlink has been followed.
-		// oxlint-disable-next-line no-await-in-loop
 		const link = await readlink(target);
 		target = isAbsolute(link) ? link : `${parent}${sep}${link}`;
 	}

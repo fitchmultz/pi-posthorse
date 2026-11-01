@@ -21,7 +21,7 @@ export type PosthorseDisplay =
 				readonly percent: number | null;
 			};
 			readonly rollover?: "enabled" | "disabled" | "unsupported";
-			readonly rolloverAt?: number;
+			readonly rolloverAt?: number | undefined;
 	  }
 	| {
 			readonly kind: "notes-list" | "notes-search";
@@ -241,7 +241,7 @@ function historyReadSummary(
 	) {
 		return pageSummary(display);
 	}
-	const summary = `${pageSummary(display).split("\n")[0]}\nImages ${n(display.imageOffset ?? 0)}–${n(display.imageEnd)} of ${n(display.imageTotal)}`;
+	const summary = `${pageSummary(display).split("\n", 1).join("")}\nImages ${n(display.imageOffset ?? 0)}–${n(display.imageEnd)} of ${n(display.imageTotal)}`;
 	return display.end < display.total || display.imageEnd < display.imageTotal
 		? `Next offset ${n(display.end)}\nimageOffset ${n(display.imageEnd)}\n${summary}`
 		: summary;

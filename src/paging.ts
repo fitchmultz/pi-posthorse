@@ -14,8 +14,8 @@ import {
 export type PageRequest = {
 	readonly offset: number;
 	readonly imageCount?: number;
-	readonly cursor?: string;
-	readonly imageOffset?: number;
+	readonly cursor?: string | undefined;
+	readonly imageOffset?: number | undefined;
 };
 export type NotesPage = {
 	readonly rows: readonly string[];

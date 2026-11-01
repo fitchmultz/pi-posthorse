@@ -61,11 +61,12 @@ function callDetails(name: ToolName, args: Readonly<Record<string, unknown>>): s
 		name === "history" && args.op === "search"
 			? `Scope: ${args.all === true ? "all project sessions" : "current branch"}`
 			: "";
-	const offsets = [
+	const labels: readonly (readonly [string, string])[] = [
 		["offset", "Offset"],
 		["imageOffset", "Image offset"],
 		["limit", "Limit"],
-	].map(([key, label]) => {
+	];
+	const offsets = labels.map(([key, label]) => {
 		const value = args[key];
 		return value === undefined
 			? ""

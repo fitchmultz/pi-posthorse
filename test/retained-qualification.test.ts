@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test as nodeTest } from "node:test";
 import { repository, runCli } from "./quality-support.ts";
 
-test("release qualification must cover the retained package and selected host", async () => {
+nodeTest("release qualification must cover the retained package and selected host", async () => {
 	const root = mkdtempSync(join(tmpdir(), "posthorse-retained-"));
 	const candidatePath = join(root, "release.json");
 	const reportPath = join(root, "qualification.json");

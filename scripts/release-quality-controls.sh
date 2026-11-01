@@ -10,7 +10,7 @@ fi
 
 scratch="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/posthorse-release-quality.XXXXXX")"
 worktree="$scratch/checkout"
-evidence="${PI_RELEASE_QUALITY_EVIDENCE:-$scratch/evidence}"
+evidence="${PI_RELEASE_QUALITY_EVIDENCE:-$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/posthorse-quality-evidence.XXXXXX")}"
 mkdir -p "$evidence"
 evidence="$(cd "$evidence" && pwd -P)"
 added=0
@@ -30,9 +30,14 @@ trap cleanup EXIT
 git -C "$source_root" worktree add --detach "$worktree" "$source_sha"
 added=1
 cd "$worktree"
-printf 'source=%s\ntree=%s\n' "$source_sha" "$(git rev-parse 'HEAD^{tree}')" | tee "$evidence/source.txt"
 npm ci --ignore-scripts --no-audit
-npm run quality:prepare
+{
+  printf 'source=%s\ntree=%s\n' "$source_sha" "$(git rev-parse 'HEAD^{tree}')"
+  node --version
+  npm --version
+  npm ls --depth=0
+} | tee "$evidence/source.txt"
+printf 'Evidence: %s\n' "$evidence"
 
 run_command() {
   local name=$1 script=$2 status=0
@@ -80,38 +85,70 @@ expect_rejection() {
   done
 }
 
-inject() {
-  git restore --source="$source_sha" -- src/budget.ts
-  printf '\n%s\n' "$1" >> src/budget.ts
+expect_gates() {
+  local name=$1 failed=$2 gate status
+  for gate in quality:policy quality:config lint:oxlint format:check check test build; do
+    status=0
+    if [[ ",$failed," == *",$gate,"* ]]; then
+      status=1
+    fi
+    if ! grep -Fxq "Gate $gate: exit $status" "$evidence/$name.log"; then
+      printf '%s: %s did not run with expected exit %s.\n' "$name" "$gate" "$status" >&2
+      exit 1
+    fi
+  done
 }
 
-inject 'const = 0;'
-expect_rejection syntax verify 'Could not parse src/budget.ts: Unexpected token'
+expect_verify_rejection() {
+  local name=$1 failed=$2
+  shift 2
+  expect_rejection "$name" verify "$@"
+  expect_gates "$name" "$failed"
+}
+
+restore_controls() {
+  git restore --source="$source_sha" -- src/budget.ts test/posthorse.test.ts .oxlintrc.json
+}
+
+inject() {
+  restore_controls
+  printf '\n%s\n' "$1" >> src/budget.ts
+  control_line="$(wc -l < src/budget.ts | tr -d '[:space:]')"
+}
+
+expect_success baseline verify
+expect_gates baseline ''
+
+inject 'debugger;'
+expect_verify_rejection lint lint:oxlint "src/budget.ts:$control_line:" 'eslint(no-debugger)'
 
 inject 'Promise.resolve(1);'
-expect_rejection semantic verify 'src/budget.ts:' 'promise(catch-or-return)' \
-  'typescript(no-floating-promises)' 'Found 0 warnings and 2 errors.'
+expect_verify_rejection semantic lint:oxlint "src/budget.ts:$control_line:" \
+  'promise(catch-or-return)' 'typescript(no-floating-promises)'
 
 inject 'export const releaseGateNumber: number = "not a number";'
-expect_rejection compiler-tsc check 'src/budget.ts(' 'error TS2322:'
-if [[ "$(grep -Ec 'error TS[0-9]+:' "$evidence/compiler-tsc.log")" != 1 ]]; then
-  printf '%s\n' 'compiler-tsc: unexpected compiler diagnostics.' >&2
-  exit 1
-fi
-expect_rejection compiler verify 'src/budget.ts:' 'typescript(TS2322)' \
-  'Found 0 warnings and 1 error.'
+expect_verify_rejection compiler check "src/budget.ts($control_line,14): error TS2322:"
 
 inject 'export const releaseGateFormat=1;'
-expect_rejection format verify 'src/budget.ts' 'Found 0 warnings and 0 errors.' \
+expect_verify_rejection format format:check 'src/budget.ts' \
   'Format issues found in above 1 files.'
 
-inject $'const test = () => Promise.resolve(1);\ntest();'
-expect_rejection allowance-local-test verify 'src/budget.ts:' \
-  'typescript(no-floating-promises)' 'Found 0 warnings and 1 error.'
+restore_controls
+printf '\n%s\n' $'nodeTest("release quality control: failed assertion", () => {\n\tassert.equal(1, 2);\n});' >> test/posthorse.test.ts
+assertion_line=$(( $(wc -l < test/posthorse.test.ts) - 1 ))
+expect_verify_rejection assertion test 'release quality control: failed assertion' \
+  'ERR_ASSERTION' "test/posthorse.test.ts:$assertion_line:"
 
-inject $'const registration = async () => 1;\nregistration();'
-expect_rejection allowance-ordinary-async verify 'src/budget.ts:' \
-  'typescript(no-floating-promises)' 'Found 0 warnings and 1 error.'
+restore_controls
+node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from "node:fs";
+const file = ".oxlintrc.json";
+const config = JSON.parse(readFileSync(file, "utf8"));
+config.categories.suspicious = "off";
+writeFileSync(file, JSON.stringify(config));
+NODE
+npm run format > "$evidence/policy-format.log" 2>&1
+expect_verify_rejection policy 'quality:policy,test' '.oxlintrc.json:categories differs'
 
 inject $'var releaseGateValue=1;\nexport const releaseGateFix=releaseGateValue;'
 expect_success lint-fix-first lint:fix
@@ -132,9 +169,9 @@ if ! cmp -s "$evidence/fix-first.diff" "$evidence/fix-second.diff"; then
   printf '%s\n' 'Safe lint and formatting did not converge.' >&2
   exit 1
 fi
-expect_success converged-lint lint
-expect_success converged-format format:check
-git restore --source="$source_sha" -- src/budget.ts
+expect_success converged verify
+expect_gates converged ''
+restore_controls
 if [[ -n "$(git status --porcelain)" ]]; then
   printf '%s\n' 'Disposable worktree was not restored cleanly.' >&2
   exit 1

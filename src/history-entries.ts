@@ -36,10 +36,10 @@ export function contextStart(entries: readonly EntryLike[]): {
 } {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
-		if (entry.type === "context_window") {
+		if (entry?.type === "context_window") {
 			return { start: i + 1, boundary: entry };
 		}
-		if (entry.type === "compaction") {
+		if (entry?.type === "compaction") {
 			const kept = entries.findIndex((candidate) => candidate.id === entry.firstKeptEntryId);
 			return { start: kept >= 0 ? kept : i + 1, boundary: entry };
 		}
@@ -101,27 +101,26 @@ function contentText(content: unknown): string {
 		.join("\n");
 }
 function ownAssistantText(message: MessageLike, images: WindowedEntry["images"]): string[] {
-	const originals = [""];
+	const originals: string[] = [];
+	let current = "";
 	for (const part of unknownArray(message.content) ?? []) {
 		if (isRecoveryCall(part)) {
-			originals.push("");
+			originals.push(current);
+			current = "";
 		} else {
 			const partText = textOf({ content: [part] });
-			const index = originals.length - 1;
 			if (partText !== "") {
-				originals[index] += `${originals[index] === "" ? "" : "\n"}${partText}`;
+				current = current === "" ? partText : `${current}\n${partText}`;
 			}
 		}
 	}
-	const metadata = [assistantFailure(message), imageSummary(images)]
+	const last = [current, assistantFailure(message), imageSummary(images)]
 		.filter((part) => part !== "")
 		.join("\n");
-	const last = originals.length - 1;
-	if (metadata !== "") {
-		originals[last] += `${originals[last] === "" ? "" : "\n"}${metadata}`;
-	}
-	if (originals[0] !== "") {
-		originals[0] = `[assistant] ${originals[0]}`;
+	originals.push(last);
+	const first = originals[0] ?? "";
+	if (first !== "") {
+		originals[0] = `[assistant] ${first}`;
 	}
 	return originals;
 }
@@ -228,9 +227,10 @@ export function windowProjection(): (entry: EntryLike) => string {
 export function* reverseWindowEntries(entries: readonly EntryLike[]): Generator<WindowedEntry> {
 	// Preserve parent-relative window labels without normalizing the whole branch.
 	// ponytail: ancestry still scans metadata; a native window-aware iterator could remove that cost.
-	const windows = entries.map(windowProjection());
-	for (let i = entries.length - 1; i >= 0; i--) {
-		const item = toWindowedEntry(entries[i], windows[i]);
+	const project = windowProjection();
+	const windows = entries.map((entry) => ({ entry, windowId: project(entry) }));
+	for (const { entry, windowId } of windows.reverse()) {
+		const item = toWindowedEntry(entry, windowId);
 		if (item !== undefined) {
 			yield item;
 		}
