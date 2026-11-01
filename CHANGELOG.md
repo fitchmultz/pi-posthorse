@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.10.3 - 2026-11-01
+
+<!-- npm-release:unreleased:start -->
+
 - Adopt the strict Oxlint and Oxfmt engineering standard 5.1.2 with published quality tools,
   complete source and compiler coverage, operation-bound exceptions, and independent acceptance
   gates. Replace custom native checker patches with the standard's baseline and explicit evidence.
@@ -9,6 +13,16 @@
   SDK callback contracts and extract recovery-note responsibilities without changing public tools.
 - Disclose the published import checker's external and awaited-dynamic cycle detection limits.
   Static and type-only cycle checks remain enabled.
+
+<!-- npm-release:unreleased:end -->
+
+- Adopt strict engineering standard 5.1.2 (#115) ([1389a68](https://github.com/fitchmultz/pi-posthorse/commit/1389a68bddc1ea35f2f109cadfa031b086b6d8e7))
+
+### What's Changed
+
+- Adopt strict engineering standard 5.1.2 by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/115
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.2...v0.10.3
 
 ## 0.10.2 - 2026-11-01
 
