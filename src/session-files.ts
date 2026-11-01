@@ -56,7 +56,7 @@ const LABEL_SOURCES: readonly (readonly [label: string, needles: readonly string
  */
 export function prefilterNeedles(query: string): string[] | undefined {
 	// A match contains every fragment between characters that JSON escapes or labels may add.
-	const [fragment] = query
+	const [fragment = ""] = query
 		.split(/["\\[\](){}:$\p{Cc}\p{Cs}]/u)
 		.map((part) => part.trim())
 		.sort((a, b) => b.length - a.length);
@@ -143,7 +143,6 @@ function ripgrepFilter(
 		for (const binary of binaries) {
 			try {
 				// Try the host-managed binary first; PATH is a fallback only when it is unavailable.
-				// oxlint-disable-next-line no-await-in-loop
 				return (await execFileText(binary, [...flags, ...paths], dir, signal)).split("\0");
 			} catch (error) {
 				const code = isRecord(error) ? error.code : undefined;
@@ -162,7 +161,7 @@ function ripgrepFilter(
 	return async (files) => {
 		const paths = files.map((file) => relative(dir, file));
 		const found = new Set((await Promise.all(commandGroups(paths).map(matching))).flat());
-		return files.filter((_file, index) => found.has(paths[index]));
+		return files.filter((file) => found.has(relative(dir, file)));
 	};
 }
 function messageFrom(value: unknown): MessageLike | undefined {
@@ -222,7 +221,7 @@ function entryHead(prefix: string): EntryLike | undefined {
 	return {
 		type: head[1],
 		id: head[2],
-		parentId: head[3] === "null" ? null : head[3].slice(1, -1),
+		parentId: head[3] === "null" ? null : head[3]?.slice(1, -1),
 	};
 }
 /** Whether a caller may need a line; other lines only advance window ancestry. */
@@ -271,7 +270,6 @@ async function sessionFiles(dir: string): Promise<string[]> {
 	let level = existsSync(dir) ? [dir] : [];
 	while (level.length > 0) {
 		// Each level lists the directories the previous level found.
-		// oxlint-disable-next-line no-await-in-loop
 		const listings = await Promise.all(
 			level.map((path) => readdir(path, { withFileTypes: true })),
 		);
@@ -293,16 +291,24 @@ async function sessionFiles(dir: string): Promise<string[]> {
 }
 type SessionFile = { readonly file: string; readonly size: number; readonly mtime: number };
 async function newestFirst(files: readonly string[]): Promise<SessionFile[]> {
-	const stats = await Promise.all(files.map((file) => stat(file)));
-	return files
-		.map((file, index) => ({ file, size: stats[index].size, mtime: stats[index].mtimeMs }))
-		.sort((a, b) => b.mtime - a.mtime);
+	const stats = await Promise.all(
+		files.map(async (file) => {
+			const info = await stat(file);
+			return { file, size: info.size, mtime: info.mtimeMs };
+		}),
+	);
+	return stats.sort((a, b) => b.mtime - a.mtime);
 }
 /** The newest files up to FIRST_SEARCH_BYTES, then the rest. */
 function searchPhases(files: readonly SessionFile[]): readonly (readonly string[])[] {
 	let count = 0;
-	for (let bytes = 0; count < files.length && bytes < FIRST_SEARCH_BYTES; count++) {
-		bytes += files[count].size;
+	let bytes = 0;
+	for (const file of files) {
+		if (bytes >= FIRST_SEARCH_BYTES) {
+			break;
+		}
+		bytes += file.size;
+		count++;
 	}
 	const paths = files.map(({ file }) => file);
 	return [paths.slice(0, count), paths.slice(count)];
@@ -310,7 +316,7 @@ function searchPhases(files: readonly SessionFile[]): readonly (readonly string[
 async function sessionHeader(
 	file: string,
 	signal?: AbortSignal,
-): Promise<{ readonly cwd?: string } | undefined> {
+): Promise<{ readonly cwd?: string | undefined } | undefined> {
 	for await (const line of lfLines(file, signal)) {
 		try {
 			const value: unknown = JSON.parse(line.toString("utf8"));
@@ -343,11 +349,11 @@ function parentSession(
 export type SessionScope = {
 	readonly dir: string;
 	readonly cwd: string;
-	readonly currentFile?: string;
-	readonly signal?: AbortSignal;
-	readonly fileKey?: string;
+	readonly currentFile?: string | undefined;
+	readonly signal?: AbortSignal | undefined;
+	readonly fileKey?: string | undefined;
 	/** Raw-text needles; files without any of them are skipped. */
-	readonly needles?: readonly string[];
+	readonly needles?: readonly string[] | undefined;
 };
 /** Scope memoization is owned by one enumeration; nested runs inherit their parent's project. */
 function membership(
@@ -393,10 +399,8 @@ export async function* scopedSessionFiles(scope: SessionScope): AsyncGenerator<s
 			: ripgrepFilter(scope.dir, scope.needles, scope.signal);
 	for (const phase of searchPhases(selected)) {
 		// Older files are searched only when the newest ones did not satisfy the caller.
-		// oxlint-disable-next-line no-await-in-loop
 		for (const file of prefilter === undefined ? phase : await prefilter(phase)) {
 			// Preserve newest-first traversal while closing each header stream before opening another.
-			// oxlint-disable-next-line no-await-in-loop
 			if (await belongs(file)) {
 				yield file;
 			}

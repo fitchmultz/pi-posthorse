@@ -22,7 +22,7 @@ export type ReminderLookup = {
 };
 export type StaleReminderPredicate = (message: {
 	readonly role: string;
-	readonly customType?: string;
+	readonly customType?: string | undefined;
 	readonly details?: unknown;
 }) => boolean;
 
@@ -53,8 +53,8 @@ function onlyReminders(entries: readonly EntryLike[]): EntryLike[] {
 	);
 }
 type ScanProgress = {
-	readonly boundary?: EntryLike;
-	readonly window?: EntryLike;
+	readonly boundary?: EntryLike | undefined;
+	readonly window?: EntryLike | undefined;
 	readonly kept: boolean;
 };
 function advanceBoundary(entry: EntryLike, progress: ScanProgress): ScanProgress {

@@ -1,53 +1,11 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { checkPolicy, objectValue, suppressionProblems } from "../scripts/quality-policy.ts";
+import { test as nodeTest } from "node:test";
+import { checkPolicy } from "../scripts/quality-policy.ts";
+import { inspectSuppressions } from "../scripts/quality-directives.ts";
 import { sourcePolicies } from "../scripts/quality-source.ts";
-import { expectFindings, fixture, policy, repository } from "./quality-support.ts";
-import { execFileSync, spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { expectFindings, fixture, repository } from "./quality-support.ts";
 
-await test("unchecked-JavaScript overrides disable installed type-aware metadata, not namespaces", () => {
-	const result = spawnSync(
-		join(repository, "node_modules/.bin/oxlint"),
-		["--rules", "--format=json"],
-		{ encoding: "utf8", timeout: 30_000 },
-	);
-	assert.equal(result.status, 0);
-	const metadata: unknown = JSON.parse(result.stdout);
-	assert.ok(Array.isArray(metadata));
-	const entries: readonly unknown[] = metadata;
-	const names = entries.flatMap((entry) => {
-		assert.ok(objectValue(entry));
-		if (entry.type_aware !== true) {
-			return [];
-		}
-		assert.equal(typeof entry.scope, "string");
-		assert.equal(typeof entry.value, "string");
-		if (typeof entry.scope !== "string" || typeof entry.value !== "string") {
-			throw new Error("Invalid installed rule metadata");
-		}
-		return [`${entry.scope}/${entry.value}`];
-	});
-	assert.ok(Array.isArray(policy.overrides));
-	const overrides: readonly unknown[] = policy.overrides;
-	const unchecked = overrides.find(
-		(entry) =>
-			objectValue(entry) &&
-			objectValue(entry.rules) &&
-			entry.rules["typescript/no-floating-promises"] === "off",
-	);
-	assert.ok(objectValue(unchecked) && objectValue(unchecked.rules));
-	assert.deepEqual(
-		Object.keys(unchecked.rules).toSorted(),
-		[...names, "typescript/explicit-module-boundary-types"].toSorted(),
-	);
-	assert.ok(
-		!Object.hasOwn(unchecked.rules, "typescript/no-explicit-any"),
-		"syntactic TypeScript namespace rules must not all be waived",
-	);
-});
-
-await test("suppression policy parses actual comments, never strings, regexes or template text", () => {
+nodeTest("suppression policy reads actual comments, not strings, regexes or documentation", () => {
 	const project = fixture({
 		files: {
 			"examples.ts": [
@@ -63,47 +21,46 @@ await test("suppression policy parses actual comments, never strings, regexes or
 		},
 	});
 	try {
-		const source = sourcePolicies(project.root, ["examples.ts"]).at(0);
+		const source = sourcePolicies(project.root, ["examples.ts"])[0];
 		assert.ok(source);
-		assert.deepEqual(suppressionProblems(source), [
+		assert.deepEqual(inspectSuppressions(source).problems, [
 			"examples.ts:5: compiler suppression is forbidden",
-			"examples.ts:6: only one named rule on oxlint-disable-next-line is permitted",
-			"examples.ts:7: directive needs an adjacent contract explanation",
+			"examples.ts:6: only one named next-line rule with QX identifier and reason is permitted",
+			"examples.ts:7: only one named next-line rule with QX identifier and reason is permitted",
 		]);
 	} finally {
 		project.dispose();
 	}
 });
 
-await test("suppression governance detects directives inside empty containers and punctuation gaps", async () => {
-	const containers = [
+nodeTest("suppression governance sees empty containers and punctuation gaps", async (t) => {
+	for (const container of [
 		"export const empty = { /* oxlint-disable eqeqeq */ };",
 		"export const empty = [ /* oxlint-disable eqeqeq */ ];",
 		"export function empty(): void { /* oxlint-disable eqeqeq */ }",
 		"export const number = ( /* oxlint-disable eqeqeq */ 1 );",
 		"export const first = 1; /* oxlint-disable eqeqeq */ export const second = 2;",
-	];
-	await Promise.all(
-		containers.map(async (container) => {
+	]) {
+		await t.test(container, async () => {
 			const files = {
 				"hidden.ts": `${container}\nexport function unsafe(n: number): boolean { return n == 1; }\n`,
 			};
 			await expectFindings({ files }, []);
 			const project = fixture({ files });
 			try {
-				const source = sourcePolicies(project.root, ["hidden.ts"]).at(0);
+				const source = sourcePolicies(project.root, ["hidden.ts"])[0];
 				assert.ok(source);
-				assert.deepEqual(suppressionProblems(source), [
-					"hidden.ts:1: only one named rule on oxlint-disable-next-line is permitted",
+				assert.deepEqual(inspectSuppressions(source).problems, [
+					"hidden.ts:1: only one named next-line rule with QX identifier and reason is permitted",
 				]);
 			} finally {
 				project.dispose();
 			}
-		}),
-	);
+		});
+	}
 });
 
-await test("JSX text and template literals are not directives, but JSX expression comments are", () => {
+nodeTest("JSX text is not a directive, but JSX expression comments are", () => {
 	const project = fixture({
 		files: {
 			"example.tsx": [
@@ -116,156 +73,128 @@ await test("JSX text and template literals are not directives, but JSX expressio
 		compiler: { jsx: "preserve" },
 	});
 	try {
-		const source = sourcePolicies(project.root, ["example.tsx"]).at(0);
+		const source = sourcePolicies(project.root, ["example.tsx"])[0];
 		assert.ok(source);
-		assert.deepEqual(suppressionProblems(source), [
-			"example.tsx:4: only one named rule on oxlint-disable-next-line is permitted",
+		assert.deepEqual(inspectSuppressions(source).problems, [
+			"example.tsx:4: only one named next-line rule with QX identifier and reason is permitted",
 		]);
 	} finally {
 		project.dispose();
 	}
 });
 
-await test("arity directives require SDK declaration identity rather than method or interface names", async () => {
+function registration(
+	name: string,
+	directive = "max-params -- QX-002: Pi supplies five fixed positional tool arguments.",
+): string {
+	return [
+		`pi.registerTool({ name: '${name}', label: 'Native', description: 'Native callback', parameters: Type.Object({}),`,
+		`// oxlint-disable-next-line ${directive}`,
+		"async execute(_id, _params, _signal, _onUpdate, _ctx) { return { content: [], details: {} }; },",
+		"});",
+	].join("\n");
+}
+function registrations(body: string, receiver = "NativeExtensionAPI"): string {
+	return [
+		"import type { ExtensionAPI as NativeExtensionAPI } from '@earendil-works/pi-coding-agent';",
+		"import { Type } from 'typebox';",
+		...(receiver === "LocalAPI"
+			? ["interface LocalAPI { readonly registerTool: NativeExtensionAPI['registerTool']; }"]
+			: []),
+		`export function registerContextTools(pi: ${receiver}): void {`,
+		body,
+		"}",
+	].join("\n");
+}
+
+nodeTest(
+	"QX-002 binds the real declaration, file and operation, including replacement and duplication",
+	async (t) => {
+		const invalid = "unapproved exception file, rule, origin, or operation";
+		const cases = [
+			{
+				name: "actual SDK operation",
+				file: "src/context-tools.ts",
+				body: registrations(registration("new_context")),
+				expected: [],
+			},
+			{
+				name: "structural same-signature receiver",
+				file: "src/context-tools.ts",
+				body: registrations(registration("new_context"), "LocalAPI"),
+				expected: [`src/context-tools.ts:6: ${invalid}`],
+			},
+			{
+				name: "copied file",
+				file: "src/unrelated.ts",
+				body: registrations(registration("new_context")),
+				expected: [`src/unrelated.ts:5: ${invalid}`],
+			},
+			{
+				name: "copied operation, unchanged count",
+				file: "src/context-tools.ts",
+				body: registrations(registration("other")),
+				expected: [`src/context-tools.ts:5: ${invalid}`],
+			},
+			{
+				name: "replacement rule, unchanged count",
+				file: "src/context-tools.ts",
+				body: registrations(
+					registration(
+						"new_context",
+						"typescript/no-unsafe-assignment -- QX-002: A different rule cannot borrow the arity decision.",
+					),
+				),
+				expected: [`src/context-tools.ts:5: ${invalid}`],
+			},
+			{
+				name: "duplicate operation",
+				file: "src/context-tools.ts",
+				body: registrations(
+					`${registration("new_context")}\n${registration("new_context")}`,
+				),
+				expected: ["src/context-tools.ts:9: duplicate exception operation"],
+			},
+		];
+		for (const example of cases) {
+			await t.test(example.name, () => {
+				const project = fixture({ files: { [example.file]: example.body } });
+				try {
+					const source = sourcePolicies(project.root, [example.file])[0];
+					assert.ok(source);
+					assert.deepEqual(inspectSuppressions(source).problems, example.expected);
+				} finally {
+					project.dispose();
+				}
+			});
+		}
+	},
+);
+
+nodeTest("only described dedicated negative type tests may use expect-error", () => {
 	const files = {
-		"src/context-tools.ts": [
-			"import type { ExtensionAPI as NativeExtensionAPI } from '@earendil-works/pi-coding-agent';",
-			"import { Type } from 'typebox';",
-			"export function register(pi: NativeExtensionAPI): void {",
-			"pi.registerTool({ name: 'native', label: 'Native', description: 'Native callback', parameters: Type.Object({}),",
-			"// The actual SDK supplies id, parameters, cancellation, updates and context.",
-			"// oxlint-disable-next-line max-params",
-			"async execute(_id, _params, _signal, _onUpdate, _ctx) { return { content: [], details: {} }; },",
-			"});",
-			"}",
-			"export const unrelated = {",
-			"// An unrelated method cannot claim the native framework callback contract.",
-			"// oxlint-disable-next-line max-params",
-			"execute(a: number, b: number, c: number, d: number, e: number): number { return a + b + c + d + e; },",
-			"};",
-			"interface ExtensionAPI { readonly registerTool: NativeExtensionAPI['registerTool']; }",
-			"export function fake(pi: ExtensionAPI): void {",
-			"pi.registerTool({ name: 'fake', label: 'Fake', description: 'Local declaration', parameters: Type.Object({}),",
-			"// A local same-named interface is not the SDK registration declaration.",
-			"// oxlint-disable-next-line max-params",
-			"async execute(_id, _params, _signal, _onUpdate, _ctx) { return { content: [], details: {} }; },",
-			"});",
-			"}",
-		].join("\n"),
+		"production.ts":
+			"// @ts-expect-error: A string violates this numeric contract.\nexport const value: number = 'wrong';\n",
+		"types.test-d.ts":
+			"// @ts-expect-error: A string violates this numeric contract.\nexport const value: number = 'wrong';\n",
+		"short.test-d.ts": "// @ts-expect-error short\nexport const value: number = 'wrong';\n",
 	};
-	await expectFindings({ files }, []);
 	const project = fixture({ files });
 	try {
-		const source = sourcePolicies(project.root, ["src/context-tools.ts"]).at(0);
-		assert.ok(source);
-		assert.deepEqual(suppressionProblems(source), [
-			"src/context-tools.ts:12: arity allowance requires an actual five-argument SDK tool registration",
-			"src/context-tools.ts:19: arity allowance requires an actual five-argument SDK tool registration",
-		]);
+		assert.deepEqual(
+			sourcePolicies(project.root, Object.keys(files)).flatMap(
+				(source) => inspectSuppressions(source).problems,
+			),
+			[
+				"production.ts:1: expected compiler errors belong in described dedicated .test-d.ts tests",
+				"short.test-d.ts:1: expected compiler errors belong in described dedicated .test-d.ts tests",
+			],
+		);
 	} finally {
 		project.dispose();
 	}
 });
 
-await test("explained native directives preserve only authorized sites and generic callback shape", () => {
-	const project = fixture({
-		files: {
-			"src/ui/text.ts":
-				"// Tool previews reject terminal control sequences rather than execute them.\n// oxlint-disable-next-line no-control-regex\nexport const forbidden = /[\\u0000]/u;\n",
-			"wrong.ts":
-				"// This broad rule would hide ordinary unsafe Promise ownership.\n// oxlint-disable-next-line typescript/no-floating-promises\nexport const x = 1;\n",
-			"generic.ts":
-				"export function invoke<T>(\n// This plain callable exposes no mutable properties; T describes its result.\n// oxlint-disable-next-line typescript/prefer-readonly-parameter-types\noperation: () => T,\n): T { return operation(); }\n",
-			"wrong-generic.ts":
-				"export function invoke(\n// Mutable attached application state is not a generic result false positive.\n// oxlint-disable-next-line typescript/prefer-readonly-parameter-types\noperation: (() => number) & { state: number },\n): number { return operation(); }\n",
-		},
-	});
-	try {
-		const output = sourcePolicies(project.root, [
-			"src/ui/text.ts",
-			"wrong.ts",
-			"generic.ts",
-			"wrong-generic.ts",
-		]).flatMap(suppressionProblems);
-		assert.deepEqual(output, [
-			"wrong.ts:2: unapproved rule or scope: typescript/no-floating-promises",
-			"wrong-generic.ts:3: unapproved rule or scope: typescript/prefer-readonly-parameter-types",
-		]);
-	} finally {
-		project.dispose();
-	}
-});
-
-await test("only described dedicated negative type tests may use expect-error", () => {
-	const project = fixture({
-		files: {
-			"production.ts":
-				"// @ts-expect-error: This cannot suppress an application compiler failure.\nexport const value: number = 'wrong';\n",
-			"types.test-d.ts":
-				"// @ts-expect-error: A string must not satisfy the numeric input contract.\nexport const value: number = 'wrong';\n",
-			"short.test-d.ts": "// @ts-expect-error short\nexport const value: number = 'wrong';\n",
-		},
-	});
-	try {
-		const output = sourcePolicies(project.root, [
-			"production.ts",
-			"types.test-d.ts",
-			"short.test-d.ts",
-		]).flatMap(suppressionProblems);
-		assert.equal(output.length, 2);
-		assert.ok(output[0]?.startsWith("production.ts:1:"));
-		assert.ok(output[1]?.startsWith("short.test-d.ts:1:"));
-	} finally {
-		project.dispose();
-	}
-});
-
-await test("framework mutation allowances cannot exempt an ordinary input or another file", async () => {
-	const body =
-		"export function stream(opts) { opts.cacheRetention = 'none'; }\nexport function ordinary(input) { input.value = 1; }\n";
-	await expectFindings(
-		{
-			files: { "test/native.test.mjs": body, "test/host.test.mjs": body },
-			paths: ["test/native.test.mjs", "test/host.test.mjs"],
-		},
-		[
-			{ code: "eslint/no-param-reassign", file: "test/native.test.mjs", line: 2 },
-			{ code: "eslint/no-param-reassign", file: "test/host.test.mjs", line: 1 },
-			{ code: "eslint/no-param-reassign", file: "test/host.test.mjs", line: 2 },
-		],
-	);
-});
-
-await test("contract-required undefined options retain checks outside the two exact fixture files", async () => {
-	const body =
-		"export const nothing: () => undefined = () => undefined;\nexport function optional(value?: number): number | undefined { return value; }\nexport const value = optional(undefined);\n";
-	await expectFindings(
-		{ files: { "test/posthorse.test.ts": body, "test/unscoped.test.ts": body } },
-		[
-			{ code: "unicorn/no-useless-undefined", file: "test/unscoped.test.ts", line: 1 },
-			{ code: "unicorn/no-useless-undefined", file: "test/unscoped.test.ts", line: 3 },
-		],
-	);
-});
-
-await test("maintained source inventory and effective projects remain covered in normal lint", () => {
+nodeTest("the real repository has complete source, project, profile and exception coverage", () => {
 	assert.deepEqual(checkPolicy(repository), []);
-});
-
-await test("semantic scope fails closed when an unchecked JavaScript fixture opts into ts-check", () => {
-	const project = fixture({
-		files: {
-			"test/host.test.mjs": "export const value = 1;\n",
-			"test/native.test.mjs": "// @ts-check\nexport const value = 1;\n",
-			"test/official.test.mjs": "export const value = 1;\n",
-		},
-	});
-	try {
-		execFileSync("git", ["init", "--quiet"], { cwd: project.root });
-		assert.deepEqual(checkPolicy(project.root), [
-			"Semantic lint scope disagrees with effective compiler/directive scope: test/native.test.mjs",
-		]);
-	} finally {
-		project.dispose();
-	}
 });

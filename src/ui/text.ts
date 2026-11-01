@@ -5,7 +5,6 @@ export type OutputColor = "toolOutput" | "muted" | "dim" | "error" | "warning";
 
 export function clean(value: string): string {
 	// Tool previews must not execute terminal controls or Unicode interlinear annotations.
-	// oxlint-disable-next-line no-control-regex
 	return stripTerminalSequences(value).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f\ufff9-\ufffb]/g, "");
 }
 

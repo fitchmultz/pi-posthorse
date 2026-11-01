@@ -13,7 +13,7 @@ import type { PageAccess } from "./paging.ts";
 type SearchPage = {
 	readonly parts: readonly string[];
 	readonly spans: readonly { readonly headerLength: number; readonly length: number }[];
-	readonly next?: string;
+	readonly next?: string | undefined;
 };
 function cursorFor(matches: HistoryMatches, hit: HistoryHit, offset: number): string {
 	return Buffer.from(JSON.stringify([hit.id, hit.priority, offset, matches.key])).toString(

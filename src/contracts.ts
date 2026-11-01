@@ -4,7 +4,7 @@ import type { PosthorseDisplay } from "../ui.ts";
 export type CompactionPolicy = {
 	readonly enabled: boolean;
 	readonly reserveTokens: number;
-	readonly keepRecentTokens?: number;
+	readonly keepRecentTokens?: number | undefined;
 };
 export type ContextUsage = {
 	readonly tokens: number | null;
@@ -17,52 +17,56 @@ export type PolicyContext = {
 	readonly getSystemPrompt: () => string;
 };
 export type PolicyReader = (ctx: ExtensionContext) => CompactionPolicy;
+export type SnapshotReader = (
+	ctx: ExtensionContext,
+	livePolicy?: CompactionPolicy,
+) => PolicyContext;
 export type ImageLike = {
 	readonly type: "image";
 	readonly data: string;
 	readonly mimeType: string;
 };
 export type ToolCallLike = {
-	readonly type?: string;
-	readonly id?: string;
-	readonly name?: string;
-	readonly namespace?: string;
+	readonly type?: string | undefined;
+	readonly id?: string | undefined;
+	readonly name?: string | undefined;
+	readonly namespace?: string | undefined;
 	readonly arguments?: unknown;
 	readonly executionArguments?: unknown;
-	readonly async?: boolean;
+	readonly async?: boolean | undefined;
 };
 export type MessageLike = {
-	readonly role?: string;
-	readonly stopReason?: string;
-	readonly errorMessage?: string;
+	readonly role?: string | undefined;
+	readonly stopReason?: string | undefined;
+	readonly errorMessage?: string | undefined;
 	readonly content?: unknown;
-	readonly summary?: string;
-	readonly toolName?: string;
-	readonly customType?: string;
-	readonly namespace?: string;
-	readonly toolCallId?: string;
-	readonly isError?: boolean;
+	readonly summary?: string | undefined;
+	readonly toolName?: string | undefined;
+	readonly customType?: string | undefined;
+	readonly namespace?: string | undefined;
+	readonly toolCallId?: string | undefined;
+	readonly isError?: boolean | undefined;
 	readonly details?: unknown;
 	readonly nestedCalls?: unknown;
-	readonly command?: string;
-	readonly output?: string;
-	readonly excludeFromContext?: boolean;
+	readonly command?: string | undefined;
+	readonly output?: string | undefined;
+	readonly excludeFromContext?: boolean | undefined;
 };
 export type EntryLike = {
-	readonly type?: string;
-	readonly id?: string;
-	readonly parentId?: string | null;
-	readonly timestamp?: string;
-	readonly message?: MessageLike;
-	readonly summary?: string;
-	readonly customType?: string;
+	readonly type?: string | undefined;
+	readonly id?: string | undefined;
+	readonly parentId?: string | null | undefined;
+	readonly timestamp?: string | undefined;
+	readonly message?: MessageLike | undefined;
+	readonly summary?: string | undefined;
+	readonly customType?: string | undefined;
 	readonly content?: unknown;
 	readonly details?: unknown;
-	readonly display?: boolean;
-	readonly handoff?: string;
-	readonly firstKeptEntryId?: string | null;
-	readonly targetId?: string;
-	readonly replacement?: { readonly content: unknown } | null;
+	readonly display?: boolean | undefined;
+	readonly handoff?: string | undefined;
+	readonly firstKeptEntryId?: string | null | undefined;
+	readonly targetId?: string | undefined;
+	readonly replacement?: { readonly content: unknown } | null | undefined;
 };
 export type WindowedEntry = {
 	readonly entry: EntryLike;
@@ -82,8 +86,8 @@ export type HistoryHit = {
 };
 export type ReminderFingerprint = {
 	readonly windowId: string;
-	readonly contextWindow?: number;
-	readonly reserveTokens?: number;
+	readonly contextWindow?: number | undefined;
+	readonly reserveTokens?: number | undefined;
 };
 export type TextResult = {
 	content: Array<

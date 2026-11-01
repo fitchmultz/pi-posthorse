@@ -1,179 +1,104 @@
 # Code quality and acceptance
 
-Oxlint owns code-quality checks; Oxfmt owns formatting. TypeScript, behavior tests, package packing
-and code review remain independent gates. Correctness, maintainability and trustworthy enforcement
-have equal weight.
-
-`npm run verify` first checks Node 24 and the invoking npm's actual version against `packageManager`.
-The check applies to repository acceptance, not package installation. It does not change global
-tools or the extension's supported runtime floor. See [Correction safeguards](corrections.md).
+[Engineering standard 5.1.2](engineering-standard.md) owns the requirements, source profiles,
+and evidence-based exception process. Its Appendix B records Posthorse's mappings and decisions.
 
 ## Commands
 
-Use Node 24 and npm 12.2.0. Install the committed dependencies with `npm ci --ignore-scripts`, then
-prepare the corrected native quality engine before linting or opening the editor. The engine's
-pinned sources, patches and reproducible builds are documented in
-[Corrected native checkers](quality-engine.md).
+Acceptance uses Node 24, the npm version in `package.json`, and the committed lockfile.
+`npm ci --ignore-scripts` installs the published quality tools. The invoking npm's real manifest
+is checked before acceptance starts. [Development](development.md) describes isolated npm selection.
 
-| Command                  | Purpose                                                                                                      |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `npm run quality:policy` | Parsed configuration coherence, comment-aware suppression governance and maintained-source/project inventory |
-| `npm run quality:probes` | Installed native CLI configuration, language scope, declaration isolation and regression probes              |
-| `npm run lint`           | Policy check and strict code-quality/type-aware/compiler diagnostics                                         |
-| `npm run lint:agent`     | Identical scope, structured agent diagnostics                                                                |
-| `npm run lint:fix`       | Identical scope and reviewed safe fixes; no dangerous-fix mode                                               |
-| `npm run format`         | Oxfmt writes maintained supported files                                                                      |
-| `npm run format:check`   | Non-modifying formatting check                                                                               |
-| `npm run check`          | Canonical TypeScript compiler check, independently of Oxlint                                                 |
-| `npm run check:compat`   | Compiler, unit/rendering tests and real native-host tests                                                    |
-| `npm run build`          | npm package dry-run; this source-distributed extension has no emitted build                                  |
-| `npm run verify`         | All acceptance gates, preserving each child process's failure status                                         |
+| Command                  | Purpose                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `npm run quality:policy` | Standard settings, full source inventory, canonical compiler membership, profile boundaries, and directive authorization |
+| `npm run quality:config` | Shared workflow references and supported Pi dependency-floor coherence                                                   |
+| `npm run quality:probes` | Installed native tools, compiler scope, source coverage, and exception controls                                          |
+| `npm run lint`           | Independent policy, configuration, and complete native lint checks                                                       |
+| `npm run lint:agent`     | The same gates with native agent-format lint output                                                                      |
+| `npm run lint:fix`       | The same scope with reviewed safe native fixes                                                                           |
+| `npm run format`         | Oxfmt writes supported maintained files                                                                                  |
+| `npm run format:check`   | Non-writing formatting check                                                                                             |
+| `npm run check`          | Canonical TypeScript compiler, separate from semantic lint                                                               |
+| `npm run check:compat`   | Independent compiler and complete test commands                                                                          |
+| `npm run test:native`    | Real installed-SDK lifecycle and provider suites                                                                         |
+| `npm test`               | Unit, renderer, archive, enforcement, and real-host suites                                                               |
+| `npm run build`          | npm package dry-run for this source-distributed extension                                                                |
+| `npm run verify`         | Provenance first, then every independent required gate                                                                   |
 
-CI runs acceptance independently of the existing latest-official/latest-fork qualification. Its
-reusable release-qualification workflow checks out the supplied candidate commit and runs
-`npm run verify`. It exercises the negative controls in a disposable worktree and retains the diagnostics
-and both safe-fix diffs as CI evidence. The release workflow supplies its planned source commit to
-CI, and `prepublishOnly` also requires acceptance.
+`scripts/verify.ts` invokes each child through the same npm and inherits its complete output.
+It continues after a failed independent gate and returns failure if any gate fails. The internal
+`lint:oxlint`, `lint:agent:oxlint`, and `lint:fix:oxlint` scripts contain the native invocations.
+The public lint commands include policy and configuration checks too.
 
-## Coverage and limits
+CI's strict quality job runs `npm run verify` against the locked minimum-version SDK graph.
+The official and fork lanes separately qualify the exact latest host identities. Release
+qualification runs the same acceptance command and disposable negative controls against the
+candidate source. `prepublishOnly` also requires acceptance.
 
-All handwritten TypeScript, JavaScript, test helpers, adapters and tooling are maintained. Root
-`tsconfig.json` includes `index.ts`, `ui.ts`, `src/**/*.ts`, `scripts/**/*.ts`, `test/**/*.ts` and
-`test/**/*.mjs`. Checked leaf projects require effective `strict` and `noImplicitReturns`.
+## Coverage
 
-The native integration suites `test/host.test.mjs`, `test/native.test.mjs` and
-`test/official.test.mjs` remain intentionally unchecked JavaScript. Their exact overrides disable
-only the installed metadata's `type_aware` rules and TypeScript-only explicit boundary annotations.
-They retain syntactic correctness, suspicious, performance, Node, import, Promise, mutation,
-sequencing and test structural checks, plus formatting and their existing real-host execution.
-Imported JavaScript remains available to checked consumers through `allowJs` without acquiring
-compiler diagnostics by accident. `@ts-check` or inherited `checkJs: true` opts JavaScript into
-semantic lint/compiler checking; policy fails if an unchecked override masks that decision.
+The inventory reads the filesystem, excluding only Git internals and npm dependencies. It compares
+all maintained JavaScript and TypeScript with native Oxlint traversal. Ignored or newly added
+handwritten source therefore cannot disappear from coverage. Temporary invalid probe programs
+live outside the repository and their harness checks the intended diagnostics and statuses.
 
-The inventory compares actual Oxlint traversal with all tracked and nonignored untracked source,
-then uses the installed TypeScript compiler API to verify project settings and per-file directives.
-A new unchecked JavaScript file needs an exact metadata override; a new checked file must have the
-correct project assignment. Normal lint, fixes, agent diagnostics, CI and the editor share the root
-policy. There are no handwritten-source lint exclusions. Negative probe files are created only in
-disposable external projects and are removed in `finally` blocks, never silently ignored source.
+`tsconfig.json` is the canonical compiler project. The native TypeScript API verifies actual program
+membership, effective compiler minimums, checked JavaScript, and declaration ownership. A new project
+requires a corresponding compiler gate and explicit qualification. The application's dependency
+`skipLibCheck` setting does not cover handwritten declarations. Adding one requires a real
+`skipLibCheck: false` compiler owner. Compiler-resolved production imports cannot depend on the
+test-only profile.
 
-Production limits are modified complexity 10, depth 3, parameters 4, statements 40, function lines
-80 and file lines 500 (excluding blanks/comments). Tests and approved test-only helpers keep
-complexity 15, depth 4 and parameters 6 while exempting only size/statement metrics. Hand-maintained
-declarations retain API/type-safety policy while exempting structural metrics. Test assertions use
-the Node runner and Node's strict assertion API; Vitest-specific rules are not applicable.
+Appendix A supplies the root policy. The Node plugin and `test/*.ts` support mapping preserve its
+base plugins, categories, options, and all unaffected rules. Configuration checks compare the
+qualified composition directly. Introducing nested lint or format configuration, changing ignore
+ownership, broadening an override, or changing required commands needs a matching record and controls.
+The checker constrains the repository's actual composition instead of implementing a second config
+merger or type analyzer.
 
-Oxfmt retains established tab indentation, double quotes, semicolons and LF. YAML and Markdown
-retain two-space indentation. Import/package sorting and JSDoc rewriting are disabled. The npm
-lockfile stays npm-owned; images/SVG are unchanged and unsupported by Oxfmt. External dependencies
-and native-engine build caches are under ignored `node_modules`, not production lint scope.
+Oxfmt retains tabs with width four, double quotes, semicolons, and LF. Markdown and YAML use two
+spaces. Sorting and JSDoc transformations remain disabled. npm owns the lockfile; illustration
+assets retain their existing byte ownership. The source package has no emitted build step.
 
-## Narrow contracts and exceptions
+## Editor
 
-- Native TypeScript inputs use declaration-qualified `from: lib` allowances. Native Pi/TUI handles
-  and the compiler AST use package-qualified allowances, never a wildcard generic-container list.
-  CLI probes pair approved declarations with local/foreign mutable same-named types.
-- Framework-owned Node test registration is eligible only after the corrected declaration matcher
-  passes the complete identity matrix. Native Promise/PromiseLike are not safe-Promise allowances.
-  Ordinary work, local shadows, foreign packages/files, aliases and unawaited subtests remain checked.
-- SDK `execute` requires five parameters at three exact tool-registration boundaries. The policy
-  checker resolves the actual `ExtensionAPI.registerTool` declaration before permitting a directive;
-  matching method/interface names and neighboring application helpers retain the ordinary limit.
-- Sequential persistence, streams and cleanup keep explained single-site `no-await-in-loop`
-  exceptions. Concurrency is chosen by actual dependencies, not by diagnostic counts.
-- `src/ui/text.ts` deliberately rejects terminal controls and Unicode interlinear annotations.
-  Its exact validation expression and intentional `test/renderers.test.ts` control fixtures receive
-  explained native directives.
-- Necessary post-await lifecycle guards may use explained single-site condition exceptions, and
-  plain generic callbacks may use the authorized readonly-result exception. Neither permits unsafe
-  callback bodies, mutable attached properties or floating Promises.
-- Exact test fixture scopes preserve explicit-undefined arrow contracts and positional native API
-  arguments without disabling the rule's other checks.
-- Native mock-provider `opts` mutations in `test/native.test.mjs` and `test/official.test.mjs`, and
-  context-hook `event` mutation in `test/official.test.mjs`, preserve explicit platform contracts.
-  Ordinary input mutation remains checked, including outside those exact files.
-- The corrected checker recognizes actual native `ReadonlyMap`/`ReadonlySet` contracts while checking
-  generic keys, values and attached application state. Mutable Map/Set APIs remain mutable even under
-  a `Readonly` wrapper. Unsuppressed positive and negative reproducers are retained; there are no
-  blanket Map/Record/Readonly allowances. Application APIs still expose only the read capabilities
-  they need.
+`.vscode/extensions.json` recommends `oxc.oxc-vscode`. The workspace settings select its formatter,
+explicit save-time fixes, semantic analysis, and unused-directive diagnostics. Editor feedback is
+not acceptance evidence; the required npm commands and CI check the committed dependency graph.
 
-The policy checker uses Oxc's complete parsed comment stream, including comments inside empty
-containers and punctuation gaps, not source-text grep or partial AST trivia. Strings, regexes,
-template literals and JSX text are not directives; real JSX expression comments remain checked.
-It rejects blanket, line-wide, unapproved or unexplained directives and legacy ESLint suppressions. `@ts-ignore` and
-`@ts-nocheck` are forbidden. Described `@ts-expect-error` belongs only in dedicated `.test-d.ts`
-negative type tests. Unused-disable diagnostics stay enabled. New configuration/ignore/CI/suppression
-changes go through the repository's ordinary PR review, with positive and negative probes.
+## Exceptions and detection limits
 
-## Responsibility boundaries after cleanup
+Appendix B contains the comparisons and remaining protections for each decision. The executable
+site inventory is `scripts/quality-sites.ts`. Native next-line directives identify one rule,
+a QX identifier, and a reason. Authorization checks the real comment, target AST operation,
+enclosing named and anonymous owners, actual SDK declaration where applicable, and duplication.
+Native unused-disable reporting remains required.
 
-Before, the single `createPosthorse` factory owned rollover requests, reminder ancestry caching,
-parallel page reservations, notes filesystem operations and history scan/cursor orchestration.
-State from unrelated operations lived beside every tool registration:
+QX-001 permits only the needed `node:test` registration alias in genuine test scopes. Context
+subtests, local and foreign same-named functions, ordinary async calls, and work inside a test
+remain checked. QX-002 preserves the SDK's fixed five-argument execute methods. QX-003 permits
+only the two request-owned faux option writes. QX-005 preserves one required absent signal slot.
+QX-010 preserves two graph-selected native module bindings under the canonical loader's identity
+checks. Ordinary application mutation, unsafe propagation, and explicit-undefined checks remain.
 
-```ts
-const resetRequests = new Map<string, string>();
-let pendingPageTokens = 0;
-let previousPageUsage: number | null | undefined;
-```
+QX-011 records published import-analysis limits: the qualified native importer detects the
+retained static and type-only cycle controls, but not cycles through external packages or the
+awaited-dynamic-cycle control. External and dynamic module boundaries still need review. These
+limitations are not a claim that such cycles are safe or completely checked.
 
-After, the entry point wires explicit owners and focused operations:
+## Verification evidence
 
-```ts
-const pages = new PageReservations(toolTokens);
-registerPosthorseMessages(pi);
-registerRollover(pi, policy, toolTokens, () => {
-  pages.reset();
-});
-registerNotes(pi, policy, pages);
-registerHistory(pi, policy, pages);
-```
+`test/quality-*.test.ts` and the two rule-case modules own normal enforcement regression coverage.
+Controls assert native rule identifiers, files, lines, statuses, and valid counterparts. The real
+Node runner and strict assertions supply runtime failure propagation.
 
-`PageReservations` is the sole owner of sibling-page accounting. Rollover owns reset requests and
-leaf-certified reminder state; Pi still owns persistence and scheduling. Notes owns note operations,
-while `src/files.ts` owns target resolution, staging, permissions, abort checks, atomic rename and
-cleanup without replacing the original caught failure. History separates normalization, ranking,
-archive visibility, cursor progress and rendering; readonly operation interfaces expose only what
-consumers need, rather than sharing an entire mutable owner. UI validates display facts/spans,
-constructs truthful summaries and lays out cards separately, with click state owned locally.
+`scripts/release-quality-controls.sh` uses a clean candidate and disposable worktree. Independent
+native-lint, semantic, compiler, formatter, test, and policy faults must fail the real aggregate without
+hiding later gates. Safe lint fixes and formatting run twice and their diffs must converge.
 
-The root default extension and `createPosthorse` contracts, and the existing `ui.ts` exports, are
-preserved. Production helper exports are internal to the source-distributed package, not new root
-APIs. Existing lifecycle/persistence and native rendering tests retain their intended assertions.
-Formatting is presentation work; these responsibility/ownership changes are substantive
-maintainability improvements, not claimed runtime bug fixes.
-
-The former `toolCards.renderResult` also combined an unchecked display assertion, summary
-selection, history slicing, terminal sanitation and collapsed/expanded layout. Before:
-
-```ts
-const display = result.details as PosthorseDisplay | undefined;
-```
-
-After, the SDK boundary validates unknown saved metadata:
-
-```ts
-display: displayOf(result.details);
-```
-
-`src/ui/display.ts` owns readonly display contracts, validation and history-span boundaries;
-`src/ui/text.ts` owns safe terminal text; `src/ui/cards.ts` owns presentation and row budgets.
-`ui.ts` retains the public exports and per-message click state. A summary change no longer requires
-editing sanitation or message expansion, and malformed legacy metadata falls back to ordinary text.
-
-## Verification and review
-
-The probes check installed CLI rule IDs and source locations, not just exit status or schema
-acceptance. Configuration/parser/dependency errors, unexpected diagnostics and child crashes fail
-the probe. Language probes cover inherited settings, per-file directives and checked consumers of
-unchecked JavaScript; compiler diagnostics are verified separately. Origin probes exercise actual
-approved calls/types, local same names, foreign files/packages, shadows, aliases/re-exports,
-wrong-qualifier controls, ordinary async work and unawaited subtests. Repeat after clean installation
-or engine upgrades.
-
-Before delivery, run `npm run verify` on the integrated revision and independently demonstrate that
-this same workflow rejects syntactic, semantic, compiler, formatting and allowance-isolation
-violations in a disposable checkout. Formatting must converge with safe lint fixes and be idempotent.
-Review meaningful decomposition for explicit state ownership, readable phases, preserved failure
-identity/cancellation and localized change boundaries; green metrics alone are not a design review.
+Required CI retains `strict-quality-fixtures` and `host-qualification-official` or
+`host-qualification-fork` artifacts. Release controls record the exact source commit and tree in
+`release-controls/source.txt`; the workflow also checks its requested candidate commit before
+running acceptance. Local results, hosted results, review findings, and publication are separate
+claims. [Section 10.2](engineering-standard.md#102-completion-criteria) defines completed adoption.

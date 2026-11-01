@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseDocument } from "yaml";
-import { objectValue, readObject } from "./quality-policy.ts";
+import { objectValue, readObject } from "./quality-settings.ts";
 
 type Configuration = Readonly<Record<string, unknown>>;
 const CI = ".github/workflows/ci.yml";
@@ -49,7 +49,7 @@ function sharedJobs(config: Configuration, file: string, ref: string): string[] 
 		}
 		shared++;
 		const path = `${file}:jobs.${name}`;
-		const workflowName = uses.split("@")[0];
+		const workflowName = uses.slice(0, uses.indexOf("@"));
 		problems.push(
 			...mismatch(
 				`${path}.uses (use ${CI} env.PI_AUTOMATION_REF)`,
@@ -111,7 +111,7 @@ function includes(value: unknown, item: string): boolean {
 	return Array.isArray(value) && value.includes(item);
 }
 function cohortRuleProblems(rule: Configuration, range: string): string[] {
-	const selectors = [
+	const selectors: readonly (readonly [string, string])[] = [
 		["matchManagers", "npm"],
 		["matchDepTypes", "devDependencies"],
 		["matchPackageNames", "@earendil-works/**"],
@@ -192,7 +192,8 @@ function floorProblems(manifest: Configuration, renovate: Configuration): string
 			includes(field(rule, "matchPackageNames"), "@earendil-works/**") &&
 			includes(field(rule, "matchDepTypes"), "devDependencies"),
 	);
-	if (cohort.length !== 1) {
+	const [primary] = cohort;
+	if (primary === undefined || cohort.length !== 1) {
 		return [
 			...problems,
 			"renovate.json: expected one Pi development-cohort rule matching package.json's support floor",
@@ -200,9 +201,9 @@ function floorProblems(manifest: Configuration, renovate: Configuration): string
 	}
 	return [
 		...problems,
-		...cohortRuleProblems(cohort[0], range),
+		...cohortRuleProblems(primary, range),
 		...entries.flatMap((rule, index) =>
-			rule === cohort[0] || independentRange(rule)
+			rule === primary || independentRange(rule)
 				? []
 				: [
 						`renovate.json:packageRules[${index}].allowedVersions may override the Pi floor; use the single Pi cohort rule, literal non-Pi package names, or a non-npm manager`,

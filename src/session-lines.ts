@@ -18,7 +18,7 @@ type LineRange = {
 	readonly end: number;
 	readonly head: string;
 	readonly matches: boolean;
-	readonly bytes?: Readonly<Pick<Buffer, "toString">>;
+	readonly bytes?: Readonly<Pick<Buffer, "toString">> | undefined;
 };
 async function* lineRanges(
 	file: string,
@@ -73,7 +73,6 @@ async function rangeText(
 	while (offset < buffer.length) {
 		signal?.throwIfAborted();
 		// Positioned reads may be short; each continues the same selected record.
-		// oxlint-disable-next-line no-await-in-loop
 		const { bytesRead } = await handle.read(
 			buffer,
 			offset,

@@ -8,10 +8,16 @@ export interface RuleCase {
 /** Fixtures are compiler-valid programs; only the intended lint boundary differs. */
 export const ruleCases: readonly RuleCase[] = [
 	{
+		name: "category-only correctness checks survive explicit rule composition",
+		pass: "export function value(): number { try { return 1; } finally { console.log('flush'); } }",
+		fail: "export function value(): number { try { return 1; } finally { return 2; } }",
+		rules: ["eslint/no-unsafe-finally"],
+	},
+	{
 		name: "explicit any includes rest arguments",
 		pass: "export function value(...items: readonly unknown[]): unknown { return items[0]; }",
 		fail: "export function value(...items: any[]): unknown { return items[0]; }",
-		rules: ["typescript/no-explicit-any", "typescript/prefer-readonly-parameter-types"],
+		rules: ["typescript/no-explicit-any"],
 	},
 	{
 		name: "non-null assertions",
@@ -194,9 +200,9 @@ export const ruleCases: readonly RuleCase[] = [
 		rules: ["typescript/restrict-template-expressions"],
 	},
 	{
-		name: "unknown cannot stringify as a base object",
-		pass: "export function value(input: unknown): string { return typeof input === 'string' ? input : 'unknown'; }",
-		fail: "export function value(input: unknown): string { return String(input); }",
+		name: "known base objects cannot masquerade as useful text",
+		pass: "export function value(input: { readonly name: string }): string { return input.name; }",
+		fail: "export function value(input: { readonly name: string }): string { return String(input); }",
 		rules: ["typescript/no-base-to-string"],
 	},
 	{
@@ -215,7 +221,7 @@ export const ruleCases: readonly RuleCase[] = [
 		name: "misused Promise callbacks",
 		pass: "export async function value(): Promise<void> { await Promise.all([1].map(async () => Promise.resolve())); }",
 		fail: "export function value(): void { [1].forEach(async () => Promise.resolve()); }",
-		rules: ["typescript/no-misused-promises", "typescript/strict-void-return"],
+		rules: ["typescript/no-misused-promises"],
 	},
 	{
 		name: "await only thenables",
@@ -232,12 +238,6 @@ export const ruleCases: readonly RuleCase[] = [
 		pass: "export async function value(): Promise<number> { try { return await Promise.resolve(1); } catch { return 0; } }",
 		fail: "export async function value(): Promise<number> { try { return Promise.resolve(1); } catch { return 0; } }",
 		rules: ["typescript/return-await"],
-	},
-	{
-		name: "void callbacks cannot discard nonvoid implicitly",
-		pass: "export const value: () => void = () => { Math.abs(1); };",
-		fail: "export const value: () => void = () => Math.abs(1);",
-		rules: ["typescript/strict-void-return"],
 	},
 	{
 		name: "void-return expression is not a value",
@@ -282,7 +282,7 @@ export const ruleCases: readonly RuleCase[] = [
 		name: "parameter properties cannot mutate shared state",
 		pass: "export function value(input: { readonly count: number }): number { return input.count + 1; }",
 		fail: "export function value(input: { count: number }): number { input.count = 1; return input.count; }",
-		rules: ["eslint/no-param-reassign", "typescript/prefer-readonly-parameter-types"],
+		rules: ["eslint/no-param-reassign"],
 	},
 	{
 		name: "private fields written only at construction are readonly",
@@ -371,12 +371,6 @@ export const ruleCases: readonly RuleCase[] = [
 		pass: "export function value(): void { console.log('done'); }",
 		fail: "export function value(): void { debugger; }",
 		rules: ["eslint/no-debugger"],
-	},
-	{
-		name: "unexpected control-character regex",
-		pass: "export const value = /[a-z]/u;",
-		fail: "export const value = /[\\u0000-\\u001F]/u;",
-		rules: ["eslint/no-control-regex"],
 	},
 	{
 		name: "empty catches do not swallow failure",

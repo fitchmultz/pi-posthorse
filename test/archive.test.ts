@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { closeSync, mkdtempSync, openSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test as nodeTest } from "node:test";
 import { Check } from "typebox/value";
 import { registerHistory } from "../src/history.ts";
 import { PageReservations } from "../src/paging.ts";
@@ -69,74 +69,79 @@ function message(id: string, content: unknown, parentId: string | null = null): 
 	return JSON.stringify({ type: "message", id, parentId, message: { role: "user", content } });
 }
 
-test("archive search and later reads pass a nonmatching image beyond V8's string limit", async (t) => {
-	const dir = mkdtempSync(join(tmpdir(), "posthorse-giant-archive-"));
-	t.diagnostic(`generated public archive: ${dir}`);
-	t.after(() => {
-		retainFile(dir, join(dir, "synthetic.jsonl"), "original");
-		rmSync(dir, { recursive: true, force: true });
-	});
-	const file = openSync(join(dir, "synthetic.jsonl"), "wx");
-	try {
-		writeSync(file, header(dir));
-		writeSync(
-			file,
-			JSON.stringify({
-				type: "context_window",
-				id: "window",
-				parentId: null,
-				handoff: "new window",
-			}) + "\n",
-		);
-		writeSync(
-			file,
-			'{"type":"message","id":"large001","parentId":"window","message":{"role":"toolResult","toolCallId":"fake","toolName":"read","content":[{"type":"image","mimeType":"image/png","data":"',
-		);
-		const chunk = Buffer.alloc(1024 * 1024, 65);
-		for (let i = 0; i < 513; i++) {
-			writeSync(file, chunk);
+nodeTest(
+	"archive search and later reads pass a nonmatching image beyond V8's string limit",
+	async (t) => {
+		const dir = mkdtempSync(join(tmpdir(), "posthorse-giant-archive-"));
+		t.diagnostic(`generated public archive: ${dir}`);
+		t.after(() => {
+			retainFile(dir, join(dir, "synthetic.jsonl"), "original");
+			rmSync(dir, { recursive: true, force: true });
+		});
+		const file = openSync(join(dir, "synthetic.jsonl"), "wx");
+		try {
+			writeSync(file, header(dir));
+			writeSync(
+				file,
+				JSON.stringify({
+					type: "context_window",
+					id: "window",
+					parentId: null,
+					handoff: "new window",
+				}) + "\n",
+			);
+			writeSync(
+				file,
+				'{"type":"message","id":"large001","parentId":"window","message":{"role":"toolResult","toolCallId":"fake","toolName":"read","content":[{"type":"image","mimeType":"image/png","data":"',
+			);
+			const chunk = Buffer.alloc(1024 * 1024, 65);
+			for (let i = 0; i < 513; i++) {
+				writeSync(file, chunk);
+			}
+			writeSync(file, '"}]}}\n');
+			writeSync(file, message("older", "small marker older", "large001") + "\n");
+			writeSync(
+				file,
+				message(
+					"newer",
+					[
+						{ type: "text", text: "small marker newer" },
+						{ type: "image", mimeType: "image/png", data: "AA==" },
+					],
+					"older",
+				) + "\n",
+			);
+		} finally {
+			closeSync(file);
 		}
-		writeSync(file, '"}]}}\n');
-		writeSync(file, message("older", "small marker older", "large001") + "\n");
-		writeSync(
-			file,
-			message(
-				"newer",
-				[
-					{ type: "text", text: "small marker newer" },
-					{ type: "image", mimeType: "image/png", data: "AA==" },
-				],
-				"older",
-			) + "\n",
+		const history = await historyAt(dir);
+		const first = text(
+			await history({ op: "search", all: true, query: "small marker", limit: 1 }),
 		);
-	} finally {
-		closeSync(file);
-	}
-	const history = await historyAt(dir);
-	const first = text(await history({ op: "search", all: true, query: "small marker", limit: 1 }));
-	assert.match(first, /\[window window\] \[newer@[^\]]+\] \[user\] small marker newer/);
-	const cursor = requireValue(first.match(/continue with cursor "([^"]+)"/)?.[1]);
-	const next = text(
-		await history({ op: "search", all: true, query: "small marker", limit: 1, cursor }),
-	);
-	assert.match(next, /\[window window\] \[older@[^\]]+\] \[user\] small marker older/);
-	assert.doesNotMatch(next, /continue with cursor/);
-	// A nonfinal record also exercises early archive iterator cleanup before the next read.
-	const olderId = requireValue(next.match(/\[(older@[^\]]+)\]/)?.[1]);
-	assert.match(
-		text(await history({ op: "read", id: olderId })),
-		/\[window window\].*\[user\] small marker older/,
-	);
-	const id = requireValue(first.match(/\[(newer@[^\]]+)\]/)?.[1]);
-	const read = await history({ op: "read", id });
-	assert.match(text(read), /\[user\] small marker newer/);
-	assert.deepEqual(
-		read.content.filter((part) => part.type === "image"),
-		[{ type: "image", mimeType: "image/png", data: "AA==" }],
-	);
-});
+		assert.match(first, /\[window window\] \[newer@[^\]]+\] \[user\] small marker newer/);
+		const cursor = requireValue(first.match(/continue with cursor "([^"]+)"/)?.[1]);
+		const next = text(
+			await history({ op: "search", all: true, query: "small marker", limit: 1, cursor }),
+		);
+		assert.match(next, /\[window window\] \[older@[^\]]+\] \[user\] small marker older/);
+		assert.doesNotMatch(next, /continue with cursor/);
+		// A nonfinal record also exercises early archive iterator cleanup before the next read.
+		const olderId = requireValue(next.match(/\[(older@[^\]]+)\]/)?.[1]);
+		assert.match(
+			text(await history({ op: "read", id: olderId })),
+			/\[window window\].*\[user\] small marker older/,
+		);
+		const id = requireValue(first.match(/\[(newer@[^\]]+)\]/)?.[1]);
+		const read = await history({ op: "read", id });
+		assert.match(text(read), /\[user\] small marker newer/);
+		assert.deepEqual(
+			read.content.filter((part) => part.type === "image"),
+			[{ type: "image", mimeType: "image/png", data: "AA==" }],
+		);
+	},
+);
 
-test("archive prefilter keeps boundary-spanning text and Unicode folds", async (t) => {
+nodeTest("archive prefilter keeps boundary-spanning text and Unicode folds", async (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "posthorse-boundary-archive-"));
 	t.after(() => {
 		retainFile(dir, join(dir, "synthetic.jsonl"), "original");
@@ -171,7 +176,6 @@ test("archive prefilter keeps boundary-spanning text and Unicode folds", async (
 	const history = await historyAt(dir);
 	for (const [id, query] of cases) {
 		// Each query reopens the same generated archive; avoid concurrent scans of this fixture.
-		// oxlint-disable-next-line no-await-in-loop
 		const output = text(await history({ op: "search", all: true, query }));
 		assert.match(output, new RegExp(`\\[${id}@[^\\]]+\\]`));
 	}

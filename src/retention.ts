@@ -20,10 +20,10 @@ type RecoveryCapacity = {
 	readonly host: PolicyContext;
 	readonly toolTokens: number;
 	readonly pendingMessages?: readonly MessageLike[];
-	readonly firstKeptEntryId?: string;
+	readonly firstKeptEntryId?: string | undefined;
 };
 type RetainedTail = {
-	readonly firstKeptEntryId?: string;
+	readonly firstKeptEntryId?: string | undefined;
 	readonly ids: ReadonlySet<string>;
 };
 type Immutable<T> = T extends string | number | boolean | null | undefined
@@ -128,26 +128,29 @@ function boundedTail(
 	start: number,
 	maxTokens: number,
 ): RetainedTail {
-	const costs = entries.map((entry) =>
-		entry.sourceEntry.type === "compaction"
-			? 0
-			: visibleMessages(entry).reduce(
-					(sum, message) => sum + estimateTokens(nativeMessage(message)),
-					0,
-				),
-	);
-	let tokens = costs.slice(start).reduce((sum, cost) => sum + cost, 0);
-	for (let index = start; index < entries.length; index++) {
-		if (tokens > 0 && tokens <= maxTokens && safeStart(entries[index])) {
+	const costs = entries.slice(start).map((entry) => ({
+		entry,
+		cost:
+			entry.sourceEntry.type === "compaction"
+				? 0
+				: visibleMessages(entry).reduce(
+						(sum, message) => sum + estimateTokens(nativeMessage(message)),
+						0,
+					),
+	}));
+	let tokens = costs.reduce((sum, { cost }) => sum + cost, 0);
+	for (const [offset, { entry, cost }] of costs.entries()) {
+		const index = start + offset;
+		if (tokens > 0 && tokens <= maxTokens && safeStart(entry)) {
 			const tail = entries.slice(index);
 			if (pairedTail(tail)) {
 				return {
-					firstKeptEntryId: entries[index].sourceEntry.id,
-					ids: new Set(tail.map((entry) => entry.sourceEntry.id)),
+					firstKeptEntryId: entry.sourceEntry.id,
+					ids: new Set(tail.map((retained) => retained.sourceEntry.id)),
 				};
 			}
 		}
-		tokens -= costs[index];
+		tokens -= cost;
 	}
 	return { ids: new Set() };
 }
@@ -181,7 +184,7 @@ export function automaticRecovery(
 	projected: readonly ProjectionEntry[],
 	capacity: RecoveryCapacity,
 	ownerQuestionRegistered: boolean,
-): { readonly handoff: string; readonly firstKeptEntryId?: string } | undefined {
+): { readonly handoff: string; readonly firstKeptEntryId?: string | undefined } | undefined {
 	const payload = freshPayloadChars(
 		capacity.host,
 		capacity.toolTokens,

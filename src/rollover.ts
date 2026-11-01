@@ -1,26 +1,22 @@
 import type {
 	BoundaryResult,
+	ContextEvent,
 	ExtensionAPI,
 	ExtensionContext,
 	TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
-import {
-	budgetFor,
-	buildGuidance,
-	CHECKPOINT_STEPS,
-	freshPayloadChars,
-	type Budget,
-} from "./budget.ts";
+import { budgetFor, CHECKPOINT_STEPS, freshPayloadChars, type Budget } from "./budget.ts";
 import {
 	isRecord,
 	isReminderType,
 	REMINDER_TYPE,
-	type CompactionPolicy,
 	type PolicyContext,
 	type ProjectedEntry,
 	type ReminderFingerprint,
+	type SnapshotReader,
 } from "./contracts.ts";
 import { registerContextTools } from "./context-tools.ts";
+import { registerGuidance } from "./guidance.ts";
 import { safeJsonStringify } from "./message-text.ts";
 import { hasRetainedRolloverMarker } from "./recovery.ts";
 import { automaticRecovery } from "./retention.ts";
@@ -33,48 +29,7 @@ import {
 	type StaleReminderPredicate,
 } from "./reminders.ts";
 
-export type SnapshotReader = (
-	ctx: ExtensionContext,
-	livePolicy?: CompactionPolicy,
-) => PolicyContext;
 const REMINDER_BUFFER_TOKENS = 32_000;
-function registerGuidance(pi: ExtensionAPI, policy: SnapshotReader): void {
-	let promptOptions: { readonly forceSystemPrompt?: string } | undefined;
-	pi.on("before_agent_start", (event) => {
-		promptOptions = event.systemPromptOptions;
-	});
-	pi.on("agent_settled", () => {
-		// Prompt options belong to one run, never to later idle context evaluation.
-		promptOptions = undefined;
-	});
-	pi.on("context_with_system", (event, ctx) => {
-		const guidance = buildGuidance(policy(ctx));
-		const system =
-			event.messages.findLast(
-				(message) =>
-					message.role === "system" && typeof message.sections?.posthorse === "string",
-			) ?? event.messages.find((message) => message.role === "system");
-		if (system === undefined || system.role !== "system") {
-			return;
-		}
-		if (promptOptions?.forceSystemPrompt !== undefined) {
-			// ponytail: Pi applies forced prompts after this hook; keep request-local guidance
-			// until the host projects forced text before context_with_system.
-			event.messages.splice(1, 0, {
-				role: "custom",
-				customType: "posthorse-guidance",
-				content: guidance,
-				display: false,
-				timestamp: 0,
-			});
-		} else {
-			system.sections = {
-				...system.sections,
-				posthorse: `<posthorse>\n${guidance}\n</posthorse>`,
-			};
-		}
-	});
-}
 function explicitReset(
 	event: TurnEndEvent,
 	ctx: ExtensionContext,
@@ -150,7 +105,7 @@ function sendReminder(
 		readonly tokens: number;
 		readonly pendingMessages: readonly {
 			readonly role: string;
-			readonly customType?: string;
+			readonly customType?: string | undefined;
 			readonly details?: unknown;
 		}[];
 	},
@@ -188,7 +143,7 @@ const NO_STALE_REMINDER: StaleReminderPredicate = () => false;
 function staleReminderPredicate(
 	messages: readonly {
 		readonly role: string;
-		readonly customType?: string;
+		readonly customType?: string | undefined;
 		readonly details?: unknown;
 	}[],
 	ctx: ExtensionContext,
@@ -225,6 +180,40 @@ function staleReminderPredicate(
 		isReminderType(message.customType) &&
 		(!enabled || !reminderMatches(message.details, fingerprint));
 }
+function chronologicalRetainedTail(
+	messages: ContextEvent["messages"],
+	ctx: ExtensionContext,
+	stale: StaleReminderPredicate,
+): ContextEvent["messages"] {
+	const first = messages[0];
+	if (
+		messages.length >= 2 &&
+		first?.role === "compactionSummary" &&
+		hasRetainedRolloverMarker(first.summary)
+	) {
+		const count = countRetainedMessages(ctx, stale);
+		if (count > 0 && 1 + count <= messages.length) {
+			const retainedSlice = messages.slice(1, 1 + count);
+			const afterSlice = messages.slice(1 + count);
+			if (retainedSlice[0]?.role !== "assistant") {
+				return [...retainedSlice, first, ...afterSlice];
+			}
+			return [
+				{
+					role: "custom",
+					customType: "posthorse-retained-tail",
+					content: "[Retained pre-rollover tail]",
+					display: false,
+					timestamp: first.timestamp,
+				},
+				...retainedSlice,
+				first,
+				...afterSlice,
+			];
+		}
+	}
+	return messages;
+}
 function registerReminderFilter(
 	pi: ExtensionAPI,
 	policy: SnapshotReader,
@@ -235,37 +224,9 @@ function registerReminderFilter(
 		const filtered = event.messages.some(stale)
 			? event.messages.filter((message) => !stale(message))
 			: event.messages;
-		const first = filtered[0];
-		if (
-			filtered.length >= 2 &&
-			first.role === "compactionSummary" &&
-			hasRetainedRolloverMarker(first.summary)
-		) {
-			const count = countRetainedMessages(ctx, stale);
-			if (count > 0 && 1 + count <= filtered.length) {
-				const retainedSlice = filtered.slice(1, 1 + count);
-				const afterSlice = filtered.slice(1 + count);
-				if (retainedSlice[0].role !== "assistant") {
-					return { messages: [...retainedSlice, first, ...afterSlice] };
-				}
-				return {
-					messages: [
-						{
-							role: "custom",
-							customType: "posthorse-retained-tail",
-							content: "[Retained pre-rollover tail]",
-							display: false,
-							timestamp: first.timestamp,
-						},
-						...retainedSlice,
-						first,
-						...afterSlice,
-					],
-				};
-			}
-		}
-		if (filtered !== event.messages) {
-			return { messages: filtered };
+		const ordered = chronologicalRetainedTail(filtered, ctx, stale);
+		if (ordered !== event.messages) {
+			return { messages: ordered };
 		}
 		return;
 	});
@@ -277,7 +238,7 @@ function automaticDraft(
 		readonly handoff: string;
 		readonly tokensBefore: number;
 		readonly reason: string;
-		readonly firstKeptEntryId?: string;
+		readonly firstKeptEntryId?: string | undefined;
 	},
 ) {
 	let firstKeptEntryId = recovery.firstKeptEntryId;
