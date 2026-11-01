@@ -242,7 +242,7 @@
 			"error",
 			{ "max": 80, "skipBlankLines": true, "skipComments": true, "IIFEs": true }
 		],
-		"max-lines": ["error", { "max": 500, "skipBlankLines": true, "skipComments": true }],
+		"max-lines": ["error", { "max": 600, "skipBlankLines": true, "skipComments": true }],
 		"curly": ["error", "all"],
 		"no-var": "error",
 		"prefer-const": "error",

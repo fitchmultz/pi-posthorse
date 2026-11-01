@@ -1,6 +1,12 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isRecord, isReminderType, type EntryLike, type ReminderFingerprint } from "./contracts.ts";
-import { contextStart, isWindow } from "./history-entries.ts";
+import {
+	isRecord,
+	isReminderType,
+	type EntryLike,
+	type ProjectedEntry,
+	type ReminderFingerprint,
+} from "./contracts.ts";
+import { contextEdits, contextStart, isWindow } from "./history-entries.ts";
 
 type ReminderState = {
 	readonly manager: ExtensionContext["sessionManager"];
@@ -14,6 +20,12 @@ export type ReminderLookup = {
 	readonly reset: () => void;
 	readonly read: (ctx: ExtensionContext) => ReminderState;
 };
+export type StaleReminderPredicate = (message: {
+	readonly role: string;
+	readonly customType?: string;
+	readonly details?: unknown;
+}) => boolean;
+
 export function reminderMatches(details: unknown, fingerprint: ReminderFingerprint): boolean {
 	if (!isRecord(details)) {
 		return false;
@@ -113,4 +125,90 @@ export function createReminderLookup(): ReminderLookup {
 			return state;
 		},
 	};
+}
+
+function retainedEntryIdSet(branch: readonly EntryLike[]): ReadonlySet<string> | undefined {
+	const compactionIdx = branch.findLastIndex((entry) => entry.type === "compaction");
+	const firstKeptId = compactionIdx > 0 ? branch[compactionIdx]?.firstKeptEntryId : undefined;
+	if (typeof firstKeptId !== "string" || firstKeptId === "") {
+		return undefined;
+	}
+	const firstKeptIdx = branch.findIndex((entry) => entry.id === firstKeptId);
+	if (firstKeptIdx < 0 || firstKeptIdx >= compactionIdx) {
+		return undefined;
+	}
+	return new Set(
+		branch
+			.slice(firstKeptIdx, compactionIdx)
+			.flatMap((entry) =>
+				typeof entry.id === "string" && entry.id !== "" ? [entry.id] : [],
+			),
+	);
+}
+
+function countRetainedFromProjected(
+	projected: readonly ProjectedEntry[],
+	retainedIds: ReadonlySet<string>,
+	stale: StaleReminderPredicate,
+): number {
+	let count = 0;
+	for (const item of projected) {
+		if (!retainedIds.has(item.sourceEntry.id ?? "")) {
+			continue;
+		}
+		for (const msg of item.messages) {
+			const role = msg.role ?? "";
+			if (
+				role !== "system" &&
+				!stale({ role, customType: msg.customType, details: msg.details })
+			) {
+				count += 1;
+			}
+		}
+	}
+	return count;
+}
+
+function entryProducesRetainedMessage(
+	entry: EntryLike,
+	edits: ReadonlyMap<string, EntryLike>,
+	stale: StaleReminderPredicate,
+): boolean {
+	if (edits.get(entry.id ?? "")?.replacement === null) {
+		return false;
+	}
+	if (entry.type === "message") {
+		return entry.message?.role !== "system" && entry.message?.excludeFromContext !== true;
+	}
+	if (entry.type === "custom_message") {
+		return !stale({ role: "custom", customType: entry.customType, details: entry.details });
+	}
+	return entry.type === "branch_summary";
+}
+
+export function countRetainedMessages(
+	ctx: ExtensionContext,
+	stale: StaleReminderPredicate,
+): number {
+	const manager: unknown = ctx.sessionManager;
+	const branch: readonly EntryLike[] =
+		isRecord(manager) && typeof manager.getBranch === "function"
+			? ctx.sessionManager.getBranch()
+			: [];
+	const retainedIds = retainedEntryIdSet(branch);
+	if (retainedIds === undefined || retainedIds.size === 0) {
+		return 0;
+	}
+	if (isRecord(manager) && typeof manager.buildSessionProjection === "function") {
+		return countRetainedFromProjected(
+			ctx.sessionManager.buildSessionProjection().entries,
+			retainedIds,
+			stale,
+		);
+	}
+	const edits = contextEdits(branch);
+	return branch.filter(
+		(entry) =>
+			retainedIds.has(entry.id ?? "") && entryProducesRetainedMessage(entry, edits, stale),
+	).length;
 }
