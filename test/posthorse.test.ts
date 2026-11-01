@@ -4776,7 +4776,7 @@ test("automatic recovery tracks session notes across tools, codemode, context ed
 				toolName: "notes",
 				toolCallId: "nw-clear",
 				isError: false,
-				content: "Cleared /workspace/.pi/notes/scratch.md (deleted)",
+				content: "Wrote /workspace/.pi/notes/scratch.md",
 			},
 		},
 		{

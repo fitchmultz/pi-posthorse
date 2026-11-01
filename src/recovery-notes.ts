@@ -130,7 +130,6 @@ function extractNotesResultTarget(
 	const patterns: readonly (readonly [RegExp, NoteOpKind])[] = [
 		[/^Wrote ([^\r\n]+)$/mu, "full-write"],
 		[/^Appended to ([^\r\n]+)$/mu, "partial-write"],
-		[/^Cleared ([^\r\n]+?)(?: \((?:deleted|already absent)\))?$/mu, "clear"],
 		[/^File: ([^\r\n]+)$/mu, "read"],
 	];
 	for (const [pattern, kind] of patterns) {
@@ -261,7 +260,7 @@ function extractFileToolSpec(
 	}
 	const directPath = optionalString(args.path);
 	const directKinds: Readonly<Record<string, NoteOpKind | undefined>> = {
-		write: "full-write",
+		write: args.content === "" ? "clear" : "full-write",
 		edit: "partial-write",
 		read: "read",
 	};
@@ -332,7 +331,7 @@ function notesToolTouches(
 	context: TouchContext,
 ): NoteTouch[] {
 	const parsed = resultText === undefined ? undefined : extractNotesResultTarget(resultText);
-	const kind = parsed?.kind ?? notesCallKind(args);
+	const kind = notesCallKind(args) ?? parsed?.kind;
 	const callTarget = resolveNoteTarget(optionalString(args.path), context.knownDirs, true);
 	const resTarget = resolveNoteTarget(parsed?.rawPath, context.knownDirs, true);
 	const merged = mergeNoteTargets(callTarget, resTarget);
