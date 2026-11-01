@@ -38,9 +38,12 @@ export type MessageLike = {
 	readonly content?: unknown;
 	readonly summary?: string;
 	readonly toolName?: string;
+	readonly customType?: string;
 	readonly namespace?: string;
 	readonly toolCallId?: string;
 	readonly isError?: boolean;
+	readonly details?: unknown;
+	readonly nestedCalls?: unknown;
 	readonly command?: string;
 	readonly output?: string;
 	readonly excludeFromContext?: boolean;

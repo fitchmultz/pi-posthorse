@@ -22,12 +22,15 @@ import {
 } from "./contracts.ts";
 import { registerContextTools } from "./context-tools.ts";
 import { safeJsonStringify } from "./message-text.ts";
+import { hasRetainedRolloverMarker } from "./recovery.ts";
 import { automaticRecovery } from "./retention.ts";
 import {
+	countRetainedMessages,
 	createReminderLookup,
 	hasReminder,
 	reminderMatches,
 	type ReminderLookup,
+	type StaleReminderPredicate,
 } from "./reminders.ts";
 
 export type SnapshotReader = (
@@ -181,49 +184,88 @@ function sendReminder(
 		{ deliverAs: "steer" },
 	);
 }
+const NO_STALE_REMINDER: StaleReminderPredicate = () => false;
+function staleReminderPredicate(
+	messages: readonly {
+		readonly role: string;
+		readonly customType?: string;
+		readonly details?: unknown;
+	}[],
+	ctx: ExtensionContext,
+	policy: SnapshotReader,
+	reminders: ReminderLookup,
+): StaleReminderPredicate {
+	if (
+		!messages.some((message) => message.role === "custom" && isReminderType(message.customType))
+	) {
+		return NO_STALE_REMINDER;
+	}
+	const marker = messages.find(
+		(message) => message.role === "custom" && message.customType === "context-window",
+	);
+	let windowId: unknown;
+	if (marker?.role === "custom") {
+		windowId = isRecord(marker.details) ? marker.details.windowId : undefined;
+	} else {
+		windowId = reminders.read(ctx).windowId;
+	}
+	if (typeof windowId !== "string") {
+		return NO_STALE_REMINDER;
+	}
+	const host = policy(ctx);
+	const budget = budgetFor(host);
+	const fingerprint: ReminderFingerprint = {
+		windowId,
+		contextWindow: budget?.contextWindow,
+		reserveTokens: budget?.reserveTokens,
+	};
+	const enabled = host.getCompactionSettings().enabled;
+	return (message) =>
+		message.role === "custom" &&
+		isReminderType(message.customType) &&
+		(!enabled || !reminderMatches(message.details, fingerprint));
+}
 function registerReminderFilter(
 	pi: ExtensionAPI,
 	policy: SnapshotReader,
 	reminders: ReminderLookup,
 ): void {
 	pi.on("context", (event, ctx) => {
+		const stale = staleReminderPredicate(event.messages, ctx, policy, reminders);
+		const filtered = event.messages.some(stale)
+			? event.messages.filter((message) => !stale(message))
+			: event.messages;
+		const first = filtered[0];
 		if (
-			!event.messages.some(
-				(message) => message.role === "custom" && isReminderType(message.customType),
-			)
+			filtered.length >= 2 &&
+			first.role === "compactionSummary" &&
+			hasRetainedRolloverMarker(first.summary)
 		) {
-			return;
+			const count = countRetainedMessages(ctx, stale);
+			if (count > 0 && 1 + count <= filtered.length) {
+				const retainedSlice = filtered.slice(1, 1 + count);
+				const afterSlice = filtered.slice(1 + count);
+				if (retainedSlice[0].role !== "assistant") {
+					return { messages: [...retainedSlice, first, ...afterSlice] };
+				}
+				return {
+					messages: [
+						{
+							role: "custom",
+							customType: "posthorse-retained-tail",
+							content: "[Retained pre-rollover tail]",
+							display: false,
+							timestamp: first.timestamp,
+						},
+						...retainedSlice,
+						first,
+						...afterSlice,
+					],
+				};
+			}
 		}
-		const marker = event.messages.find(
-			(message) => message.role === "custom" && message.customType === "context-window",
-		);
-		let windowId: unknown;
-		if (marker?.role === "custom") {
-			windowId = isRecord(marker.details) ? marker.details.windowId : undefined;
-		} else {
-			windowId = reminders.read(ctx).windowId;
-		}
-		if (typeof windowId !== "string") {
-			return;
-		}
-		const host = policy(ctx);
-		const budget = budgetFor(host);
-		const fingerprint: ReminderFingerprint = {
-			windowId,
-			contextWindow: budget?.contextWindow,
-			reserveTokens: budget?.reserveTokens,
-		};
-		const enabled = host.getCompactionSettings().enabled;
-		const stale = (message: {
-			readonly role: string;
-			readonly customType?: string;
-			readonly details?: unknown;
-		}) =>
-			message.role === "custom" &&
-			isReminderType(message.customType) &&
-			(!enabled || !reminderMatches(message.details, fingerprint));
-		if (event.messages.some(stale)) {
-			return { messages: event.messages.filter((message) => !stale(message)) };
+		if (filtered !== event.messages) {
+			return { messages: filtered };
 		}
 		return;
 	});
