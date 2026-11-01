@@ -2,8 +2,25 @@
 
 ## Unreleased
 
+## 0.10.2 - 2026-11-01
+
+<!-- npm-release:unreleased:start -->
+
 - Let the corrected Go quality engine finish building on slower hosts instead of stopping it after
   ten minutes.
+
+<!-- npm-release:unreleased:end -->
+
+- Automate reviewed npm releases (#112) ([4e8863c](https://github.com/fitchmultz/pi-posthorse/commit/4e8863c7a5bd463295d901e788e7ab94d76920bc))
+
+### What's Changed
+
+- Automate release quality qualification by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/110
+- Let the quality engine finish building on slower hosts by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/111
+- Order retained rollover tail chronologically and surface task notes in recovery by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/113
+- Automate reviewed npm releases by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/112
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.1...v0.10.2
 
 ## 0.10.1
 
