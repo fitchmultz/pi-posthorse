@@ -49,7 +49,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: c21598f3cf9a9c19d7e697f36600014a0a24f2de # main
+  PI_AUTOMATION_REF: 298709b018a4d99fe4eb4905647410ffdf193518 # main
   GO_VERSION: "1.27.1"
   RUST_TOOLCHAIN: "1.99.0"
 
@@ -61,9 +61,9 @@ jobs:
       source-ref: ${{ inputs.source-ref || github.sha }}
 
   resolve:
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@c21598f3cf9a9c19d7e697f36600014a0a24f2de # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@298709b018a4d99fe4eb4905647410ffdf193518 # main
     with:
-      automation-ref: c21598f3cf9a9c19d7e697f36600014a0a24f2de # main
+      automation-ref: 298709b018a4d99fe4eb4905647410ffdf193518 # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
