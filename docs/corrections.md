@@ -82,7 +82,7 @@ Run the same checker locally and through normal acceptance:
 
 ```sh
 node scripts/config-policy.ts /path/to/disposable-checkout
-npm run quality:policy
+npm run quality:config
 npm run verify
 ```
 
