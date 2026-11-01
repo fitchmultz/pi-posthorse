@@ -809,12 +809,37 @@ for (const [reason, asynchronous] of [
 		assert.equal(boundary.usage, undefined);
 		assert.equal(h.faux.state.callCount, reason === "overflow" ? 3 : 2);
 		const retained = fresh.filter((message) => message.role !== "system");
-		assert.ok(retained.some((message) => textOf(message).startsWith("RETAINED_OWNER")));
-		assert.ok(retained.some((message) => textOf(message).startsWith("RECENT_ASSISTANT")));
-		assert.ok(retained.some((message) => textOf(message).startsWith("PROJECTED_RECEIPT")));
+		assert.equal(
+			retained[0].role,
+			"user",
+			"retained assistant tail gets a leading user anchor",
+		);
+		const idxAssistant = retained.findIndex((message) =>
+			textOf(message).startsWith("RECENT_ASSISTANT"),
+		);
+		const idxOwner = retained.findIndex((message) =>
+			textOf(message).startsWith("RETAINED_OWNER"),
+		);
+		const idxReceipt = retained.findIndex((message) =>
+			textOf(message).startsWith("PROJECTED_RECEIPT"),
+		);
+		const idxSummary = retained.findIndex((message) =>
+			textOf(message).includes("Automatic context rollover recovery record."),
+		);
+		assert.ok(idxAssistant >= 0 && idxOwner > idxAssistant && idxReceipt > idxOwner);
+		assert.ok(
+			idxSummary > idxReceipt,
+			"compaction recovery record appears chronologically after the retained pre-rollover tail",
+		);
 		assert.doesNotMatch(JSON.stringify(fresh), /OMITTED_PRIVATE_INPUT|PRIVATE_UNEDITED_RESULT/);
 		assert.doesNotMatch(boundary.summary, /RETAINED_OWNER|PROJECTED_RECEIPT|RECENT_ASSISTANT/);
 		assert.match(boundary.summary, /DISCARDED_OWNER/);
+		assert.match(
+			boundary.summary,
+			new RegExp(
+				`Context rolled over after entry .*entries ${ids.prose} through .* above are the carried-over recent tail`,
+			),
+		);
 		assert.match(textOf(toolResult(h, "history")), /skipped.*context/i);
 		assert.match(textOf(toolResult(h, "history")), /^No history matches/);
 		const reopened = SessionManager.open(h.sessionManager.getSessionFile());
@@ -838,6 +863,18 @@ for (const [reason, asynchronous] of [
 		await h.session.prompt("Continue after another overflow.");
 		assert.equal(boundaries(h).length, 2);
 		assert.equal(boundaries(h)[1].firstKeptEntryId, ids.owner);
+		const repeatedNonSystem = repeated.filter((message) => message.role !== "system");
+		assert.ok(
+			textOf(repeatedNonSystem[0]).startsWith("RETAINED_OWNER"),
+			"when firstKeptEntryId is already a user message, no extra anchor is prepended",
+		);
+		const repReceiptIdx = repeatedNonSystem.findIndex((message) =>
+			textOf(message).startsWith("PROJECTED_RECEIPT"),
+		);
+		const repSummaryIdx = repeatedNonSystem.findIndex((message) =>
+			textOf(message).includes("Automatic context rollover recovery record."),
+		);
+		assert.ok(repReceiptIdx > 0 && repSummaryIdx > repReceiptIdx);
 		assert.match(JSON.stringify(repeated), /RETAINED_OWNER|PROJECTED_RECEIPT/);
 		assert.doesNotMatch(boundaries(h)[1].summary, /RETAINED_OWNER|PROJECTED_RECEIPT/);
 		assert.match(

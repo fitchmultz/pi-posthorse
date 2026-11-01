@@ -4655,3 +4655,262 @@ test("appends from concurrent Pi processes never merge records", async () => {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("automatic recovery tracks session notes across tools, codemode, context edits, clears, and explicit resets", () => {
+	const entries = [
+		{
+			type: "message",
+			id: "pre-reset-write",
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id: "call-pre",
+						name: "notes",
+						arguments: { op: "write", path: "obsolete.md", content: "old task" },
+					},
+				],
+			},
+		},
+		{
+			type: "compaction",
+			id: "explicit-reset",
+			summary: "Fresh explicit task window.",
+			firstKeptEntryId: null,
+			details: { posthorse: 1, reason: "explicit" },
+		},
+		{
+			type: "message",
+			id: "owner-1",
+			timestamp: "2026-11-01T00:00:00Z",
+			message: { role: "user", content: "Ship the durable recovery fix." },
+		},
+		{
+			type: "message",
+			id: "codemode-res",
+			message: {
+				role: "toolResult",
+				toolName: "codemode",
+				toolCallId: "cm-1",
+				isError: false,
+				content: "read note",
+				nestedCalls: {
+					calls: [
+						{
+							name: "notes",
+							arguments: { op: "read", path: "durable-session-recovery.md" },
+							result: "File: /workspace/.pi/notes/durable-session-recovery.md\nprior context",
+						},
+					],
+				},
+			},
+		},
+		{
+			type: "message",
+			id: "compacted-write-call",
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id: "nw-1",
+						name: "notes",
+						arguments: {
+							op: "write",
+							path: "pi-durable-pr.md",
+							content: "# Goal\nShip PR",
+						},
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: "compacted-write-res",
+			message: {
+				role: "toolResult",
+				toolName: "notes",
+				toolCallId: "nw-1",
+				isError: false,
+				content: "Wrote /workspace/.pi/notes/pi-durable-pr.md",
+			},
+		},
+		{
+			type: "message",
+			id: "temp-calls",
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id: "nw-temp",
+						name: "notes",
+						arguments: { op: "write", path: "scratch.md", content: "temp" },
+					},
+					{
+						type: "toolCall",
+						id: "nw-clear",
+						name: "notes",
+						arguments: { op: "write", path: "scratch.md", content: "" },
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: "temp-write",
+			message: {
+				role: "toolResult",
+				toolName: "notes",
+				toolCallId: "nw-temp",
+				isError: false,
+				content: "Wrote /workspace/.pi/notes/scratch.md",
+			},
+		},
+		{
+			type: "message",
+			id: "temp-clear",
+			message: {
+				role: "toolResult",
+				toolName: "notes",
+				toolCallId: "nw-clear",
+				isError: false,
+				content: "Cleared /workspace/.pi/notes/scratch.md (deleted)",
+			},
+		},
+		{
+			type: "message",
+			id: "omitted-write",
+			message: {
+				role: "toolResult",
+				toolName: "notes",
+				toolCallId: "nw-omit",
+				isError: false,
+				content: "Wrote /workspace/.pi/notes/redacted.md",
+			},
+		},
+		{
+			type: "context_edit",
+			id: "edit-omit",
+			targetId: "omitted-write",
+			replacement: null,
+		},
+		{
+			type: "message",
+			id: "failed-edit-call",
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id: "rt-fail",
+						name: "replace_text",
+						arguments: {
+							files: [{ path: "/workspace/.pi/notes/failed-note.md", edits: [] }],
+						},
+					},
+					{
+						type: "toolCall",
+						id: "rt-preview",
+						name: "replace_text",
+						arguments: {
+							preview: true,
+							files: [{ path: "/workspace/.pi/notes/preview-only.md", edits: [] }],
+						},
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: "failed-edit-res",
+			message: {
+				role: "toolResult",
+				toolName: "replace_text",
+				toolCallId: "rt-fail",
+				isError: true,
+				content: "Anchor not found",
+			},
+		},
+		{
+			type: "message",
+			id: "retained-partial-call",
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id: "rt-ok",
+						name: "replace_text",
+						arguments: {
+							files: [{ path: "/workspace/.pi/notes/pi-durable-pr.md", edits: [] }],
+						},
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: "retained-partial-res",
+			message: {
+				role: "toolResult",
+				toolName: "replace_text",
+				toolCallId: "rt-ok",
+				isError: false,
+				content: "Updated 1 file",
+			},
+		},
+	];
+	const projected = entries
+		.filter((entry) => entry.type === "message" && entry.id !== "omitted-write")
+		.map((sourceEntry) => ({
+			sourceEntry,
+			messages: sourceEntry.message === undefined ? [] : [sourceEntry.message],
+		}));
+
+	// Case 1: Only a partial edit (replace_text) is in the retained tail; the full write was compacted.
+	const partialRetained = buildAutoHandoff(entries, projected, 20_000, {
+		ownerQuestionRegistered: false,
+		retainedEntryIds: new Set(["retained-partial-call", "retained-partial-res"]),
+	});
+	assert.doesNotMatch(
+		partialRetained,
+		/obsolete\.md|scratch\.md|redacted\.md|failed-note\.md|preview-only\.md/,
+	);
+	assert.match(
+		partialRetained,
+		/Context rolled over after entry retained-partial-res\. Earlier turns before entry retained-partial-call were compacted into session history; entries retained-partial-call through retained-partial-res above are the carried-over recent tail/,
+	);
+	assert.match(
+		partialRetained,
+		/- Active note \(written\): pi-durable-pr\.md \(\/workspace\/\.pi\/notes\/pi-durable-pr\.md\) \[only partial edits are in the retained tail above at entry retained-partial-call — read full note now\]/,
+	);
+	assert.match(
+		partialRetained,
+		/- Referenced note \(read\): durable-session-recovery\.md \(\/workspace\/\.pi\/notes\/durable-session-recovery\.md\) \[compacted before entry retained-partial-call\]/,
+	);
+	assert.match(
+		partialRetained,
+		/Read pi-durable-pr\.md \(notes read or read on its path\) before continuing/,
+	);
+
+	// Case 2: The full write itself is inside the retained tail -> tell the model not to rewrite it unnecessarily.
+	const fullRetained = buildAutoHandoff(entries, projected, 20_000, {
+		ownerQuestionRegistered: false,
+		retainedEntryIds: new Set([
+			"compacted-write-call",
+			"compacted-write-res",
+			"retained-partial-call",
+			"retained-partial-res",
+		]),
+	});
+	assert.match(
+		fullRetained,
+		/- Active note \(written\): pi-durable-pr\.md \(\/workspace\/\.pi\/notes\/pi-durable-pr\.md\) \[latest full write is in the retained tail above at entry compacted-write-call, updated at entry retained-partial-call\]/,
+	);
+	assert.match(
+		fullRetained,
+		/Your latest full write to pi-durable-pr\.md is already visible above at entry compacted-write-call; do not rewrite it unless new findings after entry retained-partial-res require it\./,
+	);
+});

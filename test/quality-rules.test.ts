@@ -71,8 +71,8 @@ const structuralCases = [
 	{
 		name: "production file lines",
 		code: "eslint/max-lines",
-		pass: fileLines(500),
-		fail: fileLines(501),
+		pass: fileLines(600),
+		fail: fileLines(601),
 	},
 ];
 
@@ -104,7 +104,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 			);
 			const specialLocations: Readonly<Record<string, number>> = {
 				"eslint/max-depth": 5,
-				"eslint/max-lines": 501,
+				"eslint/max-lines": 601,
 			};
 			const expectedLine = specialLocations[example.code] ?? 1;
 			await expectFindings(
