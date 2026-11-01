@@ -6,6 +6,7 @@ import { objectValue, readObject } from "./quality-policy.ts";
 type Configuration = Readonly<Record<string, unknown>>;
 const CI = ".github/workflows/ci.yml";
 const RELEASE = ".github/workflows/npm-release.yml";
+const VERSION = ".github/workflows/npm-version.yml";
 const SHARED_WORKFLOWS = "fitchmultz/.github/.github/workflows/";
 
 function field(value: unknown, ...keys: readonly string[]): unknown {
@@ -69,14 +70,14 @@ function sharedJobs(config: Configuration, file: string, ref: string): string[] 
 	}
 	return problems;
 }
-function automationCheckout(config: Configuration): string[] {
+function automationCheckout(config: Configuration, file: string, ref: string): string[] {
 	const jobs = field(config, "jobs");
 	const problems: string[] = [];
 	let checkouts = 0;
 	for (const [name, job] of Object.entries(objectValue(jobs) ? jobs : {})) {
 		if (field(job, "env", "PI_AUTOMATION_REF") !== undefined) {
 			problems.push(
-				`${CI}:jobs.${name}.env.PI_AUTOMATION_REF: remove the override; use the workflow-level authority`,
+				`${file}:jobs.${name}.env.PI_AUTOMATION_REF: remove the override; use the workflow-level authority`,
 			);
 		}
 		const steps = field(job, "steps");
@@ -87,23 +88,23 @@ function automationCheckout(config: Configuration): string[] {
 		for (const [index, step] of entries.entries()) {
 			if (field(step, "env", "PI_AUTOMATION_REF") !== undefined) {
 				problems.push(
-					`${CI}:jobs.${name}.steps[${index}].env.PI_AUTOMATION_REF: remove the override; use the workflow-level authority`,
+					`${file}:jobs.${name}.steps[${index}].env.PI_AUTOMATION_REF: remove the override; use the workflow-level authority`,
 				);
 			}
 			if (field(step, "with", "repository") === "fitchmultz/.github") {
 				checkouts++;
 				problems.push(
 					...mismatch(
-						`${CI}:jobs.${name}.steps[${index}].with.ref`,
+						`${file}:jobs.${name}.steps[${index}].with.ref (use ${CI} env.PI_AUTOMATION_REF)`,
 						field(step, "with", "ref"),
-						"${{ env.PI_AUTOMATION_REF }}",
+						ref,
 					),
 				);
 			}
 		}
 	}
 	return checkouts === 0
-		? [...problems, `${CI}: shared automation checkout must use env.PI_AUTOMATION_REF`]
+		? [...problems, `${file}: shared automation checkout must use ${CI} env.PI_AUTOMATION_REF`]
 		: problems;
 }
 function includes(value: unknown, item: string): boolean {
@@ -213,14 +214,20 @@ function floorProblems(manifest: Configuration, renovate: Configuration): string
 export function checkConfiguration(root: string): readonly string[] {
 	const ci = workflow(root, CI);
 	const release = workflow(root, RELEASE);
+	const version = workflow(root, VERSION);
 	const ref = field(ci, "env", "PI_AUTOMATION_REF");
 	const problems =
 		typeof ref === "string" && /^[a-f0-9]{40}$/u.test(ref)
-			? [...sharedJobs(ci, CI, ref), ...sharedJobs(release, RELEASE, ref)]
+			? [
+					...sharedJobs(ci, CI, ref),
+					...sharedJobs(release, RELEASE, ref),
+					...sharedJobs(version, VERSION, ref),
+					...automationCheckout(release, RELEASE, ref),
+				]
 			: [`${CI}:env.PI_AUTOMATION_REF must be an immutable 40-character commit SHA`];
 	return [
 		...problems,
-		...automationCheckout(ci),
+		...automationCheckout(ci, CI, "${{ env.PI_AUTOMATION_REF }}"),
 		...floorProblems(
 			readObject(resolve(root, "package.json")),
 			readObject(resolve(root, "renovate.json")),

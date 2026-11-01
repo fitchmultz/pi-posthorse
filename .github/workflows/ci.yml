@@ -19,6 +19,18 @@ on:
         description: Exact candidate commit; blank uses the caller commit
         type: string
         default: ""
+      release-source:
+        description: Original main commit represented by the candidate
+        type: string
+        default: ""
+      candidate-artifact:
+        description: Same-run retained npm candidate; blank qualifies source normally
+        type: string
+        default: ""
+      fork-artifact:
+        description: Same-run retained fork; blank builds the resolved fork
+        type: string
+        default: ""
       official-version:
         description: Official stable version resolved for this run; blank resolves latest
         type: string
@@ -29,6 +41,7 @@ on:
         default: ""
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -36,7 +49,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: 54c687228d840506555801b9db038373e697d901 # main
+  PI_AUTOMATION_REF: 298709b018a4d99fe4eb4905647410ffdf193518 # main
   GO_VERSION: "1.27.1"
   RUST_TOOLCHAIN: "1.99.0"
 
@@ -48,9 +61,9 @@ jobs:
       source-ref: ${{ inputs.source-ref || github.sha }}
 
   resolve:
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@54c687228d840506555801b9db038373e697d901 # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@298709b018a4d99fe4eb4905647410ffdf193518 # main
     with:
-      automation-ref: 54c687228d840506555801b9db038373e697d901 # main
+      automation-ref: 298709b018a4d99fe4eb4905647410ffdf193518 # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
@@ -86,7 +99,7 @@ jobs:
           ref: ${{ env.PI_AUTOMATION_REF }}
           path: automation
           persist-credentials: false
-      - if: matrix.host == 'fork'
+      - if: matrix.host == 'fork' && inputs.fork-artifact == ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         id: fork
         with:
@@ -108,10 +121,10 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
-      - if: matrix.host == 'fork'
+      - if: matrix.host == 'fork' && inputs.fork-artifact == ''
         name: Use the reviewed npm version
         run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
-      - if: matrix.host == 'fork'
+      - if: matrix.host == 'fork' && inputs.fork-artifact == ''
         name: Build the current fork
         working-directory: fork
         env:
@@ -123,8 +136,29 @@ jobs:
           git diff --exit-code
           node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "$PI_FORK_REF"
           git diff --exit-code
+      - if: matrix.host == 'fork' && inputs.fork-artifact != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.fork-artifact }}
+          path: ${{ runner.temp }}/fork-package
       - name: Use the extension npm version
         run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
+      - if: inputs.candidate-artifact != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.candidate-artifact }}
+          path: ${{ runner.temp }}/npm-candidate
+      - if: inputs.candidate-artifact != ''
+        name: Verify the retained candidate
+        env:
+          SOURCE_REF: ${{ inputs.source-ref }}
+          RELEASE_SOURCE: ${{ inputs.release-source }}
+          OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
+          FORK_REF: ${{ needs.resolve.outputs.fork-ref }}
+        run: |
+          node automation/scripts/npm-release.mjs verify \
+            --artifact "$RUNNER_TEMP/npm-candidate" --source-ref "$SOURCE_REF" \
+            --release-source "$RELEASE_SOURCE" --official-version "$OFFICIAL_VERSION" --fork-ref "$FORK_REF"
       # Same keys as the strict quality job; a miss builds inside isolated qualification.
       - name: Restore corrected native Oxlint
         id: oxlint
@@ -175,11 +209,18 @@ jobs:
       - if: matrix.host == 'fork'
         name: Qualify fork Pi
         env:
-          PI_COMPAT_FORK_REF: ${{ steps.fork.outputs.commit }}
+          PI_COMPAT_FORK_REF: ${{ needs.resolve.outputs.fork-ref }}
         run: |
           node automation/scripts/qualify.mjs \
             --repo pi-posthorse --source "$GITHUB_WORKSPACE/extension" \
             --host fork --target "$RUNNER_TEMP/fork-package" --output "$RUNNER_TEMP/posthorse-fork"
+      - if: inputs.candidate-artifact != ''
+        name: Match the qualified package and host to the retained candidate
+        env:
+          HOST: ${{ matrix.host }}
+        run: |
+          node extension/scripts/verify-retained-qualification.ts \
+            "$RUNNER_TEMP/npm-candidate/release.json" "$RUNNER_TEMP/posthorse-$HOST/qualification.json" "$HOST"
       - name: Hash retained qualification fixtures
         if: always()
         env:

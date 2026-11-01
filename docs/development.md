@@ -46,6 +46,6 @@ For latest-host qualification, run `node /path/to/automation/scripts/qualify.mjs
 
 ## Automatic npm releases (maintainers)
 
-The [shared release workflow](https://github.com/fitchmultz/.github#automatic-npm-releases) publishes matching npm and GitHub releases from reviewed changes on `main`. The full existing CI workflow and candidate-tarball qualification must pass. Complete any applicable package-specific release evidence before publication.
+After a reviewed change merges into `main`, the [shared release workflow](https://github.com/fitchmultz/.github#automatic-npm-releases) prepares a version PR and publishes matching npm and GitHub releases. The existing CI workflow runs strict quality and release controls against the candidate source. Each latest-host lane verifies that the package it qualified matches the retained tarball and that its Pi host matches the prepared host. Publication requires those gates and a same-run receipt binding the tarball and host identities.
 
 Follow the shared procedure for retries. Set `NPM_RELEASE_ENABLED` to anything other than `true` to stop new release plans; cancel pending runs separately when needed. Verify the actual npm and GitHub releases; workflow validation alone is not evidence of a completed OIDC publication.

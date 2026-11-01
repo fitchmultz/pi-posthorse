@@ -9,6 +9,7 @@ import { repository, runCli } from "./quality-support.ts";
 
 const CI = ".github/workflows/ci.yml";
 const RELEASE = ".github/workflows/npm-release.yml";
+const VERSION = ".github/workflows/npm-version.yml";
 const NEXT_REF = "a".repeat(40);
 const BASE_REF = "b".repeat(40);
 
@@ -38,8 +39,15 @@ function configurationFixture() {
 			},
 		},
 		[RELEASE]: {
-			jobs: { plan: shared("npm-release-plan.yml"), publish: shared("npm-release.yml") },
+			jobs: {
+				plan: shared("npm-release-plan.yml"),
+				publish: shared("npm-release-qualified.yml"),
+				qualification: {
+					steps: [{ with: { repository: "fitchmultz/.github", ref: BASE_REF } }],
+				},
+			},
 		},
+		[VERSION]: { jobs: { reconcile: shared("npm-release-bump.yml") } },
 		"package.json": {
 			peerDependencies: {
 				"@earendil-works/pi-coding-agent": ">=1.3.0",
@@ -94,18 +102,25 @@ test("configuration policy accepts a coherent future pin and support-floor updat
 			`fitchmultz/.github/.github/workflows/resolve-hosts.yml@${NEXT_REF}`,
 		);
 		change(project.root, CI, ["jobs", "resolve", "with", "automation-ref"], NEXT_REF);
-		for (const [job, workflow] of [
-			["plan", "npm-release-plan.yml"],
-			["publish", "npm-release.yml"],
+		for (const [file, job, workflow] of [
+			[RELEASE, "plan", "npm-release-plan.yml"],
+			[RELEASE, "publish", "npm-release-qualified.yml"],
+			[VERSION, "reconcile", "npm-release-bump.yml"],
 		]) {
 			change(
 				project.root,
-				RELEASE,
+				file,
 				["jobs", job, "uses"],
 				`fitchmultz/.github/.github/workflows/${workflow}@${NEXT_REF}`,
 			);
-			change(project.root, RELEASE, ["jobs", job, "with", "automation-ref"], NEXT_REF);
+			change(project.root, file, ["jobs", job, "with", "automation-ref"], NEXT_REF);
 		}
+		change(
+			project.root,
+			RELEASE,
+			["jobs", "qualification", "steps", 0, "with", "ref"],
+			NEXT_REF,
+		);
 		for (const name of ["pi-coding-agent", "pi-tui"]) {
 			change(
 				project.root,
@@ -150,9 +165,16 @@ test("configuration policy rejects each independently drifted workflow reference
 		[
 			RELEASE,
 			["jobs", "publish", "uses"],
-			`fitchmultz/.github/.github/workflows/npm-release.yml@${NEXT_REF}`,
+			`fitchmultz/.github/.github/workflows/npm-release-qualified.yml@${NEXT_REF}`,
 		],
 		[RELEASE, ["jobs", "publish", "with", "automation-ref"], NEXT_REF],
+		[RELEASE, ["jobs", "qualification", "steps", 0, "with", "ref"], NEXT_REF],
+		[
+			VERSION,
+			["jobs", "reconcile", "uses"],
+			`fitchmultz/.github/.github/workflows/npm-release-bump.yml@${NEXT_REF}`,
+		],
+		[VERSION, ["jobs", "reconcile", "with", "automation-ref"], NEXT_REF],
 		[CI, ["jobs", "qualify", "steps", 0, "with", "ref"], NEXT_REF],
 		[CI, ["jobs", "qualify", "env", "PI_AUTOMATION_REF"], NEXT_REF],
 		[CI, ["jobs", "qualify", "steps", 0, "env", "PI_AUTOMATION_REF"], NEXT_REF],
