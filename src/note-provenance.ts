@@ -5,7 +5,7 @@ import { isRecord, type EntryLike } from "./contracts.ts";
 import { sessionLines } from "./session-lines.ts";
 import { parseSessionLine } from "./session-files.ts";
 import { sessionNoteTouches } from "./note-evidence.ts";
-import { readManifest, snapshot, type SnapshotNote } from "./note-snapshots.ts";
+import { mapBatch, readManifest, snapshot, type SnapshotNote } from "./note-snapshots.ts";
 import {
 	addressOf,
 	bindingsOf,
@@ -227,10 +227,8 @@ async function forkBinding(
 	const entries = [...manager.getEntries(), ...source.entries];
 	const files: SnapshotNote[] = [];
 	const absent: string[] = [];
-	const addresses = await Promise.all(
-		candidates.map((candidate) =>
-			resolveReference(scope ?? candidate.source, candidate.path, entries),
-		),
+	const addresses = await mapBatch(candidates, (candidate) =>
+		resolveReference(scope ?? candidate.source, candidate.path, entries),
 	);
 	for (const [index, candidate] of candidates.entries()) {
 		// Resolve against the immediate parent's files, not a historical ancestor's version.

@@ -12,6 +12,7 @@ import {
 	type NoteAddress,
 	type NoteTouchRecord,
 } from "./note-scopes.ts";
+import { mapBatch } from "./note-snapshots.ts";
 import { noteOperations, verifiedNoteOperations, type NoteOperation } from "./note-tool-effects.ts";
 import type { NoteCall, NotesStore, SessionNotes } from "./note-store.ts";
 
@@ -115,10 +116,8 @@ async function recordedFiles(
 	captured: CapturedCall,
 ): Promise<NoteTouchRecord["files"]> {
 	const files: NoteTouchRecord["files"][number][] = [];
-	const addresses = await Promise.all(
-		operations.map((operation) =>
-			noteAddress(toolPath(captured.tool, operation.path, captured.cwd), captured.session),
-		),
+	const addresses = await mapBatch(operations, (operation) =>
+		noteAddress(toolPath(captured.tool, operation.path, captured.cwd), captured.session),
 	);
 	for (const [index, operation] of operations.entries()) {
 		// Each result belongs to the scope captured before execution, even after /tree.

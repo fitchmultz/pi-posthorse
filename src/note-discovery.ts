@@ -3,7 +3,13 @@ import { join, relative } from "node:path";
 import { isRecord } from "./contracts.ts";
 import { sessionNoteTouches } from "./note-evidence.ts";
 import { notesUnder, type NoteFile } from "./note-inventory.ts";
-import { fileDigest, fileIdentity, readManifest, sameIdentity } from "./note-snapshots.ts";
+import {
+	fileDigest,
+	fileIdentity,
+	mapBatch,
+	readManifest,
+	sameIdentity,
+} from "./note-snapshots.ts";
 import {
 	sameScope,
 	scopeDirectory,
@@ -48,12 +54,8 @@ async function projectScopes(
 		throw error;
 	});
 	const candidates = entries.filter((entry) => !entry.name.startsWith(".staging-"));
-	const manifests = await Promise.all(
-		candidates.map((entry) =>
-			entry.isDirectory()
-				? readManifest(join(directory, entry.name, "notes"))
-				: Promise.resolve(),
-		),
+	const manifests = await mapBatch(candidates, async (entry) =>
+		entry.isDirectory() ? readManifest(join(directory, entry.name, "notes")) : undefined,
 	);
 	for (const [index, entry] of candidates.entries()) {
 		const path = join(directory, entry.name);
@@ -204,18 +206,16 @@ export class NoteDiscovery {
 					Number(sameScope(b.address, session.binding)) -
 					Number(sameScope(a.address, session.binding)),
 			);
-			const results = await Promise.all(
-				group.map(async (file) => {
-					const fileNotices: string[] = [];
-					const digest = await this.#digest(file, session, {
-						...options,
-						notice: (text) => {
-							fileNotices.push(text);
-						},
-					});
-					return { file, digest, fileNotices };
-				}),
-			);
+			const results = await mapBatch(group, async (file) => {
+				const fileNotices: string[] = [];
+				const digest = await this.#digest(file, session, {
+					...options,
+					notice: (text) => {
+						fileNotices.push(text);
+					},
+				});
+				return { file, digest, fileNotices };
+			});
 			for (const { file, digest, fileNotices } of results) {
 				fileNotices.forEach(options.notice);
 				// Only same-lineage, same-size candidates need content comparison.
@@ -253,8 +253,8 @@ export class NoteDiscovery {
 					path === options.path ||
 					path.startsWith(`${options.path}/`)),
 		);
-		const resolved = await Promise.all(
-			candidates.map((path) => readReference(session, path, options.signal)),
+		const resolved = await mapBatch(candidates, (path) =>
+			readReference(session, path, options.signal),
 		);
 		return resolved.filter((file): file is DiscoveredNote => file !== undefined);
 	}
@@ -282,15 +282,13 @@ export class NoteDiscovery {
 					])(),
 			this.#references(session, options),
 		]);
-		const scoped = await Promise.all(
-			scopes.map(async (scope) => {
-				const scopeNotices: string[] = [];
-				const scopeFiles = await scopedFiles(scope, options, (text) => {
-					scopeNotices.push(text);
-				});
-				return { scopeFiles, scopeNotices };
-			}),
-		);
+		const scoped = await mapBatch(scopes, async (scope) => {
+			const scopeNotices: string[] = [];
+			const scopeFiles = await scopedFiles(scope, options, (text) => {
+				scopeNotices.push(text);
+			});
+			return { scopeFiles, scopeNotices };
+		});
 		const files: DiscoveredNote[] = [];
 		for (const { scopeFiles, scopeNotices } of scoped) {
 			// Preserve native listing order while walking each scope independently.

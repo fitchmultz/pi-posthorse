@@ -61,7 +61,8 @@ async function listNotes(
 			scope: params.scope,
 			signal,
 		}),
-		params.scope === undefined ? Promise.resolve() : session.selectScope(params.scope),
+		(async () =>
+			params.scope === undefined ? undefined : session.selectScope(params.scope))(),
 	]);
 	const { files } = inventory;
 	const dir = selectedScope === undefined ? session.directory : scopeDirectory(selectedScope);

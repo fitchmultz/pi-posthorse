@@ -89,6 +89,25 @@ export type SnapshotNote = {
 	readonly lineage: NoteAddress;
 	readonly anchors: readonly string[];
 };
+const NOTE_IO_BATCH = 16;
+export async function mapBatch<Input, Output>(
+	items: readonly Input[],
+	fn: (item: Input) => Promise<Output>,
+): Promise<Output[]> {
+	const results: Output[] = [];
+	for (let start = 0; start < items.length; start += NOTE_IO_BATCH) {
+		const settled = await Promise.allSettled(
+			items.slice(start, start + NOTE_IO_BATCH).map((item) => fn(item)),
+		);
+		for (const item of settled) {
+			if (item.status === "rejected") {
+				throw item.reason instanceof Error ? item.reason : new Error(String(item.reason));
+			}
+			results.push(item.value);
+		}
+	}
+	return results;
+}
 async function copyNote(note: SnapshotNote, destination: string): Promise<NoteSeed> {
 	const source = notePath(note.source, note.source.path);
 	const [before] = await Promise.all([
@@ -131,19 +150,10 @@ export async function snapshot(
 	await mkdir(dirname(container), { recursive: true });
 	const stage = await mkdtemp(join(dirname(container), ".staging-"));
 	try {
-		const settledSeeds = await Promise.allSettled(
-			notes.map((note) =>
-				copyNote(note, notePath({ root: stage, scope: "notes" }, note.path)),
-			),
+		// Keep each file's identity and digest paired with the bytes actually copied.
+		const seeds = await mapBatch(notes, (note) =>
+			copyNote(note, notePath({ root: stage, scope: "notes" }, note.path)),
 		);
-		const seeds: NoteSeed[] = [];
-		for (const item of settledSeeds) {
-			// Keep each file's identity and digest paired with the bytes actually copied.
-			if (item.status === "rejected") {
-				throw item.reason instanceof Error ? item.reason : new Error(String(item.reason));
-			}
-			seeds.push(item.value);
-		}
 		const complete: ForkBinding = { ...binding, seeds };
 		await writeFile(join(stage, "manifest.json"), JSON.stringify(complete), { flag: "wx" });
 		await rename(stage, container);
