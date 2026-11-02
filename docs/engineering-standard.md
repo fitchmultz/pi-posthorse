@@ -969,8 +969,8 @@ Review and revisit trigger:
 
 Repository: `fitchmultz/pi-posthorse`. Adopted version: 5.1.2. Adoption starts from
 `a25d5d5`. Node 24 and the npm version declared in `package.json` own acceptance.
-The extension retains its Node >=24.12.0 and Pi >=1.4.0 support floors. The locked
-Pi 1.4.0 cohort exercises that floor; separate CI lanes qualify the latest stable
+The extension retains its Node >=24.12.0 and Pi >=1.5.0 support floors. The locked
+Pi 1.5.0 cohort exercises that floor; separate CI lanes qualify the latest stable
 official release and latest maintained fork commit with their actual SDK graphs.
 
 The qualified published tools are Oxlint 1.90.0, oxlint-tsgolint 7.0.2005,
@@ -1087,8 +1087,8 @@ official `fixture` response factories. The inventory includes the enclosing
 function, assignment, map, and anonymous callback parameter boundaries.
 
 The faux provider awaits the response factory and then estimates usage from
-the same options object. See the qualified Pi AI 1.4.0
-`dist/providers/faux.js:349-352` and cache accounting at `:133-153`.
+the same options object. See the qualified Pi AI 1.5.0
+`dist/providers/faux.js:354-357` and cache accounting at `:134-157`.
 The fixture disables faux's synthetic cache double count so capacity tests
 exercise actual request admission.
 
