@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.10.4 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+
 - Require Pi 1.4.0 or later and update the locked development cohort to 1.4.0. Qualify the latest
   official release and maintained fork against their own SDK and CLI graphs.
 - Isolate fork checkpoints under a session-owned `.forks` scope. Copy only selected-branch notes,
@@ -12,6 +16,16 @@
   calls made through codemode. Preserve confirmed partial effects and ownership after deletion.
 - Recover verified nested note writes even when outer receipts omit arguments or background work
   finishes after tree navigation. Respect omitted receipts without treating metadata as full text.
+
+<!-- npm-release:unreleased:end -->
+
+- Isolate forked session notes and preserve recovery provenance (#117) ([4363bf7](https://github.com/fitchmultz/pi-posthorse/commit/4363bf74a67a73badd24805d07d528e23bb2fef2))
+
+### What's Changed
+
+- Isolate forked session notes and preserve recovery provenance by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/117
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.3...v0.10.4
 
 ## 0.10.3 - 2026-11-01
 
