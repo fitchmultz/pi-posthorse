@@ -20,6 +20,11 @@ import { registerGuidance } from "./guidance.ts";
 import { safeJsonStringify } from "./message-text.ts";
 import { hasRetainedRolloverMarker } from "./recovery.ts";
 import { automaticRecovery } from "./retention.ts";
+import type { NotesRecovery } from "./note-evidence.ts";
+type RolloverResources = {
+	readonly resetPages: () => void;
+	readonly notes: (ctx: ExtensionContext) => NotesRecovery | undefined;
+};
 import {
 	countRetainedMessages,
 	createReminderLookup,
@@ -313,7 +318,11 @@ function thresholdFallback(
 	pi: ExtensionAPI,
 	event: TurnEndEvent,
 	ctx: ExtensionContext,
-	capacity: { readonly host: PolicyContext; readonly toolTokens: () => number },
+	capacity: {
+		readonly host: PolicyContext;
+		readonly toolTokens: () => number;
+		readonly notes: RolloverResources["notes"];
+	},
 ): BoundaryResult | undefined {
 	if (!fallbackTurnEligible(event, ctx)) {
 		return undefined;
@@ -332,7 +341,12 @@ function thresholdFallback(
 	const recovery = automaticRecovery(
 		ctx.sessionManager.getBranch(),
 		projected,
-		{ host, toolTokens: toolTokens(), pendingMessages: event.context.pendingMessages },
+		{
+			host,
+			toolTokens: toolTokens(),
+			pendingMessages: event.context.pendingMessages,
+			notes: capacity.notes(ctx),
+		},
 		ownerQuestionRegistered,
 	);
 	if (recovery === undefined) {
@@ -357,6 +371,7 @@ function registerAutomaticRollover(
 	pi: ExtensionAPI,
 	policy: SnapshotReader,
 	activeToolTokens: () => number,
+	notes: RolloverResources["notes"],
 ): void {
 	pi.on("session_before_compact", (event, ctx) => {
 		if (event.reason === "manual") {
@@ -381,6 +396,7 @@ function registerAutomaticRollover(
 					host,
 					toolTokens: activeToolTokens(),
 					firstKeptEntryId: event.preparation.firstKeptEntryId,
+					notes: notes(ctx),
 				},
 				ownerQuestionRegistered,
 			);
@@ -411,13 +427,13 @@ export function registerRollover(
 	pi: ExtensionAPI,
 	policy: SnapshotReader,
 	activeToolTokens: () => number,
-	resetPages: () => void,
+	resources: RolloverResources,
 ): void {
 	const resetRequests = new Map<string, string>();
 	const reminders = createReminderLookup();
 	const resetTurn = () => {
 		resetRequests.clear();
-		resetPages();
+		resources.resetPages();
 	};
 	pi.on("turn_start", resetTurn);
 	pi.on("session_start", () => {
@@ -429,7 +445,7 @@ export function registerRollover(
 	});
 	registerGuidance(pi, policy);
 	registerReminderFilter(pi, policy, reminders);
-	registerAutomaticRollover(pi, policy, activeToolTokens);
+	registerAutomaticRollover(pi, policy, activeToolTokens, resources.notes);
 	pi.on("turn_end", (event, ctx) => {
 		const requested = event.toolResults.find(
 			(result) => result.toolName === "new_context" && resetRequests.has(result.toolCallId),
@@ -452,6 +468,7 @@ export function registerRollover(
 		const fallback = thresholdFallback(pi, event, ctx, {
 			host,
 			toolTokens: activeToolTokens,
+			notes: resources.notes,
 		});
 		if (fallback !== undefined) {
 			return fallback;

@@ -50,8 +50,8 @@ function configurationFixture() {
 		[VERSION]: { jobs: { reconcile: shared("npm-release-bump.yml") } },
 		"package.json": {
 			peerDependencies: {
-				"@earendil-works/pi-coding-agent": ">=1.3.0",
-				"@earendil-works/pi-tui": ">=1.3.0",
+				"@earendil-works/pi-coding-agent": ">=1.4.0",
+				"@earendil-works/pi-tui": ">=1.4.0",
 			},
 		},
 		"renovate.json": {
@@ -60,7 +60,7 @@ function configurationFixture() {
 					matchManagers: ["npm"],
 					matchPackageNames: ["@earendil-works/**"],
 					matchDepTypes: ["devDependencies"],
-					allowedVersions: ">=1.3.0",
+					allowedVersions: ">=1.4.0",
 				},
 			],
 		},

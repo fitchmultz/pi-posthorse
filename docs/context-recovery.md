@@ -26,7 +26,7 @@ With Posthorse loaded:
 | Manual `/compact`                  | Pi's normal summary and retained tail                                                 | Pi's normal summarization |
 | Unsupported small automatic budget | Pi's native compaction fallback                                                       | May use Pi's summarizer   |
 
-The practical additions are shared `notes`, model-callable `history` search/read, context guidance,
+The practical additions are project-wide `notes` with private fork scopes, model-callable `history` search/read, context guidance,
 and a best-effort checkpoint nudge. The automatic record is assembled from selected inputs, tool
 evidence and history pointers; it is **not an automatic narrative summary of completed work**.
 The model still needs to read notes or history and check live state. There is no universal claim
@@ -90,7 +90,7 @@ sessions keep their context, so a cold resume can still send a large request. Se
 [idle sessions and cache expiry](reference.md#idle-sessions-and-cache-expiry) for the scheduling
 limitation and the supported explicit alternatives.
 
-Cancellation is not a rollback guarantee. In official Pi 1.3.0, explicit resets and the eager
+Cancellation is not a rollback guarantee. In official Pi 1.4.0, explicit resets and the eager
 turn-end threshold fallback return boundary drafts before later handlers finish. The host commits
 the final drafts without another abort check, so a late abort after Posthorse's checks need not
 prevent that boundary from being saved. This is distinct from native automatic compaction, which
@@ -132,13 +132,32 @@ Posthorse does not remove notes or Pi history. Use the actual paths reported by 
 storage/provider policies for sensitive data; do not treat a rollover or context edit as redaction.
 See [storage and privacy](reference.md#data-and-privacy).
 
-## Shared notes and concurrent work
+## Fork notes and concurrent work
+
+A fork copies the notes used on its selected branch into its own writable scope. The parent and
+child can edit the same relative note name independently. The copy uses current source bytes,
+not the contents at an earlier conversation entry. Resuming or navigating with `/tree` does not
+restore old file versions.
+
+Project-wide lists and searches include completed fork scopes, with selectors for read-only
+comparisons. Unchanged inherited copies collapse into one row with references to the other
+scopes. A note found on another inherited branch can be read as a live reference. An anchored
+edit adopts it first, then asks for a reread and retry on the private file. Append adopts without
+discarding the inherited text. A deleted child-owned note stays deleted rather than falling back
+to its parent.
+
+Nested note writes remain recoverable even when Pi omits their arguments from a compact script
+receipt. Posthorse records verified effects and follows the launch branch, not the physical
+position of a late metadata entry. This does not change native cancellation or background
+completion delivery. Compact metadata never proves that full note content is visible; recovery
+asks the model to read the note. See [fork notes](reference.md#forks-references-and-discovery).
 
 Use concise current-state notes recording constraints, decisions, exact evidence locations and next
 steps. For concurrent agents, use separate per-agent/task files or an explicit single-writer handoff.
 Prefer targeted file edits for small changes instead of repeatedly sending an entire note, but only
-when that writer owns the note. Read the actual shared path from `notes list` or `notes read` rather
-than assuming that a worktree-local `.pi/notes/` is the storage location.
+when that writer owns the note. Use the editable path from a current-scope `notes read` rather
+than assuming that a worktree-local `.pi/notes/` is the storage location. Read-only references use
+scope selectors instead. Unrelated nonfork sessions still share the original project scope.
 
 The notes tool orders writes and appends to the same note within one Pi process. Across processes,
 full-file replacements do not merge concurrent edits or appends; a later replacement can overwrite

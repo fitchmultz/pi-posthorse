@@ -7,6 +7,7 @@ import {
 	recoveryRecord,
 	type RecoveryRecord,
 } from "./recovery-records.ts";
+import type { NotesRecovery } from "./note-evidence.ts";
 import { renderSessionNotes, type RetainedSpan } from "./recovery-notes.ts";
 import {
 	recoverableToolResults,
@@ -380,6 +381,7 @@ function rolloverPreambleWithNotes(
 	options: {
 		readonly retained: ReadonlySet<string>;
 		readonly reserveParts: readonly (string | undefined)[];
+		readonly notes?: NotesRecovery | undefined;
 		readonly maxChars: number;
 	},
 ): string {
@@ -394,6 +396,7 @@ function rolloverPreambleWithNotes(
 		{
 			retained,
 			span,
+			notes: options.notes,
 			maxChars: Math.min(
 				MAX_NOTES_SECTION_CHARS,
 				Math.max(0, maxChars - reserveLen - HANDOFF_OVERHEAD_RESERVE),
@@ -410,6 +413,7 @@ export function buildAutoHandoff(
 	options: {
 		readonly ownerQuestionRegistered: boolean;
 		readonly retainedEntryIds?: ReadonlySet<string>;
+		readonly notes?: NotesRecovery | undefined;
 	},
 ): string {
 	const { ownerQuestionRegistered, retainedEntryIds: retained = new Set<string>() } = options;
@@ -441,6 +445,7 @@ export function buildAutoHandoff(
 		retained,
 		reserveParts,
 		maxChars,
+		notes: options.notes,
 	});
 	const minimum = [preamble, ...reserveParts];
 	const plan = planBatch(

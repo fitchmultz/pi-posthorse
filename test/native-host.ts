@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	appendFileSync,
+	existsSync,
+	statSync,
+	symlinkSync,
+	utimesSync,
+	unlinkSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -21,6 +28,7 @@ import { textOf, messageEntry, posthorseBoundaries } from "./host-helpers.ts";
 import { fixtureDisplay, fixtureResult } from "./results.ts";
 type TranscriptMessages = NativeAi.TranscriptContext["messages"];
 import type { HistoryParams } from "../src/history-search.ts";
+import type { NotesParams } from "../src/notes.ts";
 import { retainFile, retainSession } from "./fixture-files.ts";
 const alternateHost = process.env.PI_HOST_INDEX;
 const hostIndex =
@@ -29,7 +37,11 @@ const hostIndex =
 		: import.meta.resolve("@earendil-works/pi-coding-agent");
 // oxlint-disable-next-line typescript/no-unsafe-assignment -- QX-010: pi-loader verifies the runtime SDK against the compiler's installed graph.
 const {
+	AgentSessionRuntime,
 	createAgentSession,
+	createAgentSessionFromServices,
+	createAgentSessionServices,
+	createCodemodeExtension,
 	DefaultResourceLoader,
 	discoverAndLoadExtensions,
 	ExtensionRunner,
@@ -59,6 +71,10 @@ const nextCursor = (text: string) =>
 		/\[More results; continue with cursor "([^"]+)" and the same query\/scope\.\]$/,
 	)?.[1];
 interface FixtureOptions {
+	readonly cwd?: string;
+	readonly posthorse?: boolean;
+	readonly fileTools?: boolean;
+	readonly manager?: (cwd: string, directory: string) => NativeSdk.SessionManager;
 	readonly contextWindow?: number;
 	readonly maxTokens?: number;
 	readonly enabled?: boolean;
@@ -68,11 +84,11 @@ interface FixtureOptions {
 	readonly seed?: (manager: NativeSdk.SessionManager) => void;
 }
 async function fixture(t: TestContext, options: FixtureOptions = {}) {
-	const temp = mkdtempSync(join(tmpdir(), "posthorse-regression-"));
+	const temp = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-regression-")));
 	t.diagnostic(`fixture: ${temp}`);
-	const cwd = join(temp, "project"),
+	const cwd = options.cwd ?? join(temp, "project"),
 		agentDir = join(temp, "agent");
-	mkdirSync(cwd);
+	mkdirSync(cwd, { recursive: true });
 	mkdirSync(agentDir);
 	const faux = fauxProvider({
 		models: [
@@ -120,13 +136,15 @@ async function fixture(t: TestContext, options: FixtureOptions = {}) {
 				pi.registerProvider(faux.provider);
 				return options.extension?.(pi);
 			},
-			createPosthorse(),
+			...(options.posthorse === false ? [] : [createPosthorse()]),
 			...(options.afterExtension ? [options.afterExtension] : []),
 		],
 	});
 	await resourceLoader.reload();
 	assert.deepEqual(resourceLoader.getExtensions().errors, []);
-	const sessionManager = SessionManager.create(cwd, join(temp, "sessions"));
+	const sessionManager =
+		options.manager?.(cwd, join(temp, "sessions")) ??
+		SessionManager.create(cwd, join(temp, "sessions"));
 	options.seed?.(sessionManager);
 	const { session } = await createAgentSession({
 		cwd,
@@ -137,6 +155,7 @@ async function fixture(t: TestContext, options: FixtureOptions = {}) {
 		settingsManager,
 		sessionManager,
 		noTools: "builtin",
+		...(options.fileTools === true ? { tools: ["+read", "+write", "+edit"] } : {}),
 	});
 	t.after(() => {
 		try {
@@ -165,6 +184,606 @@ async function fixture(t: TestContext, options: FixtureOptions = {}) {
 function reset(manager: NativeSdk.SessionManager, handoff: string) {
 	return manager.appendCompaction(handoff, null, 100, { posthorse: 1 });
 }
+
+async function nativeCall(
+	h: Awaited<ReturnType<typeof fixture>>,
+	call: NativeAi.ToolCall,
+): Promise<NativeAi.ToolResultMessage> {
+	h.faux.setResponses([
+		fauxAssistantMessage(call, { stopReason: "toolUse" }),
+		fauxAssistantMessage("Note operation complete."),
+	]);
+	await h.session.prompt("Use the requested notes operation.");
+	const result = messageEntry(
+		h.sessionManager
+			.getBranch()
+			.findLast(
+				(entry) =>
+					entry.type === "message" &&
+					entry.message.role === "toolResult" &&
+					entry.message.toolCallId === call.id,
+			),
+	).message;
+	assert.ok(result.role === "toolResult");
+	return result;
+}
+async function notesCall(
+	h: Awaited<ReturnType<typeof fixture>>,
+	params: NotesParams,
+): Promise<string> {
+	const result = await nativeCall(h, fauxToolCall("notes", params));
+	assert.equal(result.isError, false, textOf(result));
+	return textOf(result);
+}
+
+nodeTest(
+	"fork notes canonicalize legacy receipt aliases before resolving their source",
+	async (t) => {
+		const parent = await fixture(t, { posthorse: false, fileTools: true });
+		const directory = join(parent.cwd, ".pi", "notes");
+		mkdirSync(directory, { recursive: true });
+		writeFileSync(join(directory, "legacy.md"), "legacy checkpoint");
+		const alias = join(dirname(parent.cwd), "alias", ".pi", "notes");
+		mkdirSync(dirname(alias), { recursive: true });
+		symlinkSync(directory, alias, "dir");
+		for (const path of [join(directory, "legacy.md"), join(alias, "legacy.md")]) {
+			const result = await nativeCall(parent, fauxToolCall("read", { path }));
+			assert.equal(result.isError, false, textOf(result));
+		}
+		const child = await fixture(t, {
+			cwd: parent.cwd,
+			manager: (cwd, target) =>
+				SessionManager.forkFrom(
+					requireValue(parent.sessionManager.getSessionFile()),
+					cwd,
+					target,
+				),
+		});
+		assert.match(
+			await notesCall(child, { op: "read", path: "legacy.md" }),
+			/\/\.forks\/[^/]+\/notes\/legacy\.md\nlegacy checkpoint$/u,
+		);
+		assert.equal(readFileSync(join(directory, "legacy.md"), "utf8"), "legacy checkpoint");
+		const other = join(dirname(parent.cwd), "other", ".pi", "notes");
+		mkdirSync(other, { recursive: true });
+		writeFileSync(join(other, "legacy.md"), "different store");
+		assert.equal(
+			(await nativeCall(parent, fauxToolCall("read", { path: join(other, "legacy.md") })))
+				.isError,
+			false,
+		);
+		await assert.rejects(
+			() =>
+				fixture(t, {
+					cwd: parent.cwd,
+					manager: (cwd, target) =>
+						SessionManager.forkFrom(
+							requireValue(parent.sessionManager.getSessionFile()),
+							cwd,
+							target,
+						),
+				}),
+			/Incomplete notes snapshot: the source notes root is missing or ambiguous/u,
+		);
+	},
+);
+
+async function interactiveFork(
+	t: TestContext,
+	h: Awaited<ReturnType<typeof fixture>>,
+	entryId: string,
+) {
+	const services: NativeSdk.AgentSessionServices = {
+		cwd: h.cwd,
+		agentDir: h.agentDir,
+		modelRuntime: h.modelRuntime,
+		settingsManager: h.settingsManager,
+		resourceLoader: h.resourceLoader,
+		diagnostics: [],
+	};
+	const runtime = new AgentSessionRuntime(h.session, services, async (target) => {
+		const next = await createAgentSessionServices({
+			cwd: target.cwd,
+			agentDir: target.agentDir,
+			modelRuntime: h.modelRuntime,
+			settingsManager: h.settingsManager,
+			resourceLoaderOptions: {
+				noExtensions: true,
+				noSkills: true,
+				noPromptTemplates: true,
+				noThemes: true,
+				noContextFiles: true,
+				extensionFactories: [
+					(pi) => {
+						pi.registerProvider(h.faux.provider);
+					},
+					createPosthorse(),
+				],
+			},
+		});
+		const result = await createAgentSessionFromServices({
+			...target,
+			services: next,
+			model: h.faux.getModel(),
+			noTools: "builtin",
+		});
+		return { ...result, services: next, diagnostics: next.diagnostics };
+	});
+	runtime.setRebindSession(async (session) => {
+		await session.bindExtensions({
+			onError(error) {
+				throw new Error(error.error);
+			},
+		});
+	});
+	t.after(async () => {
+		retainSession(
+			dirname(h.sessionManager.getSessionDir()),
+			runtime.session.sessionManager,
+			"interactive-fork",
+		);
+		await runtime.dispose();
+	});
+	assert.equal((await runtime.fork(entryId, { position: "at" })).cancelled, false);
+	return {
+		...h,
+		session: runtime.session,
+		sessionManager: runtime.session.sessionManager,
+	};
+}
+
+nodeTest(
+	"fork notes retain deleted-worktree source roots across projects and interactive descendants",
+	async (t) => {
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-note-worktrees-")));
+		const main = join(root, "main");
+		const worktree = join(root, "task");
+		execFileSync("git", ["init", "-b", "main", main]);
+		execFileSync("git", [
+			"-C",
+			main,
+			"-c",
+			"user.name=Posthorse fixture",
+			"-c",
+			"user.email=posthorse@example.invalid",
+			"commit",
+			"--allow-empty",
+			"-m",
+			"fixture",
+		]);
+		execFileSync("git", ["-C", main, "worktree", "add", "-b", "task", worktree]);
+		const parent = await fixture(t, { cwd: worktree });
+		await notesCall(parent, { op: "write", path: "task.md", content: "shared checkpoint" });
+		const source = requireValue(parent.sessionManager.getSessionFile());
+		execFileSync("git", ["-C", main, "worktree", "remove", worktree]);
+		assert.equal(existsSync(worktree), false);
+		const child = await fixture(t, {
+			cwd: join(root, "other-project"),
+			manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
+		});
+		const inherited = await notesCall(child, { op: "read", path: "task.md" });
+		const childPath = requireValue(/^File: ([^\n]+)/u.exec(inherited)?.[1]);
+		assert.ok(childPath.startsWith(`${child.cwd}/.pi/notes/.forks/`));
+		assert.ok(inherited.endsWith("shared checkpoint"));
+		assert.equal(
+			existsSync(worktree),
+			false,
+			"source lookup must not recreate the deleted cwd",
+		);
+		await notesCall(child, { op: "write", path: "task.md", content: "private checkpoint" });
+		const childId = child.sessionManager.getSessionId();
+		const grandchild = await interactiveFork(
+			t,
+			child,
+			requireValue(child.sessionManager.getLeafId()),
+		);
+		writeFileSync(childPath, "parent advanced after the fork");
+		const privateRead = await notesCall(grandchild, { op: "read", path: "task.md" });
+		assert.ok(privateRead.endsWith("private checkpoint"));
+		assert.ok(privateRead.includes(grandchild.sessionManager.getSessionId()));
+		assert.notEqual(grandchild.sessionManager.getSessionId(), childId);
+		assert.equal(
+			readFileSync(join(main, ".pi", "notes", "task.md"), "utf8"),
+			"shared checkpoint",
+		);
+		await notesCall(grandchild, {
+			op: "write",
+			path: "descendant-only.md",
+			content: "cross-project private result",
+		});
+		const originalProject = await fixture(t, { cwd: main });
+		assert.doesNotMatch(
+			await notesCall(originalProject, { op: "list" }),
+			/descendant-only|other-project/u,
+		);
+		assert.match(
+			await notesCall(originalProject, {
+				op: "search",
+				query: "cross-project private result",
+			}),
+			/No notes match/u,
+		);
+		assert.match(
+			await notesCall(grandchild, { op: "search", query: "cross-project private result" }),
+			/descendant-only/u,
+		);
+	},
+);
+
+nodeTest(
+	"fork notes snapshot the selected branch without sharing its writable checkpoint",
+	async (t) => {
+		const parent = await fixture(t);
+		await notesCall(parent, { op: "write", path: "task.md", content: "parent checkpoint" });
+		const source = requireValue(parent.sessionManager.getSessionFile());
+		const parentNote = join(parent.cwd, ".pi", "notes", "task.md");
+		utimesSync(parentNote, new Date("2020-01-01T00:00:00Z"), new Date("2020-01-01T00:00:00Z"));
+		writeFileSync(join(parent.cwd, ".pi", "notes", "untouched.md"), "not part of the branch");
+		const child = await fixture(t, {
+			cwd: parent.cwd,
+			manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
+		});
+		const initial = await notesCall(child, { op: "read", path: "task.md" });
+		const childPath = requireValue(/^File: ([^\n]+)/.exec(initial)?.[1]);
+		assert.equal(statSync(childPath).mtimeMs, statSync(parentNote).mtimeMs);
+		assert.equal(existsSync(join(dirname(childPath), "untouched.md")), false);
+		const listing = await notesCall(parent, { op: "list" });
+		assert.equal(listing.split("\n").filter((line) => line.startsWith("task.md ")).length, 1);
+		assert.match(listing, /identical copies/);
+		assert.doesNotMatch(listing, /manifest\.json|staging/);
+		await notesCall(parent, { op: "write", path: "task.md", content: "parent advanced" });
+		const inherited = await notesCall(child, { op: "read", path: "task.md" });
+		assert.match(inherited, /\/\.forks\/[^/]+\/notes\/task\.md\nparent checkpoint$/);
+		assert.ok(inherited.includes(child.sessionManager.getSessionId()));
+		const comparison = await notesCall(child, {
+			op: "read",
+			path: "task.md",
+			scope: dirname(parentNote),
+		});
+		assert.match(comparison, /^Read-only live reference:.*\nparent advanced$/);
+		const diverged = await notesCall(parent, { op: "list" });
+		assert.equal(diverged.split("\n").filter((line) => line.startsWith("task.md ")).length, 2);
+		await notesCall(child, { op: "append", path: "task.md", content: "child progress" });
+		assert.match(
+			await notesCall(child, { op: "read", path: "task.md" }),
+			/parent checkpoint\nchild progress\n$/,
+		);
+		assert.match(await notesCall(parent, { op: "read", path: "task.md" }), /parent advanced$/);
+		const resumed = await fixture(t, {
+			cwd: parent.cwd,
+			manager: (_cwd, directory) =>
+				SessionManager.open(requireValue(child.sessionManager.getSessionFile()), directory),
+		});
+		assert.match(
+			await notesCall(resumed, { op: "read", path: "task.md" }),
+			/parent checkpoint\nchild progress\n$/,
+		);
+	},
+);
+
+nodeTest(
+	"fork notes keep ownership across tree navigation, adoption, deletion, and resume",
+	async (t) => {
+		const parent = await fixture(t, { fileTools: true });
+		await notesCall(parent, {
+			op: "write",
+			path: "selected.md",
+			content: "selected checkpoint",
+		});
+		const forkPoint = requireValue(parent.sessionManager.getLeafId());
+		await notesCall(parent, {
+			op: "write",
+			path: "reference.md",
+			content: "original reference",
+		});
+		await notesCall(parent, { op: "write", path: "append.md", content: "inherited prefix" });
+		const otherBranch = requireValue(parent.sessionManager.getLeafId());
+		const source = requireValue(parent.sessionManager.getSessionFile());
+		const child = await fixture(t, {
+			cwd: parent.cwd,
+			fileTools: true,
+			extension: createCodemodeExtension(),
+			manager: (cwd, directory) => {
+				const manager = SessionManager.forkFrom(source, cwd, directory);
+				manager.branch(forkPoint);
+				return manager;
+			},
+		});
+		const selected = await notesCall(child, { op: "read", path: "selected.md" });
+		const childDirectory = dirname(requireValue(/^File: ([^\n]+)/u.exec(selected)?.[1]));
+		assert.equal(existsSync(join(childDirectory, "reference.md")), false);
+		assert.equal(existsSync(join(childDirectory, "append.md")), false);
+		assert.equal(
+			(await child.session.navigateTree(otherBranch, { summarize: false })).cancelled,
+			false,
+		);
+		assert.equal(await notesCall(child, { op: "read", path: "selected.md" }), selected);
+		assert.match(
+			await notesCall(child, { op: "read", path: "reference.md" }),
+			/^Read-only live reference:.*\noriginal reference$/u,
+		);
+		await notesCall(parent, {
+			op: "write",
+			path: "reference.md",
+			content: "current reference",
+		});
+		const shared = join(parent.cwd, ".pi", "notes", "reference.md");
+		const blockedRead = await nativeCall(child, fauxToolCall("read", { path: shared }));
+		assert.equal(blockedRead.isError, true);
+		assert.match(textOf(blockedRead), /labeled read-only comparison/u);
+		const blockedEdit = await nativeCall(
+			child,
+			fauxToolCall("edit", {
+				path: shared,
+				oldText: "original reference",
+				newText: "private edit",
+			}),
+		);
+		assert.equal(blockedEdit.isError, true);
+		assert.match(textOf(blockedEdit), /Private copy created.*source was not edited/u);
+		assert.equal(readFileSync(shared, "utf8"), "current reference");
+		assert.match(
+			await notesCall(child, { op: "read", path: "reference.md" }),
+			/\ncurrent reference$/u,
+		);
+		const edited = await nativeCall(
+			child,
+			fauxToolCall("edit", {
+				path: join(childDirectory, "reference.md"),
+				oldText: "current reference",
+				newText: "private edit",
+			}),
+		);
+		assert.equal(edited.isError, false, textOf(edited));
+		assert.equal(readFileSync(shared, "utf8"), "current reference");
+		assert.match(
+			await notesCall(child, { op: "read", path: "reference.md" }),
+			/\nprivate edit$/u,
+		);
+		child.session.setActiveToolsByName([...child.session.getActiveToolNames(), "codemode"]);
+		const appended = await nativeCall(
+			child,
+			fauxToolCall("codemode", {
+				code: 'await Promise.all(["first", "second"].map(content => tools.notes({op:"append", path:"append.md", content}))); return "appended";',
+			}),
+		);
+		assert.equal(appended.isError, false, textOf(appended));
+		assert.match(
+			readFileSync(join(childDirectory, "append.md"), "utf8"),
+			/^inherited prefix\n/u,
+		);
+		assert.deepEqual(
+			readFileSync(join(childDirectory, "append.md"), "utf8").trimEnd().split("\n").sort(),
+			["first", "inherited prefix", "second"],
+		);
+		assert.match(
+			await notesCall(parent, { op: "read", path: "append.md" }),
+			/\ninherited prefix$/u,
+		);
+		const protectedEdit = await nativeCall(
+			parent,
+			fauxToolCall("edit", {
+				path: join(childDirectory, "reference.md"),
+				oldText: "private edit",
+				newText: "parent overwrite",
+			}),
+		);
+		assert.equal(protectedEdit.isError, true);
+		assert.equal(readFileSync(join(childDirectory, "reference.md"), "utf8"), "private edit");
+		const manifest = join(dirname(childDirectory), "manifest.json");
+		const before = readFileSync(manifest, "utf8");
+		for (const path of [manifest, join(parent.cwd, ".pi", "notes", ".forks")]) {
+			const protectedMetadata = await nativeCall(
+				parent,
+				fauxToolCall("write", { path, content: "corrupt" }),
+			);
+			assert.equal(protectedMetadata.isError, true);
+			assert.match(textOf(protectedMetadata), /Managed notes metadata/u);
+		}
+		assert.equal(readFileSync(manifest, "utf8"), before);
+		unlinkSync(join(childDirectory, "reference.md"));
+		const deleted = await nativeCall(
+			child,
+			fauxToolCall("notes", { op: "read", path: "reference.md" }),
+		);
+		assert.equal(deleted.isError, true);
+		assert.match(textOf(deleted), /No note/u);
+		const resumed = await fixture(t, {
+			cwd: parent.cwd,
+			manager: (_cwd, directory) =>
+				SessionManager.open(requireValue(child.sessionManager.getSessionFile()), directory),
+		});
+		const stillDeleted = await nativeCall(
+			resumed,
+			fauxToolCall("notes", { op: "read", path: "reference.md" }),
+		);
+		assert.equal(stillDeleted.isError, true);
+		assert.match(textOf(stillDeleted), /No note/u);
+	},
+);
+
+const noteRecoveryTools: NativeSdk.ExtensionFactory = async (pi) => {
+	await createCodemodeExtension()(pi);
+	pi.registerTool({
+		name: "dump",
+		label: "Dump",
+		description: "Large local result to exercise native automatic rollover",
+		parameters: { type: "object", properties: {} },
+		async execute() {
+			return { content: [{ type: "text", text: "x".repeat(600_000) }], details: {} };
+		},
+	});
+};
+
+nodeTest(
+	"fork notes recover metadata-only nested writes through edited receipts and compaction",
+	async (t) => {
+		const h = await fixture(t, { extension: noteRecoveryTools, contextWindow: 128_000 });
+		h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "codemode"]);
+		// The native per-call argument record omits bodies over 8 KiB.
+		const call = fauxToolCall("codemode", {
+			code: 'await tools.notes({op:"write", path:"metadata-only.md", content:"saved checkpoint ".repeat(1024)}); return "Saved";',
+		});
+		const result = await nativeCall(h, call);
+		assert.equal(result.isError, false, textOf(result));
+		const nested = requireValue(
+			result.nestedCalls?.calls.find((entry) => entry.name === "notes"),
+		);
+		assert.equal(nested.status, "ok");
+		assert.equal(nested.arguments, undefined);
+		assert.equal(
+			readFileSync(join(h.cwd, ".pi", "notes", "metadata-only.md"), "utf8"),
+			"saved checkpoint ".repeat(1024),
+		);
+		const receipt = requireValue(
+			h.sessionManager
+				.getBranch()
+				.find(
+					(entry) =>
+						entry.type === "message" &&
+						entry.message.role === "toolResult" &&
+						entry.message.toolCallId === call.id,
+				),
+		);
+		h.sessionManager.appendContextEdit(receipt.id, {
+			content: [{ type: "text", text: "Edited receipt without note content." }],
+		});
+		await nativeCall(h, fauxToolCall("dump", {}));
+		const recovery = requireValue(posthorseBoundaries(h.sessionManager).at(-1)).summary;
+		assert.match(
+			recovery,
+			/metadata-only\.md.*full content is not retained.*read this note now/u,
+		);
+		assert.doesNotMatch(recovery, /latest full write is in the retained tail/u);
+		const source = requireValue(h.sessionManager.getSessionFile());
+		const child = await fixture(t, {
+			cwd: h.cwd,
+			manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
+		});
+		const copy = await notesCall(child, { op: "read", path: "metadata-only.md" });
+		assert.match(copy, /File: .*\/\.forks\//u);
+		assert.ok(copy.endsWith("saved checkpoint ".repeat(1024)));
+		h.sessionManager.appendContextEdit(receipt.id, null);
+		const excluded = await fixture(t, {
+			cwd: h.cwd,
+			manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
+		});
+		const listing = await notesCall(excluded, { op: "list" });
+		const directory = requireValue(/^Notes directory: ([^\n]+)/u.exec(listing)?.[1]);
+		assert.equal(
+			existsSync(join(directory, "metadata-only.md")),
+			false,
+			"an explicitly deleted causal receipt cannot seed a fork",
+		);
+	},
+);
+
+nodeTest(
+	"fork notes associate late cancelled background effects with their launch branch",
+	async (t) => {
+		const started = Promise.withResolvers<null>();
+		const release = Promise.withResolvers<null>();
+		const recorded = Promise.withResolvers<null>();
+		t.after(() => release.resolve(null));
+		let signal: AbortSignal | undefined;
+		const h = await fixture(t, {
+			fileTools: true,
+			contextWindow: 128_000,
+			async extension(pi) {
+				await noteRecoveryTools(pi);
+				pi.on("tool_result", async (event, ctx) => {
+					if (event.toolName !== "write") {
+						return;
+					}
+					signal = ctx.signal;
+					started.resolve(null);
+					await release.promise;
+				});
+			},
+			afterExtension(pi) {
+				pi.on("tool_result", (event) => {
+					if (event.toolName === "write") {
+						recorded.resolve(null);
+					}
+				});
+			},
+		});
+		h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "codemode"]);
+		const codemode = requireValue(
+			h.session.getAllTools().find((tool) => tool.name === "codemode"),
+		);
+		if (!codemode.description.includes('"background": true')) {
+			assert.notEqual(
+				process.env.PI_COMPAT_HOST,
+				"fork",
+				"The maintained fork must expose background codemode.",
+			);
+			t.skip(
+				"This host does not expose background codemode; the fork qualification owns this case.",
+			);
+			return;
+		}
+		h.faux.setResponses([fauxAssistantMessage("Seed branch.")]);
+		await h.session.prompt("Start the task.");
+		const branchPoint = requireValue(h.sessionManager.getLeafId());
+		const path = join(h.cwd, ".pi", "notes", "late.md");
+		const call = fauxToolCall("codemode", {
+			code:
+				'// @options: {"background": true}\n' +
+				`await tools.write({path: ${JSON.stringify(path)}, content: "late checkpoint"}); return "done";`,
+		});
+		const receipt = await nativeCall(h, call);
+		assert.equal(receipt.isError, false, textOf(receipt));
+		await started.promise;
+		assert.equal(readFileSync(path, "utf8"), "late checkpoint");
+		const launchBranch = requireValue(h.sessionManager.getLeafId());
+		assert.equal(
+			(await h.session.navigateTree(branchPoint, { summarize: false })).cancelled,
+			false,
+		);
+		assert.equal(signal?.aborted, true);
+		release.resolve(null);
+		await recorded.promise;
+		assert.equal(
+			h.sessionManager
+				.getEntries()
+				.some(
+					(entry) =>
+						entry.type === "custom_message" &&
+						entry.customType === "codemode-background",
+				),
+			false,
+		);
+		await nativeCall(h, fauxToolCall("dump", {}));
+		assert.doesNotMatch(
+			requireValue(posthorseBoundaries(h.sessionManager).at(-1)).summary,
+			/late\.md/u,
+		);
+		assert.equal(
+			(await h.session.navigateTree(launchBranch, { summarize: false })).cancelled,
+			false,
+		);
+		await nativeCall(h, fauxToolCall("dump", {}));
+		const recovery = requireValue(posthorseBoundaries(h.sessionManager).at(-1)).summary;
+		assert.match(recovery, /late\.md.*full content is not retained.*read this note now/u);
+		const launchReceipt = requireValue(
+			h.sessionManager
+				.getBranch()
+				.find(
+					(entry) =>
+						entry.type === "message" &&
+						entry.message.role === "toolResult" &&
+						entry.message.toolCallId === call.id,
+				),
+		);
+		h.sessionManager.appendContextEdit(launchReceipt.id, null);
+		await nativeCall(h, fauxToolCall("dump", {}));
+		assert.doesNotMatch(
+			requireValue(posthorseBoundaries(h.sessionManager).at(-1)).summary,
+			/late\.md/u,
+		);
+	},
+);
 
 async function loadedHistory(t: TestContext) {
 	t.diagnostic(`native history SDK: ${hostIndex}`);

@@ -14,6 +14,7 @@ import {
 	type MessageLike,
 	type PolicyContext,
 } from "./contracts.ts";
+import type { NotesRecovery } from "./note-evidence.ts";
 import { buildAutoHandoff } from "./recovery.ts";
 
 type RecoveryCapacity = {
@@ -21,6 +22,7 @@ type RecoveryCapacity = {
 	readonly toolTokens: number;
 	readonly pendingMessages?: readonly MessageLike[];
 	readonly firstKeptEntryId?: string | undefined;
+	readonly notes?: NotesRecovery | undefined;
 };
 type RetainedTail = {
 	readonly firstKeptEntryId?: string | undefined;
@@ -199,6 +201,7 @@ export function automaticRecovery(
 	const handoff = buildAutoHandoff(entries, projected, limit, {
 		ownerQuestionRegistered,
 		retainedEntryIds: retained.ids,
+		notes: capacity.notes,
 	});
 	return handoff.length > limit
 		? undefined

@@ -1,10 +1,11 @@
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test as nodeTest } from "node:test";
 import {
 	CustomMessageComponent,
+	SessionManager,
 	initTheme,
 	ToolExecutionComponent,
 } from "@earendil-works/pi-coding-agent";
@@ -27,6 +28,9 @@ async function setup() {
 	const tools = new Map(
 		[...loaded.extension.tools].map(([name, registration]) => [name, registration.definition]),
 	);
+	loaded.runtime.appendEntry = () => {
+		/* Rendering fixtures do not test journal persistence. */
+	};
 	loaded.runtime.getActiveTools = () => [...tools.keys()];
 	loaded.runtime.getAllTools = () =>
 		[...loaded.extension.tools.values()].map(({ definition, sourceInfo }) => ({
@@ -100,6 +104,7 @@ function click(
 }
 
 function context(cwd: string, branch: readonly unknown[] = []) {
+	const header = SessionManager.inMemory(cwd).getHeader();
 	return {
 		cwd,
 		model: { contextWindow: 100_000 },
@@ -107,6 +112,8 @@ function context(cwd: string, branch: readonly unknown[] = []) {
 		getContextUsage: () => ({ tokens: 1000, contextWindow: 100_000, percent: 1 }),
 		getSystemPrompt: () => "test",
 		sessionManager: {
+			getHeader: () => header,
+			getEntries: () => branch,
 			getSessionFile: (): string | undefined => undefined,
 			buildSessionProjection: () => ({ entries: [] }),
 			getBranch: () => branch,
@@ -261,7 +268,7 @@ nodeTest("collapsed previews show exactly the first rows of the expanded text", 
 nodeTest(
 	"notes show page range and next offset even when the preview fills the compact card",
 	async () => {
-		const cwd = mkdtempSync(`${tmpdir()}/posthorse-render-`);
+		const cwd = realpathSync(mkdtempSync(`${tmpdir()}/posthorse-render-`));
 		try {
 			const ctx = context(cwd);
 			const body = `START ${"n".repeat(56_176)} END`;

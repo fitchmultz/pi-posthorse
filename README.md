@@ -48,7 +48,12 @@ These tools are available to the model:
 
 Expand a tool card with Ctrl+O. In fullscreen mode, click a tool card to expand it. A `new_context` card shows a request. Pi's `Compacted from … tokens` card confirms the rollover.
 
-See [tool examples and paging details](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#tools).
+Forks get private copies of the notes used on their selected branch. The parent and fork can
+update the same note name without overwriting each other. Project-wide lists and searches still
+find both, with scope selectors for read-only comparisons.
+
+See [tool examples and paging details](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#tools)
+and [fork notes](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#forks-references-and-discovery).
 
 ## Settings and limits
 
@@ -80,7 +85,7 @@ Removal leaves notes and Pi session history in place. See the [installation refe
 
 ## Data and privacy
 
-Posthorse makes no network requests. Notes are plaintext files under `.pi/notes/`; linked Git worktrees share them. Notes for Pi-managed Git packages live outside their checkouts because `pi update` deletes untracked files there: global packages (including their descendants) use Pi's agent-directory `notes/`, and other project-local packages use the containing project's `.pi/package-notes/`, with project-local stores keyed by a full SHA-256 digest of the host and package path. Access existing checkout-local notes with this version before updating the package so they can migrate. Add `.pi/notes/` and `.pi/package-notes/` to the containing project's `.gitignore` if the notes must stay private.
+Posthorse makes no network requests. Notes are plaintext files under `.pi/notes/`. Linked Git worktrees share that store; forks keep private note files inside its `.forks/` directory. Notes for Pi-managed Git packages live outside their checkouts because `pi update` deletes untracked files there: global packages (including their descendants) use Pi's agent-directory `notes/`, and other project-local packages use the containing project's `.pi/package-notes/`, with project-local stores keyed by a full SHA-256 digest of the host and package path. Access existing checkout-local notes with this version before updating the package so they can migrate. Add `.pi/notes/` and `.pi/package-notes/` to the containing project's `.gitignore` if the notes must stay private.
 
 History can include user messages, assistant thinking, tool arguments, errors, and images. Content you retrieve enters the context of your selected model and provider.
 

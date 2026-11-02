@@ -51,6 +51,8 @@ type TestContext = {
 	cwd: string;
 	model: { readonly contextWindow: number };
 	sessionManager: {
+		getHeader: SessionManager["getHeader"];
+		getEntries: () => readonly unknown[];
 		getBranch: () => readonly unknown[];
 		getLeafId?: () => string | null;
 		getEntry?: (id: string) => unknown;
@@ -59,7 +61,7 @@ type TestContext = {
 		getSessionDir: () => string;
 		buildSessionProjection: () => {
 			readonly entries: readonly {
-				readonly sourceEntry: Readonly<Record<string, unknown>>;
+				readonly sourceEntry: unknown;
 				readonly messages: readonly unknown[];
 			}[];
 		};
@@ -78,6 +80,17 @@ type TestContext = {
 
 /** Fixture branches put nothing in the model's active context unless a test projects entries. */
 const emptyProjection = () => ({ entries: [] });
+
+function sessionIdentity() {
+	const manager = SessionManager.inMemory();
+	return {
+		getHeader: () => manager.getHeader(),
+		getSessionId: () => manager.getSessionId(),
+		getEntries(this: Pick<TestContext["sessionManager"], "getBranch">): readonly unknown[] {
+			return this.getBranch();
+		},
+	};
+}
 
 /** Unit branches have implicit ancestry; supply the same by-id access as SessionManager. */
 function indexedBranch(branch: readonly Readonly<Record<string, unknown>>[]) {
@@ -101,13 +114,13 @@ function indexedBranch(branch: readonly Readonly<Record<string, unknown>>[]) {
 			return owned;
 		});
 	return {
+		...sessionIdentity(),
 		getBranch: () => link(),
 		getLeafId: () => {
 			const id = link().at(-1)?.id;
 			return id === undefined ? null : stringValue(id);
 		},
 		getEntry: (id: string) => link().find((entry) => entry.id === id),
-		getSessionId: () => "fixture",
 		getSessionFile: (): string | undefined => undefined,
 	};
 }
@@ -250,6 +263,15 @@ function run(
 	);
 }
 
+function notesIn(tools: ReadonlyMap<string, Tool>, context: TestContext) {
+	const sessions = new Map<string, SessionManager>();
+	return (cwd: string, params: Readonly<Record<string, unknown>>) => {
+		const sessionManager = sessions.get(cwd) ?? SessionManager.inMemory(cwd);
+		sessions.set(cwd, sessionManager);
+		return run(tools, "notes", params, { ...context, cwd, sessionManager });
+	};
+}
+
 function turnEnd(
 	handlers: { readonly get: (name: string) => Handler | undefined },
 	context: ContextInput,
@@ -292,7 +314,7 @@ function automaticResult(
 	context: ContextInput,
 	branchEntries: readonly Readonly<Record<string, unknown>>[],
 	projected?: readonly {
-		readonly sourceEntry: Readonly<Record<string, unknown>>;
+		readonly sourceEntry: unknown;
 		readonly messages: readonly unknown[];
 	}[],
 ) {
@@ -941,6 +963,8 @@ for (const archived of [10, 43_000]) {
 			const context = {
 				...usageContext(base, 100_000, 76_000),
 				sessionManager: {
+					getHeader: () => manager.getHeader(),
+					getEntries: () => manager.getEntries(),
 					getSessionId: () => manager.getSessionId(),
 					getLeafId: () => manager.getLeafId(),
 					getEntry: (id: string) => {
@@ -1010,6 +1034,8 @@ for (const archived of [10, 43_000]) {
 				...context,
 				sessionManager: {
 					...context.sessionManager,
+					getHeader: () => initial.getHeader(),
+					getEntries: () => initial.getEntries(),
 					getSessionId: () => initial.getSessionId(),
 					getLeafId: () => initial.getLeafId(),
 					getEntry: (id: string) => {
@@ -1246,6 +1272,7 @@ nodeTest("history reads current entries without opening every archived session",
 		const context: TestContext = {
 			...base,
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => [
@@ -1324,6 +1351,7 @@ nodeTest("all-session history recurses and returns newest matching entries first
 		const context: TestContext = {
 			...base,
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => {
@@ -1412,6 +1440,7 @@ nodeTest(
 			const context = {
 				...base,
 				sessionManager: {
+					...sessionIdentity(),
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [],
 					getSessionDir: () => dir,
@@ -1509,6 +1538,7 @@ nodeTest("history searches normalized text and reports native window ids", async
 	const context: TestContext = {
 		...base,
 		sessionManager: {
+			...sessionIdentity(),
 			getSessionFile: (): string | undefined => undefined,
 			buildSessionProjection: emptyProjection,
 			getBranch: () => branch,
@@ -1821,6 +1851,7 @@ nodeTest(
 		const context = {
 			...base,
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => branch,
@@ -1905,6 +1936,7 @@ nodeTest(
 			const context = {
 				...base,
 				sessionManager: {
+					...sessionIdentity(),
 					getSessionFile: (): string | undefined => undefined,
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [],
@@ -1982,6 +2014,7 @@ nodeTest(
 		const context = {
 			...base,
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => branch,
@@ -2044,6 +2077,7 @@ nodeTest(
 			const context = {
 				...base,
 				sessionManager: {
+					...sessionIdentity(),
 					getSessionFile: (): string | undefined => undefined,
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [],
@@ -2559,6 +2593,7 @@ nodeTest(
 		const context = {
 			...base,
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => branch,
@@ -2607,6 +2642,7 @@ nodeTest(
 		const tightImage = {
 			...usageContext(base, 100_000, 82_117),
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => longImage,
@@ -2650,6 +2686,7 @@ nodeTest("history image continuations preserve order, text, and retry offsets", 
 			const context = {
 				...usageContext(base, 32_000, 1_000),
 				sessionManager: {
+					...sessionIdentity(),
 					getSessionFile: (): string | undefined => undefined,
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [
@@ -2844,7 +2881,7 @@ nodeTest(
 nodeTest(
 	"read pages shrink to the remaining budget and refuse unsafe pages while preserving the offset",
 	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-page-test-"));
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-page-test-")));
 		try {
 			const { tools, handlers, context: base } = await setup();
 			const branch = [
@@ -2861,6 +2898,7 @@ nodeTest(
 					...context,
 					cwd: dir,
 					sessionManager: {
+						...sessionIdentity(),
 						getSessionFile: (): string | undefined => undefined,
 						buildSessionProjection: emptyProjection,
 						getBranch: () => branch,
@@ -2930,7 +2968,7 @@ nodeTest(
 nodeTest(
 	"note and history pages share a batch budget without double-counting consumed pages",
 	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-batch-pages-"));
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-batch-pages-")));
 		try {
 			const { tools, handlers, context: base } = await setup();
 			let tokens = 98_000;
@@ -2939,6 +2977,7 @@ nodeTest(
 				cwd: dir,
 				getContextUsage: () => ({ tokens, contextWindow: 100_000, percent: tokens / 1000 }),
 				sessionManager: {
+					...sessionIdentity(),
 					getSessionFile: (): string | undefined => undefined,
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [
@@ -3006,7 +3045,7 @@ nodeTest(
 nodeTest(
 	"notes list and search page every result through the shared budget, including oversized paths",
 	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-search-pages-"));
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-search-pages-")));
 		try {
 			const { tools, handlers, context: base } = await setup();
 			const context = pageContext(handlers, {
@@ -3099,7 +3138,7 @@ nodeTest(
 );
 
 nodeTest("mixed search/list/read outputs and no-match refusals share one reservation", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-mixed-pages-"));
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-mixed-pages-")));
 	try {
 		const { tools, handlers, context: base } = await setup();
 		const branch = Array.from({ length: 60 }, (_, index) => ({
@@ -3111,6 +3150,7 @@ nodeTest("mixed search/list/read outputs and no-match refusals share one reserva
 			...usageContext(base, 100_000, 98_000, 16_384, false),
 			cwd: dir,
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => branch,
@@ -3233,6 +3273,7 @@ nodeTest(
 		const context = pageContext(handlers, {
 			...usageContext(base, 100_000, 98_700, 16_384, false),
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => branch,
@@ -3347,6 +3388,7 @@ nodeTest("all-session cursors retain ranking and per-file entries across pages",
 		const context = {
 			...base,
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => [],
@@ -3430,10 +3472,12 @@ nodeTest(
 			writeFileSync(path, "original checkpoint");
 			const code = `import assert from "node:assert/strict";
 import posthorse from ${JSON.stringify(new URL("../index.ts", import.meta.url).href)};
+import { SessionManager } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-coding-agent"))};
+const sessionManager = SessionManager.inMemory(process.cwd());
 let notes;
-posthorse({ on() {}, registerMessageRenderer() {}, registerTool(tool) { if (tool.name === "notes") notes = tool; } });
+posthorse({ on() {}, appendEntry: (type, data) => sessionManager.appendCustomEntry(type, data), registerMessageRenderer() {}, registerTool(tool) { if (tool.name === "notes") notes = tool; } });
 process.on("SIGXFSZ", () => { /* Publication surfaces EFBIG through the awaited rejection. */ });
-await assert.rejects(notes.execute("fault", { op: "write", path: "durable.md", content: "N".repeat(8192) }, new AbortController().signal, undefined, { cwd: process.cwd() }), { code: "EFBIG" });`;
+await assert.rejects(notes.execute("fault", { op: "write", path: "durable.md", content: "N".repeat(8192) }, new AbortController().signal, undefined, { cwd: process.cwd(), sessionManager }), { code: "EFBIG" });`;
 			execFileSync(
 				"/bin/bash",
 				[
@@ -3490,8 +3534,7 @@ nodeTest(
 			);
 			mkdirSync(plain, { recursive: true });
 			const { tools, context } = await setup();
-			const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
-				run(tools, "notes", params, { ...context, cwd });
+			const notes = notesIn(tools, context);
 			const write = (cwd: string) =>
 				notes(cwd, { op: "write", path: "state.md", content: cwd });
 
@@ -3554,12 +3597,14 @@ nodeTest(
 nodeTest(
 	"notes for Pi package checkouts move to the agent directory and survive pi update",
 	async () => {
-		// An unresolved temporary path also covers a symlinked agent directory on macOS.
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-package-notes-"));
+		// A linked agent directory must retain the same package storage owner.
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-package-notes-")));
 		const agentDir = join(dir, "agent");
 		const previous = process.env.PI_CODING_AGENT_DIR;
 		process.env.PI_CODING_AGENT_DIR = agentDir;
 		try {
+			mkdirSync(join(dir, "physical-agent"));
+			symlinkSync(join(dir, "physical-agent"), agentDir, "junction");
 			const git = (cwd: string, ...args: readonly string[]) =>
 				execFileSync("git", args, { cwd, stdio: "ignore" });
 			const owner = join(agentDir, "git", "github.com", "acme");
@@ -3570,9 +3615,8 @@ nodeTest(
 			mkdirSync(join(legacy, "task"), { recursive: true });
 			writeFileSync(join(legacy, "task", "state.md"), "Saved before the move.");
 			const { tools, context } = await setup();
-			const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
-				run(tools, "notes", params, { ...context, cwd });
-			const moved = join(agentDir, "notes", "github.com", "acme", "tool");
+			const notes = notesIn(tools, context);
+			const moved = join(realpathSync(agentDir), "notes", "github.com", "acme", "tool");
 
 			const listing = toolText(await notes(join(checkout, "src"), { op: "list" }));
 			assert.ok(listing.startsWith(`Notes directory: ${moved}\ntask/state.md  `), listing);
@@ -3669,8 +3713,7 @@ nodeTest(
 			execFileSync("git", ["init", "-q"], { cwd: outer });
 			execFileSync("git", ["init", "-q"], { cwd: inner });
 			const { tools, context } = await setup();
-			const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
-				run(tools, "notes", params, { ...context, cwd });
+			const notes = notesIn(tools, context);
 			await notes(outer, { op: "write", path: "outer.md", content: "outer checkpoint" });
 			await notes(inner, {
 				op: "write",
@@ -3713,8 +3756,7 @@ nodeTest(
 			execFileSync("git", ["init", "-q"], { cwd: outer });
 			execFileSync("git", ["init", "-q"], { cwd: inner });
 			const { tools, context } = await setup();
-			const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
-				run(tools, "notes", params, { ...context, cwd });
+			const notes = notesIn(tools, context);
 			await notes(outer, { op: "write", path: "outer.md", content: "outer checkpoint" });
 			await notes(inner, { op: "write", path: "inner.md", content: "inner checkpoint" });
 			const outerList = toolText(await notes(outer, { op: "list" }));
@@ -3748,7 +3790,7 @@ nodeTest(
 nodeTest(
 	"notes list and search follow aliases while skipping cycles and missing targets",
 	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-note-cycles-"));
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-note-cycles-")));
 		try {
 			const notesDir = join(dir, ".pi", "notes");
 			mkdirSync(join(notesDir, "nested"), { recursive: true });
@@ -3809,7 +3851,7 @@ async function withObservedStats<T>(
 nodeTest(
 	"notes list and search skip entries removed while an earlier folder is walked",
 	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-notes-cleanup-"));
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-notes-cleanup-")));
 		try {
 			const root = join(dir, ".pi", "notes");
 			mkdirSync(join(root, "a-many"), { recursive: true });
@@ -3851,7 +3893,7 @@ nodeTest(
 nodeTest(
 	"notes list, folder reads and search let Pi keep running and stop when cancelled mid-walk",
 	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-notes-walk-"));
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-notes-walk-")));
 		try {
 			const root = join(dir, ".pi", "notes", "project");
 			for (let topic = 0; topic < 20; topic++) {
@@ -3919,7 +3961,7 @@ nodeTest(
 nodeTest(
 	"notes list newest first with sizes, read folders as listings, and search only text notes",
 	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-notes-listing-"));
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-notes-listing-")));
 		try {
 			const root = join(dir, ".pi", "notes");
 			mkdirSync(join(root, "task"), { recursive: true });
@@ -4085,8 +4127,7 @@ for (const marker of ["file", "directory symlink"]) {
 				);
 				git("-C", main, "worktree", "add", "--detach", worktree);
 				const { tools, context } = await setup();
-				const notes = (cwd: string, params: Readonly<Record<string, unknown>>) =>
-					run(tools, "notes", params, { ...context, cwd });
+				const notes = notesIn(tools, context);
 				const header = `File: ${join(gitdir, ".pi", "notes", "shared.md")}\n`;
 				await notes(main, { op: "write", path: "shared.md", content: "original state" });
 				assert.equal(
@@ -4125,7 +4166,7 @@ for (const marker of ["file", "directory symlink"]) {
 nodeTest(
 	"long notes page fully, empty writes clear, appends stay separated, and search centers on the match",
 	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-notes-ops-test-"));
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-notes-ops-test-")));
 		try {
 			const { tools, context: base } = await setup();
 			const context = { ...base, cwd: dir };
@@ -4212,6 +4253,7 @@ nodeTest("history flattens bashExecution entries and honors excludeFromContext",
 	const context = {
 		...base,
 		sessionManager: {
+			...sessionIdentity(),
 			getSessionFile: (): string | undefined => undefined,
 			buildSessionProjection: emptyProjection,
 			getBranch: () => branch,
@@ -4281,6 +4323,7 @@ nodeTest(
 			const context = {
 				...base,
 				sessionManager: {
+					...sessionIdentity(),
 					getSessionFile: (): string | undefined => undefined,
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [],
@@ -4365,6 +4408,7 @@ nodeTest(
 			const context = {
 				...base,
 				sessionManager: {
+					...sessionIdentity(),
 					getSessionFile: (): string | undefined => undefined,
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [],
@@ -4468,6 +4512,7 @@ nodeTest(
 			const context = {
 				...base,
 				sessionManager: {
+					...sessionIdentity(),
 					getSessionFile: (): string | undefined => undefined,
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [],
@@ -4548,6 +4593,7 @@ nodeTest("all-session history keeps new entries in sibling forks separate", asyn
 		const context = {
 			...base,
 			sessionManager: {
+				...sessionIdentity(),
 				getSessionFile: (): string | undefined => undefined,
 				buildSessionProjection: emptyProjection,
 				getBranch: () => [],
@@ -4592,6 +4638,7 @@ nodeTest(
 			const context = {
 				...base,
 				sessionManager: {
+					...sessionIdentity(),
 					getSessionFile: (): string | undefined => undefined,
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [],
@@ -4899,6 +4946,7 @@ nodeTest(
 			const context = {
 				...base,
 				sessionManager: {
+					...sessionIdentity(),
 					getSessionFile: (): string | undefined => undefined,
 					buildSessionProjection: emptyProjection,
 					getBranch: () => [],
@@ -4939,10 +4987,12 @@ nodeTest("appends from concurrent Pi processes never merge records", async () =>
 		const script = `
 			await import(${JSON.stringify(new URL("./pi-loader.ts", import.meta.url).href)});
 			const { default: posthorse } = await import(${JSON.stringify(new URL("../index.ts", import.meta.url).href)});
+			const { SessionManager } = await import(${JSON.stringify(import.meta.resolve("@earendil-works/pi-coding-agent"))});
+			const sessionManager = SessionManager.inMemory(process.argv[1]);
 			const tools = new Map();
-			posthorse({ on() {}, registerTool: (tool) => tools.set(tool.name, tool), registerMessageRenderer() {}, sendMessage() {} });
+			posthorse({ on() {}, appendEntry: (type, data) => sessionManager.appendCustomEntry(type, data), registerTool: (tool) => tools.set(tool.name, tool), registerMessageRenderer() {}, sendMessage() {} });
 			const [cwd, letter] = process.argv.slice(1);
-			const context = { cwd, getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }), getContextUsage: () => undefined };
+			const context = { cwd, sessionManager, getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }), getContextUsage: () => undefined };
 			for (let i = 0; i < 200; i++) {
 				await tools.get("notes").execute("id", { op: "append", path: "shared.md", content: letter.repeat(300) }, undefined, () => {
       // These direct executions do not stream updates.
@@ -5243,3 +5293,66 @@ nodeTest(
 		);
 	},
 );
+
+nodeTest("automatic recovery keeps verified paths from a partially failed editing receipt", () => {
+	const source = "/workspace/.pi/notes/source.md";
+	const destination = "/workspace/.pi/notes/copied.md";
+	const entries = [
+		{
+			type: "message",
+			id: "move-call",
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id: "move",
+						name: "apply_patch",
+						arguments: {
+							input: `*** Begin Patch\n*** Update File: ${source}\n*** Move to: ${destination}\n@@\n-old\n+new\n*** Delete File: /workspace/.pi/notes/unattempted.md\n*** End Patch`,
+						},
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: "move-receipt",
+			message: {
+				role: "toolResult",
+				toolName: "apply_patch",
+				toolCallId: "move",
+				isError: true,
+				content: "The destination committed but the move did not finish.",
+				details: {
+					modifiedFiles: [destination],
+					files: [
+						{ path: source, moveTo: destination, operation: "move", status: "failed" },
+						{
+							path: "/workspace/.pi/notes/unattempted.md",
+							operation: "delete",
+							status: "unattempted",
+						},
+						{
+							path: "/workspace/.pi/notes/uncertain.md",
+							operation: "edit",
+							status: "uncertain",
+						},
+					],
+				},
+			},
+		},
+	];
+	const projected = entries.map((sourceEntry) => ({
+		sourceEntry,
+		messages: [sourceEntry.message],
+	}));
+	const handoff = buildAutoHandoff(entries, projected, 20_000, {
+		ownerQuestionRegistered: false,
+	});
+	assert.match(handoff, /Active note \(written\): copied\.md/u);
+	assert.doesNotMatch(
+		handoff,
+		/^- (?:Active|Referenced) note.*(?:source\.md|unattempted\.md|uncertain\.md)/mu,
+	);
+});
