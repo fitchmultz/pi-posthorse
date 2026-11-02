@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.6 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- perf(notes): parallelize independent hot-path awaits across discovery, guards, provenance, and snapshots (#121) ([8dd1336](https://github.com/fitchmultz/pi-posthorse/commit/8dd1336ed7050d47433b5f3300cd868dde76966c))
+
+### What's Changed
+
+- perf(notes): parallelize independent hot-path awaits across discovery, guards, provenance, and snapshots by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/121
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.5...v0.10.6
+
 ## 0.10.5 - 2026-11-02
 
 <!-- npm-release:unreleased:start -->
