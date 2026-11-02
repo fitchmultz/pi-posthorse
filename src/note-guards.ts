@@ -115,12 +115,14 @@ async function recordedFiles(
 	captured: CapturedCall,
 ): Promise<NoteTouchRecord["files"]> {
 	const files: NoteTouchRecord["files"][number][] = [];
-	for (const operation of operations) {
+	const addresses = await Promise.all(
+		operations.map((operation) =>
+			noteAddress(toolPath(captured.tool, operation.path, captured.cwd), captured.session),
+		),
+	);
+	for (const [index, operation] of operations.entries()) {
 		// Each result belongs to the scope captured before execution, even after /tree.
-		const address = await noteAddress(
-			toolPath(captured.tool, operation.path, captured.cwd),
-			captured.session,
-		);
+		const address = addresses[index];
 		if (address === undefined) {
 			continue;
 		}

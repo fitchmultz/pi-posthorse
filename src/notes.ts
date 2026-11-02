@@ -55,16 +55,16 @@ async function listNotes(
 ): Promise<TextResult> {
 	const { host, pages, signal } = access;
 	const folder = params.path;
-	const inventory = await access.discovery.list(session, {
-		path: folder,
-		scope: params.scope,
-		signal,
-	});
+	const [inventory, selectedScope] = await Promise.all([
+		access.discovery.list(session, {
+			path: folder,
+			scope: params.scope,
+			signal,
+		}),
+		params.scope === undefined ? Promise.resolve() : session.selectScope(params.scope),
+	]);
 	const { files } = inventory;
-	const dir =
-		params.scope === undefined
-			? session.directory
-			: scopeDirectory(await session.selectScope(params.scope));
+	const dir = selectedScope === undefined ? session.directory : scopeDirectory(selectedScope);
 	const rows: string[] = [];
 	for (let start = 0; start < files.length; start += FORMAT_BATCH) {
 		// Pi gets an event-loop turn before each batch of rows.

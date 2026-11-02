@@ -227,9 +227,14 @@ async function forkBinding(
 	const entries = [...manager.getEntries(), ...source.entries];
 	const files: SnapshotNote[] = [];
 	const absent: string[] = [];
-	for (const candidate of candidates) {
+	const addresses = await Promise.all(
+		candidates.map((candidate) =>
+			resolveReference(scope ?? candidate.source, candidate.path, entries),
+		),
+	);
+	for (const [index, candidate] of candidates.entries()) {
 		// Resolve against the immediate parent's files, not a historical ancestor's version.
-		const address = await resolveReference(scope ?? candidate.source, candidate.path, entries);
+		const address = addresses[index];
 		if (address !== undefined) {
 			files.push({
 				path: candidate.path,
