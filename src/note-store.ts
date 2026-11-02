@@ -251,8 +251,8 @@ export function createNotesStore(pi: ExtensionAPI): NotesStore {
 		for (const binding of bindings) {
 			roots.add(binding.root);
 		}
-		const initialized = loadNotesBinding(ctx.sessionManager, root).then(
-			({ binding, source, created }) => {
+		const initialized = loadNotesBinding(ctx.sessionManager, root)
+			.then(({ binding, source, created }) => {
 				if (created) {
 					pi.appendEntry(NOTES_BINDING, binding);
 				}
@@ -262,8 +262,11 @@ export function createNotesStore(pi: ExtensionAPI): NotesStore {
 				}
 				ready.set(key, session);
 				return session;
-			},
-		);
+			})
+			.catch((error: unknown) => {
+				sessions.delete(key);
+				throw error;
+			});
 		sessions.set(key, initialized);
 		return initialized;
 	};

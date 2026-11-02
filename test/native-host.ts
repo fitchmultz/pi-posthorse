@@ -82,6 +82,7 @@ interface FixtureOptions {
 	readonly extension?: NativeSdk.ExtensionFactory;
 	readonly afterExtension?: NativeSdk.ExtensionFactory;
 	readonly seed?: (manager: NativeSdk.SessionManager) => void;
+	readonly onError?: Parameters<NativeSdk.AgentSession["bindExtensions"]>[0]["onError"];
 }
 async function fixture(t: TestContext, options: FixtureOptions = {}) {
 	const temp = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-regression-")));
@@ -165,9 +166,11 @@ async function fixture(t: TestContext, options: FixtureOptions = {}) {
 		}
 	});
 	await session.bindExtensions({
-		onError(error) {
-			throw new Error(error.error);
-		},
+		onError:
+			options.onError ??
+			((error) => {
+				throw new Error(error.error);
+			}),
 	});
 	return {
 		cwd,
@@ -267,6 +270,38 @@ nodeTest(
 		);
 	},
 );
+
+nodeTest("fork notes retry initialization after a missing source is restored", async (t) => {
+	const parent = await fixture(t);
+	await notesCall(parent, { op: "write", path: "task.md", content: "parent checkpoint" });
+	const source = join(parent.cwd, ".pi", "notes", "task.md");
+	unlinkSync(source);
+	const errors: string[] = [];
+	const child = await fixture(t, {
+		cwd: parent.cwd,
+		manager: (cwd, target) =>
+			SessionManager.forkFrom(
+				requireValue(parent.sessionManager.getSessionFile()),
+				cwd,
+				target,
+			),
+		onError: (error) => {
+			errors.push(error.error);
+		},
+	});
+	assert.equal(errors.length, 1);
+	assert.match(
+		requireValue(errors[0]),
+		/Incomplete notes snapshot: source note task\.md is unavailable/u,
+	);
+	writeFileSync(source, "restored checkpoint");
+	assert.match(
+		await notesCall(child, { op: "read", path: "task.md" }),
+		/\/\.forks\/[^/]+\/notes\/task\.md\nrestored checkpoint$/u,
+	);
+	await notesCall(child, { op: "append", path: "task.md", content: "child progress" });
+	assert.equal(readFileSync(source, "utf8"), "restored checkpoint");
+});
 
 async function interactiveFork(
 	t: TestContext,
