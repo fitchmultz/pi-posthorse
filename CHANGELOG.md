@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Require Pi 1.4.0 or later and update the locked development cohort to 1.4.0. Qualify the latest
+  official release and maintained fork against their own SDK and CLI graphs.
+- Isolate fork checkpoints under a session-owned `.forks` scope. Copy only selected-branch notes,
+  preserve their modification times, and restore the same scope on resume or tree navigation.
+- Keep project-wide note discovery with scope selectors, read-only comparisons, and verified
+  duplicate collapse. Adopt unowned references before edits or appends without changing parent files.
+- Protect private notes and management data from supported native and batch file tools, including
+  calls made through codemode. Preserve confirmed partial effects and ownership after deletion.
+- Recover verified nested note writes even when outer receipts omit arguments or background work
+  finishes after tree navigation. Respect omitted receipts without treating metadata as full text.
+
 ## 0.10.3 - 2026-11-01
 
 <!-- npm-release:unreleased:start -->

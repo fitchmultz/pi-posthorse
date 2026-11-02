@@ -177,13 +177,15 @@ function messageFrom(value: unknown): MessageLike | undefined {
 		toolName: optionalString(value.toolName),
 		namespace: optionalString(value.namespace),
 		toolCallId: optionalString(value.toolCallId),
+		details: value.details,
+		nestedCalls: value.nestedCalls,
 		isError: value.isError === true,
 		command: optionalString(value.command),
 		output: optionalString(value.output),
 		excludeFromContext: value.excludeFromContext === true,
 	};
 }
-function parsedEntry(line: string): EntryLike | undefined {
+export function parseSessionLine(line: string): EntryLike | undefined {
 	try {
 		const value: unknown = JSON.parse(line);
 		if (!isRecord(value)) {
@@ -202,6 +204,9 @@ function parsedEntry(line: string): EntryLike | undefined {
 			customType: optionalString(value.customType),
 			content: value.content,
 			details: value.details,
+			data: value.data,
+			cwd: optionalString(value.cwd),
+			parentSession: optionalString(value.parentSession),
 			display: value.display === true,
 			handoff: optionalString(value.handoff),
 			firstKeptEntryId: optionalString(value.firstKeptEntryId),
@@ -234,7 +239,7 @@ async function readEntry(
 	if (head !== undefined && (!line.matches || !wanted(head))) {
 		return { entry: head, selected: false };
 	}
-	const entry = parsedEntry(await line.text());
+	const entry = parseSessionLine(await line.text());
 	return entry === undefined
 		? undefined
 		: {

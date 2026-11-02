@@ -1,11 +1,6 @@
 import type { EntryLike, ProjectedEntry } from "./contracts.ts";
-import { contextEdits } from "./history-entries.ts";
-import {
-	collectTouches,
-	type ScannedNoteEntry,
-	type NoteTarget,
-	type NoteTouch,
-} from "./recovery-note-touches.ts";
+import { sessionNoteTouches, scopeRecoveryTouches, type NotesRecovery } from "./note-evidence.ts";
+import type { NoteTarget, NoteTouch } from "./recovery-note-touches.ts";
 
 const MAX_WRITTEN_NOTES = 4;
 const MAX_READ_NOTES = 3;
@@ -13,6 +8,7 @@ const MAX_READ_NOTES = 3;
 export type RetainedSpan = { readonly firstId: string; readonly lastId: string };
 type TrackedNote = NoteTarget & {
 	readonly written: boolean;
+	readonly metadataOnly: boolean;
 	readonly lastEntryId: string;
 	readonly lastInRetained: boolean;
 	readonly lastWriteEntryId?: string | undefined;
@@ -27,14 +23,14 @@ function applyReadTouch(
 ): TrackedNote {
 	const wasWritten = previous?.written === true;
 	return {
+		...previous,
 		notePath: touch.notePath,
 		absPath: touch.absPath ?? previous?.absPath,
 		written: wasWritten,
+		metadataOnly: previous?.metadataOnly ?? false,
+		referenceScope: touch.referenceScope ?? previous?.referenceScope,
 		lastEntryId: touch.entryId,
 		lastInRetained: touch.inRetained,
-		lastWriteEntryId: previous?.lastWriteEntryId,
-		fullWriteRetainedEntryId: previous?.fullWriteRetainedEntryId,
-		partialEditRetainedEntryId: previous?.partialEditRetainedEntryId,
 		order: wasWritten ? previous.order : order,
 	};
 }
@@ -44,17 +40,19 @@ function applyWriteTouch(
 	touch: NoteTouch,
 	order: number,
 ): TrackedNote {
+	const previousFull =
+		touch.kind === "observed-write" ? undefined : previous?.fullWriteRetainedEntryId;
 	return {
 		notePath: touch.notePath,
 		absPath: touch.absPath ?? previous?.absPath,
 		written: true,
+		metadataOnly: touch.kind === "observed-write",
+		referenceScope: touch.referenceScope,
 		lastEntryId: touch.entryId,
 		lastInRetained: touch.inRetained,
 		lastWriteEntryId: touch.entryId,
 		fullWriteRetainedEntryId:
-			touch.kind === "full-write" && touch.inRetained
-				? touch.entryId
-				: previous?.fullWriteRetainedEntryId,
+			touch.kind === "full-write" && touch.inRetained ? touch.entryId : previousFull,
 		partialEditRetainedEntryId:
 			touch.kind === "partial-write" && touch.inRetained
 				? touch.entryId
@@ -64,6 +62,9 @@ function applyWriteTouch(
 }
 
 function formatNoteLabel(note: TrackedNote): string {
+	if (note.referenceScope !== undefined) {
+		return `${note.notePath} (read-only reference; notes read ${JSON.stringify({ scope: note.referenceScope, path: note.notePath })})`;
+	}
 	return note.absPath !== undefined && note.absPath !== note.notePath
 		? `${note.notePath} (${note.absPath})`
 		: note.notePath;
@@ -72,6 +73,9 @@ function formatNoteLabel(note: TrackedNote): string {
 function formatWrittenNoteLine(note: TrackedNote, span: RetainedSpan | undefined): string {
 	const label = formatNoteLabel(note);
 	const writeId = note.lastWriteEntryId ?? note.lastEntryId;
+	if (note.metadataOnly) {
+		return `- Active note (written): ${label} [verified effect at entry ${writeId}; full content is not retained — read this note now]`;
+	}
 	if (span === undefined) {
 		return `- Active note (written): ${label} [compacted at entry ${writeId} — read this note now]`;
 	}
@@ -112,56 +116,10 @@ function formatNotesAction(
 	return `Read ${primaryWritten.notePath} (notes read or read on its path) before continuing to restore the saved goal, progress, decisions, and next steps, then keep that note current as work progresses.`;
 }
 
-function projectNoteEntries(
-	chainEntries: readonly EntryLike[],
-	allEntries: readonly EntryLike[],
-	projected: readonly ProjectedEntry[],
-	retained: ReadonlySet<string>,
-): ScannedNoteEntry[] {
-	const edits = contextEdits(allEntries);
-	const omittedIds = new Set(
-		projected
-			.filter(({ messages }) => messages.length === 0)
-			.map(({ sourceEntry }) => sourceEntry.id),
-	);
-	return chainEntries.flatMap((entry) => {
-		const rawId = entry.id ?? "";
-		const edit = edits.get(rawId);
-		if (omittedIds.has(rawId) || edit?.replacement === null) {
-			return [];
-		}
-		const effective =
-			edit?.replacement !== undefined && entry.type === "message"
-				? {
-						...entry,
-						id: edit.id,
-						message: { ...entry.message, content: edit.replacement.content },
-					}
-				: entry;
-		const resolvedId = (effective.id ?? rawId).slice(0, 120);
-		return [
-			{
-				entry: effective,
-				entryId: resolvedId === "" ? "unknown" : resolvedId,
-				inRetained: retained.has(rawId),
-			},
-		];
-	});
-}
-
-export function renderSessionNotes(
-	chainEntries: readonly EntryLike[],
-	allEntries: readonly EntryLike[],
-	projected: readonly ProjectedEntry[],
-	options: {
-		readonly retained: ReadonlySet<string>;
-		readonly span: RetainedSpan | undefined;
-		readonly maxChars: number;
-	},
-): string | undefined {
-	const { retained, span, maxChars } = options;
-	const entries = projectNoteEntries(chainEntries, allEntries, projected, retained);
-	const { touches, defaultDir } = collectTouches(entries);
+function trackedNotes(
+	touches: readonly NoteTouch[],
+	defaultDir: string | undefined,
+): TrackedNote[] {
 	const tracked = new Map<string, TrackedNote>();
 	let order = 0;
 	for (const rawTouch of touches) {
@@ -170,18 +128,41 @@ export function renderSessionNotes(
 			rawTouch.absPath === undefined && defaultDir !== undefined
 				? { ...rawTouch, absPath: `${defaultDir}/${rawTouch.notePath}` }
 				: rawTouch;
+		const key = `${touch.referenceScope ?? touch.absPath ?? ""}\0${touch.notePath}`;
 		if (touch.kind === "clear") {
-			tracked.delete(touch.notePath);
+			tracked.delete(key);
 		} else if (touch.kind === "read") {
-			tracked.set(touch.notePath, applyReadTouch(tracked.get(touch.notePath), touch, order));
+			tracked.set(key, applyReadTouch(tracked.get(key), touch, order));
 		} else {
-			tracked.set(touch.notePath, applyWriteTouch(tracked.get(touch.notePath), touch, order));
+			tracked.set(key, applyWriteTouch(tracked.get(key), touch, order));
 		}
 	}
-	if (tracked.size === 0) {
-		return undefined;
+	return [...tracked.values()].sort((a, b) => b.order - a.order);
+}
+export function renderSessionNotes(
+	chainEntries: readonly EntryLike[],
+	allEntries: readonly EntryLike[],
+	projected: readonly ProjectedEntry[],
+	options: {
+		readonly retained: ReadonlySet<string>;
+		readonly span: RetainedSpan | undefined;
+		readonly maxChars: number;
+		readonly notes?: NotesRecovery | undefined;
+	},
+): string | undefined {
+	const { retained, span, maxChars } = options;
+	const collected = sessionNoteTouches({
+		branch: chainEntries,
+		allEntries: options.notes?.entries ?? allEntries,
+		projected,
+		retained,
+	});
+	const touches = scopeRecoveryTouches(collected.touches, options.notes);
+	const { defaultDir } = collected;
+	const all = trackedNotes(touches, defaultDir);
+	if (all.length === 0) {
+		return;
 	}
-	const all = [...tracked.values()].sort((a, b) => b.order - a.order);
 	const written = all.filter((note) => note.written).slice(0, MAX_WRITTEN_NOTES);
 	const readOnly = all.filter((note) => !note.written).slice(0, MAX_READ_NOTES);
 	const lines = [

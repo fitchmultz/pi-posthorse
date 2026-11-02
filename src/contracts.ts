@@ -63,6 +63,9 @@ export type EntryLike = {
 	readonly content?: unknown;
 	readonly details?: unknown;
 	readonly display?: boolean | undefined;
+	readonly data?: unknown;
+	readonly cwd?: string | undefined;
+	readonly parentSession?: string | undefined;
 	readonly handoff?: string | undefined;
 	readonly firstKeptEntryId?: string | null | undefined;
 	readonly targetId?: string | undefined;

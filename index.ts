@@ -15,6 +15,8 @@ import type { CompactionPolicy, PolicyReader } from "./src/contracts.ts";
 import { registerHistory } from "./src/history.ts";
 import { safeJsonStringify } from "./src/message-text.ts";
 import { registerNotes } from "./src/notes.ts";
+import { createNotesStore } from "./src/note-store.ts";
+import { registerNoteGuards } from "./src/note-guards.ts";
 import { PageReservations } from "./src/paging.ts";
 import { registerRollover } from "./src/rollover.ts";
 
@@ -47,10 +49,18 @@ export function createPosthorse(getPolicy?: PolicyReader): (pi: ExtensionAPI) =>
 		const toolTokens = () => activeToolTokens(pi);
 		const pages = new PageReservations(toolTokens);
 		registerPosthorseMessages(pi);
-		registerRollover(pi, policy, toolTokens, () => {
-			pages.reset();
+		const notes = createNotesStore(pi);
+		registerRollover(pi, policy, toolTokens, {
+			resetPages: () => {
+				pages.reset();
+			},
+			notes: (ctx) => notes.recovery(ctx),
 		});
-		registerNotes(pi, policy, pages);
+		pi.on("session_start", async (_event, ctx) => {
+			await notes.get(ctx);
+		});
+		registerNoteGuards(pi, notes);
+		registerNotes(pi, policy, pages, notes);
 		registerHistory(pi, policy, pages);
 	};
 }

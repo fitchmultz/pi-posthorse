@@ -6,21 +6,30 @@ import {
 	type ToolCallLike,
 } from "./contracts.ts";
 import { textOf, toolCalls } from "./message-text.ts";
+import { bareToolName, noteOperationKind, verifiedNoteOperations } from "./note-tool-effects.ts";
+import { matchNoteDirectory, type NoteOwner } from "./note-scopes.ts";
 
 export type ScannedNoteEntry = {
 	readonly entry: EntryLike;
 	readonly entryId: string;
 	readonly inRetained: boolean;
 };
-type NoteOpKind = "full-write" | "partial-write" | "read" | "clear";
-export type NoteTarget = { readonly notePath: string; readonly absPath?: string | undefined };
+type NoteOpKind = "full-write" | "partial-write" | "read" | "clear" | "observed-write";
+export type NoteTarget = {
+	readonly notePath: string;
+	readonly absPath?: string | undefined;
+	readonly referenceScope?: string | undefined;
+};
 export type NoteTouch = NoteTarget & {
 	readonly kind: NoteOpKind;
 	readonly entryId: string;
 	readonly inRetained: boolean;
+	readonly receiptId?: string | undefined;
+	readonly owner?: NoteOwner | undefined;
 };
 type ToolResultInfo = {
 	readonly entryId: string;
+	readonly sourceId: string;
 	readonly inRetained: boolean;
 	readonly isError: boolean;
 	readonly toolName: string;
@@ -29,17 +38,10 @@ type ToolResultInfo = {
 };
 type TouchContext = {
 	readonly entryId: string;
+	readonly sourceId: string;
 	readonly inRetained: boolean;
 	readonly knownDirs: ReadonlySet<string>;
 };
-
-function bareToolName(name: string | undefined): string {
-	if (name === undefined || name === "") {
-		return "";
-	}
-	const cut = Math.max(name.lastIndexOf(":"), name.lastIndexOf("/"));
-	return cut >= 0 ? name.slice(cut + 1) : name;
-}
 
 function normalizeRelPath(raw: string): string {
 	const cleaned = raw
@@ -74,15 +76,14 @@ function matchMarkerPath(slash: string): string | undefined {
 	return /\/\.pi\/(?:agent\/)?notes\/[^/]+\/[^/]+\/[^/]+\/(.+)$/u.exec(slash)?.[1];
 }
 
-function matchKnownDir(slash: string, knownDirs: ReadonlySet<string>): string | undefined {
-	for (const dir of knownDirs) {
-		if (slash.startsWith(`${dir}/`)) {
-			return slash.slice(dir.length + 1);
-		}
+function unscopedNoteTarget(trimmed: string, slash: string): NoteTarget | undefined {
+	if (slash.startsWith("/") || /^[A-Za-z]:\//u.test(slash)) {
+		const base = normalizeRelPath(slash.slice(slash.lastIndexOf("/") + 1));
+		return base === "" ? undefined : { notePath: base, absPath: trimmed };
 	}
-	return undefined;
+	const rel = normalizeRelPath(slash);
+	return rel === "" ? undefined : { notePath: rel };
 }
-
 function resolveNoteTarget(
 	rawPath: string | undefined,
 	knownDirs: ReadonlySet<string>,
@@ -93,20 +94,12 @@ function resolveNoteTarget(
 	}
 	const trimmed = rawPath.trim();
 	const slash = trimmed.replaceAll("\\", "/");
-	const matched = matchKnownDir(slash, knownDirs) ?? matchMarkerPath(slash);
+	const matched = matchNoteDirectory(slash, [...knownDirs])?.path ?? matchMarkerPath(slash);
 	if (matched !== undefined) {
-		const rel = normalizeRelPath(matched);
+		const rel = matched.startsWith(".forks/") ? "" : normalizeRelPath(matched);
 		return rel === "" ? undefined : { notePath: rel, absPath: trimmed };
 	}
-	if (!fromNotesTool) {
-		return undefined;
-	}
-	if (slash.startsWith("/") || /^[A-Za-z]:\//u.test(slash)) {
-		const base = normalizeRelPath(slash.slice(slash.lastIndexOf("/") + 1));
-		return base === "" ? undefined : { notePath: base, absPath: trimmed };
-	}
-	const rel = normalizeRelPath(slash);
-	return rel === "" ? undefined : { notePath: rel };
+	return fromNotesTool ? unscopedNoteTarget(trimmed, slash) : undefined;
 }
 
 function extractNotesResultTarget(
@@ -141,6 +134,7 @@ function collectResultMap(
 		) {
 			results.set(callId, {
 				entryId: item.entryId,
+				sourceId: item.entry.id ?? item.entryId,
 				inRetained: item.inRetained,
 				isError: msg.isError === true,
 				toolName: bareToolName(msg.toolName),
@@ -205,84 +199,23 @@ function learnNotesDirs(
 	return dirs;
 }
 
-function pathsFromFileList(value: unknown): string[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-	return value.flatMap((item: unknown) => {
-		if (typeof item === "string") {
-			return [item];
-		}
-		const itemPath = isRecord(item) ? optionalString(item.path) : undefined;
-		const skipped =
-			isRecord(item) && (item.status === "failed" || item.status === "unattempted");
-		return itemPath !== undefined && !skipped ? [itemPath] : [];
-	});
-}
-
-function patchPaths(input: unknown): string[] {
-	return typeof input === "string"
-		? Array.from(
-				input.matchAll(/^\*\*\* (?:Update File|Add File|Move to): ([^\r\n]+)$/gmu),
-				(m) => m[1] ?? "",
-			)
-		: [];
-}
-
-function detailFilePaths(details: unknown): string[] {
-	return isRecord(details)
-		? [...pathsFromFileList(details.modifiedFiles), ...pathsFromFileList(details.files)]
-		: [];
-}
-
-function extractFileToolSpec(
-	tool: string,
-	args: Readonly<Record<string, unknown>>,
-	details: unknown,
-): { readonly kind: NoteOpKind; readonly rawPaths: readonly string[] } | undefined {
-	if (args.preview === true) {
-		return undefined;
-	}
-	const directPath = optionalString(args.path);
-	const directKinds: Readonly<Record<string, NoteOpKind | undefined>> = {
-		write: args.content === "" ? "clear" : "full-write",
-		edit: "partial-write",
-		read: "read",
-	};
-	const directKind = directKinds[tool];
-	if (directKind !== undefined && directPath !== undefined) {
-		return { kind: directKind, rawPaths: [directPath] };
-	}
-	if (tool === "write_files" || tool === "replace_text") {
-		const kind: NoteOpKind = tool === "write_files" ? "full-write" : "partial-write";
-		return { kind, rawPaths: [...pathsFromFileList(args.files), ...detailFilePaths(details)] };
-	}
-	return tool === "apply_patch"
-		? {
-				kind: "partial-write",
-				rawPaths: [...patchPaths(args.input), ...detailFilePaths(details)],
-			}
-		: undefined;
-}
-
 function fileToolTouches(
 	tool: string,
 	args: Readonly<Record<string, unknown>>,
-	details: unknown,
+	result: { readonly details: unknown; readonly isError: boolean },
 	context: TouchContext,
 ): NoteTouch[] {
-	const spec = extractFileToolSpec(tool, args, details);
-	if (spec === undefined) {
-		return [];
-	}
-	return spec.rawPaths.flatMap((raw) => {
-		const target = resolveNoteTarget(raw, context.knownDirs, false);
+	return verifiedNoteOperations(tool, args, result).flatMap((operation) => {
+		const target = resolveNoteTarget(operation.path, context.knownDirs, false);
 		return target === undefined
 			? []
 			: [
 					{
 						...target,
-						kind: spec.kind,
+						kind:
+							tool === "apply_patch" && operation.action !== "delete"
+								? "partial-write"
+								: noteOperationKind(operation.action),
 						entryId: context.entryId,
 						inRetained: context.inRetained,
 					},
@@ -317,7 +250,10 @@ function notesToolTouches(
 ): NoteTouch[] {
 	const parsed = resultText === undefined ? undefined : extractNotesResultTarget(resultText);
 	const kind = notesCallKind(args) ?? parsed?.kind;
-	const callTarget = resolveNoteTarget(optionalString(args.path), context.knownDirs, true);
+	const path = optionalString(args.path);
+	const scopedPath =
+		typeof args.scope === "string" && path !== undefined ? `${args.scope}/${path}` : path;
+	const callTarget = resolveNoteTarget(scopedPath, context.knownDirs, true);
 	const resTarget = resolveNoteTarget(parsed?.rawPath, context.knownDirs, true);
 	const merged = mergeNoteTargets(callTarget, resTarget);
 	return kind === undefined || merged === undefined
@@ -357,15 +293,25 @@ function touchesFromNested(message: MessageLike, context: TouchContext): NoteTou
 			!isRecord(raw) ||
 			raw.isError === true ||
 			raw.status === "error" ||
+			raw.status === "unfinished" ||
 			(typeof raw.error === "string" && raw.error !== "")
 		) {
 			return [];
 		}
 		const name = bareToolName(optionalString(raw.name) ?? optionalString(raw.toolName));
 		const args = nestedArgs(raw);
-		return name === "notes"
-			? notesToolTouches(args, optionalString(raw.result), context)
-			: fileToolTouches(name, args, raw.result, context);
+		const touches =
+			name === "notes"
+				? notesToolTouches(args, optionalString(raw.result), context)
+				: fileToolTouches(name, args, { details: raw.result, isError: false }, context);
+		return touches.map((touch) =>
+			Object.assign({}, touch, {
+				kind:
+					touch.kind === "read" || touch.kind === "clear" ? touch.kind : "observed-write",
+				inRetained: false,
+				receiptId: context.sourceId,
+			}),
+		);
 	});
 }
 
@@ -377,16 +323,19 @@ function touchesFromAssistantCall(
 	const callId = optionalString(call.id);
 	const res = callId === undefined ? undefined : results.get(callId);
 	const consumedCallId = callId !== undefined && res !== undefined ? callId : undefined;
-	if (res?.isError === true) {
+	if (res === undefined || (res.isError && bareToolName(call.name) === "notes")) {
 		return { consumedCallId, touches: [] };
 	}
 	const tool = bareToolName(call.name);
 	const args = isRecord(call.arguments) ? call.arguments : {};
 	const touches =
 		tool === "notes"
-			? notesToolTouches(args, res?.text, context)
-			: fileToolTouches(tool, args, res?.details, context);
-	return { consumedCallId, touches };
+			? notesToolTouches(args, res.text, context)
+			: fileToolTouches(tool, args, res, context);
+	return {
+		consumedCallId,
+		touches: touches.map((touch) => Object.assign({}, touch, { receiptId: res.sourceId })),
+	};
 }
 
 function touchesFromToolResult(
@@ -405,18 +354,22 @@ function touchesFromToolResult(
 	return [...direct, ...touchesFromNested(msg, context)];
 }
 
-export function collectTouches(entries: readonly ScannedNoteEntry[]): {
+export function collectTouches(
+	entries: readonly ScannedNoteEntry[],
+	directories: ReadonlySet<string> = new Set(),
+): {
 	readonly touches: readonly NoteTouch[];
 	readonly defaultDir?: string | undefined;
 } {
 	const results = collectResultMap(entries);
-	const knownDirs = learnNotesDirs(entries, results);
+	const knownDirs = new Set([...directories, ...learnNotesDirs(entries, results)]);
 	const handledResultIds = new Set<string>();
 	const touches: NoteTouch[] = [];
 	for (const item of entries) {
 		const msg = item.entry.message;
 		const context: TouchContext = {
 			entryId: item.entryId,
+			sourceId: item.entry.id ?? item.entryId,
 			inRetained: item.inRetained,
 			knownDirs,
 		};

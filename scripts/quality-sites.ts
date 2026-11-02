@@ -49,7 +49,7 @@ export const exceptionSites = [
 		rule: "typescript/no-unsafe-assignment",
 		file: "test/native-host.ts",
 		selector:
-			"binding:createAgentSession,DefaultResourceLoader,discoverAndLoadExtensions,ExtensionRunner,ModelRuntime,ModelRegistry,SessionManager,SettingsManager,wrapRegisteredTools:typeof NativeSdk=await import(hostIndex)",
+			"binding:AgentSessionRuntime,createAgentSession,createAgentSessionFromServices,createAgentSessionServices,createCodemodeExtension,DefaultResourceLoader,discoverAndLoadExtensions,ExtensionRunner,ModelRuntime,ModelRegistry,SessionManager,SettingsManager,wrapRegisteredTools:typeof NativeSdk=await import(hostIndex)",
 	},
 	{
 		id: "QX-010",
