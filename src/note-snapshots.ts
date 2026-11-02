@@ -89,18 +89,39 @@ export type SnapshotNote = {
 	readonly lineage: NoteAddress;
 	readonly anchors: readonly string[];
 };
+const NOTE_IO_BATCH = 16;
+export async function mapBatch<Input, Output>(
+	items: readonly Input[],
+	fn: (item: Input) => Promise<Output>,
+): Promise<Output[]> {
+	const results: Output[] = [];
+	for (let start = 0; start < items.length; start += NOTE_IO_BATCH) {
+		const settled = await Promise.allSettled(
+			items.slice(start, start + NOTE_IO_BATCH).map((item) => fn(item)),
+		);
+		for (const item of settled) {
+			if (item.status === "rejected") {
+				throw item.reason instanceof Error ? item.reason : new Error(String(item.reason));
+			}
+			results.push(item.value);
+		}
+	}
+	return results;
+}
 async function copyNote(note: SnapshotNote, destination: string): Promise<NoteSeed> {
 	const source = notePath(note.source, note.source.path);
-	const before = await stat(source);
-	await mkdir(dirname(destination), { recursive: true });
+	const [before] = await Promise.all([
+		stat(source),
+		mkdir(dirname(destination), { recursive: true }),
+	]);
 	await copyFile(source, destination, constants.COPYFILE_EXCL);
 	const after = await stat(source);
 	if (!sameIdentity(before, after)) {
 		throw new Error(`Source note changed during snapshot: ${source}. Retry initialization.`);
 	}
 	await utimes(destination, before.atimeMs / 1000, before.mtimeMs / 1000);
-	const digest = await fileDigest(destination);
-	return { ...note, digest, identity: fileIdentity(await stat(destination)) };
+	const [digest, destInfo] = await Promise.all([fileDigest(destination), stat(destination)]);
+	return { ...note, digest, identity: fileIdentity(destInfo) };
 }
 /** Publication is the ownership boundary. An existing unrelated directory is never overwritten. */
 export async function snapshot(
@@ -129,11 +150,10 @@ export async function snapshot(
 	await mkdir(dirname(container), { recursive: true });
 	const stage = await mkdtemp(join(dirname(container), ".staging-"));
 	try {
-		const seeds: NoteSeed[] = [];
-		for (const note of notes) {
-			// Keep each file's identity and digest paired with the bytes actually copied.
-			seeds.push(await copyNote(note, notePath({ root: stage, scope: "notes" }, note.path)));
-		}
+		// Keep each file's identity and digest paired with the bytes actually copied.
+		const seeds = await mapBatch(notes, (note) =>
+			copyNote(note, notePath({ root: stage, scope: "notes" }, note.path)),
+		);
 		const complete: ForkBinding = { ...binding, seeds };
 		await writeFile(join(stage, "manifest.json"), JSON.stringify(complete), { flag: "wx" });
 		await rename(stage, container);

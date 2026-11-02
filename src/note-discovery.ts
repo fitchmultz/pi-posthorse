@@ -3,7 +3,13 @@ import { join, relative } from "node:path";
 import { isRecord } from "./contracts.ts";
 import { sessionNoteTouches } from "./note-evidence.ts";
 import { notesUnder, type NoteFile } from "./note-inventory.ts";
-import { fileDigest, fileIdentity, readManifest, sameIdentity } from "./note-snapshots.ts";
+import {
+	fileDigest,
+	fileIdentity,
+	mapBatch,
+	readManifest,
+	sameIdentity,
+} from "./note-snapshots.ts";
 import {
 	sameScope,
 	scopeDirectory,
@@ -47,12 +53,13 @@ async function projectScopes(
 		}
 		throw error;
 	});
-	for (const entry of entries) {
+	const candidates = entries.filter((entry) => !entry.name.startsWith(".staging-"));
+	const manifests = await mapBatch(candidates, async (entry) =>
+		entry.isDirectory() ? readManifest(join(directory, entry.name, "notes")) : undefined,
+	);
+	for (const [index, entry] of candidates.entries()) {
 		const path = join(directory, entry.name);
-		if (entry.name.startsWith(".staging-")) {
-			continue;
-		}
-		const manifest = entry.isDirectory() ? await readManifest(join(path, "notes")) : undefined;
+		const manifest = manifests[index];
 		if (manifest === undefined || manifest.root !== session.binding.root) {
 			notice(`Not indexed: unmanaged or incomplete notes data at ${path}.`);
 		} else {
@@ -199,9 +206,19 @@ export class NoteDiscovery {
 					Number(sameScope(b.address, session.binding)) -
 					Number(sameScope(a.address, session.binding)),
 			);
-			for (const file of group) {
+			const results = await mapBatch(group, async (file) => {
+				const fileNotices: string[] = [];
+				const digest = await this.#digest(file, session, {
+					...options,
+					notice: (text) => {
+						fileNotices.push(text);
+					},
+				});
+				return { file, digest, fileNotices };
+			});
+			for (const { file, digest, fileNotices } of results) {
+				fileNotices.forEach(options.notice);
 				// Only same-lineage, same-size candidates need content comparison.
-				const digest = await this.#digest(file, session, options);
 				const previous = digest === undefined ? undefined : matches.get(digest);
 				if (previous === undefined || digest === undefined) {
 					matches.set(digest ?? noteKey(file.address), file);
@@ -229,22 +246,17 @@ export class NoteDiscovery {
 			directories: new Set(session.scopes.map(scopeDirectory)),
 		});
 		const paths = new Set(touches.map((touch) => touch.notePath));
-		const files: DiscoveredNote[] = [];
-		for (const path of paths) {
-			if (
-				session.owns(path) ||
-				(options.path !== undefined &&
-					path !== options.path &&
-					!path.startsWith(`${options.path}/`))
-			) {
-				continue;
-			}
-			const file = await readReference(session, path, options.signal);
-			if (file !== undefined) {
-				files.push(file);
-			}
-		}
-		return files;
+		const candidates = [...paths].filter(
+			(path) =>
+				!session.owns(path) &&
+				(options.path === undefined ||
+					path === options.path ||
+					path.startsWith(`${options.path}/`)),
+		);
+		const resolved = await mapBatch(candidates, (path) =>
+			readReference(session, path, options.signal),
+		);
+		return resolved.filter((file): file is DiscoveredNote => file !== undefined);
 	}
 	async list(
 		session: SessionNotes,
@@ -258,21 +270,32 @@ export class NoteDiscovery {
 		const notice = (text: string) => {
 			notices.push(text);
 		};
-		const scopes =
-			options.scope === undefined
-				? await projectScopes(session, notice)
-				: [
+		const requestedScope = options.scope;
+		const [scopes, references] = await Promise.all([
+			requestedScope === undefined
+				? projectScopes(session, notice)
+				: (async () => [
 						{
-							scope: await session.selectScope(options.scope),
-							manifest: await readManifest(options.scope),
+							scope: await session.selectScope(requestedScope),
+							manifest: await readManifest(requestedScope),
 						},
-					];
+					])(),
+			this.#references(session, options),
+		]);
+		const scoped = await mapBatch(scopes, async (scope) => {
+			const scopeNotices: string[] = [];
+			const scopeFiles = await scopedFiles(scope, options, (text) => {
+				scopeNotices.push(text);
+			});
+			return { scopeFiles, scopeNotices };
+		});
 		const files: DiscoveredNote[] = [];
-		for (const scope of scopes) {
+		for (const { scopeFiles, scopeNotices } of scoped) {
 			// Preserve native listing order while walking each scope independently.
-			files.push(...(await scopedFiles(scope, options, notice)));
+			notices.push(...scopeNotices);
+			files.push(...scopeFiles);
 		}
-		for (const reference of await this.#references(session, options)) {
+		for (const reference of references) {
 			if (!files.some((file) => noteKey(file.address) === noteKey(reference.address))) {
 				files.push(reference);
 			}
