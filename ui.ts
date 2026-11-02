@@ -35,6 +35,8 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 			: raw;
 		const previewRows = window ? 2 : 3;
 		const previewText = leadingRows(preview, theme, "toolOutput", previewRows);
+		// Pi injects keyText so the hint shows the user's configured keys.
+		const expandKey = options.keyText("app.tools.expand");
 		let fullText: Text | undefined;
 		const historyText = textBlock("Earlier conversation remains in history.", theme, "muted");
 		const content: Component = {
@@ -57,7 +59,7 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 					: [
 							...(window ? historyText.render(inner).slice(0, 2) : []),
 							...previewText(inner).slice(0, previewRows),
-							hint(theme, inner),
+							hint(theme, inner, expandKey),
 						];
 				const box = new Box(padding, 1, (line) => theme.bg("customMessageBg", line));
 				box.addChild({

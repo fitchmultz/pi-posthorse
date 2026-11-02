@@ -90,7 +90,7 @@ sessions keep their context, so a cold resume can still send a large request. Se
 [idle sessions and cache expiry](reference.md#idle-sessions-and-cache-expiry) for the scheduling
 limitation and the supported explicit alternatives.
 
-Cancellation is not a rollback guarantee. In official Pi 1.4.0, explicit resets and the eager
+Cancellation is not a rollback guarantee. In official Pi 1.5.0, explicit resets and the eager
 turn-end threshold fallback return boundary drafts before later handlers finish. The host commits
 the final drafts without another abort check, so a late abort after Posthorse's checks need not
 prevent that boundary from being saved. This is distinct from native automatic compaction, which
