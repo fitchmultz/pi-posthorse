@@ -64,9 +64,9 @@ advantage over a request-time decision: Posthorse's local rollover itself neithe
 nor refreshes the provider cache.
 
 The public `ctx.compact()` entry point is manual compaction, not a non-aborting automatic
-checkpoint. In [official Pi 1.4.0](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/src/core/agent-session.ts)
+checkpoint. In [official Pi 1.5.0](https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/src/core/agent-session.ts)
 it aborts the current operation before `session_before_compact`; the
-[maintained fork](https://github.com/fitchmultz/pi/blob/44204bdc05cca88b74b55302bd2c324aff47dee0/packages/coding-agent/src/core/agent-session.ts)
+[maintained fork](https://github.com/fitchmultz/pi/blob/ea5fe4563fd15e7b630fa33c776865a1e30c7acb/packages/coding-agent/src/core/agent-session.ts)
 also cancels and joins native `runInBackground` tools there. Those tools can still be running
 while `isIdle()` is true. Cancelling in the later hook cannot undo that cancellation, and
 Posthorse deliberately leaves manual compaction on Pi's summarization path.
@@ -132,7 +132,7 @@ For conventional Git checkouts, packages managed by Pi use storage outside their
 
 Whole-project symlinks and logical project-package paths through a linked `.pi/git` container or source host/repository segment are supported. If a session instead opens the external physical checkout path, or a linked worktree outside that project, Posthorse cannot infer the undiscoverable project alias: it falls back to the physical checkout's notes location. Such notes can still be deleted by package cleanup. Global detection supports a linked agent directory or whole `git` container, but not a source host/repository segment linked outside that container. These are not universal symlink-protection guarantees. Separately stored Git metadata retains the common-directory storage described above; it is safe from checkout cleanup only when that metadata is outside the cleaned checkout. No filesystem-wide ownership discovery is performed.
 
-This follows the [official Pi 1.4.0 package manager](https://unpkg.com/@earendil-works/pi-coding-agent@1.4.0/dist/core/package-manager.js): `getGitInstallRoot` selects `<agent>/git` or `<cwd>/.pi/git`, `getGitInstallPath` appends the source host/path, and `ensureGitRef` resets changed commits before `cleanAndInstallGitDependencies` runs `git clean -fdx` inside the checkout. An unchanged commit normally repairs missing dependencies without cleaning, except when retrying an interrupted update.
+This follows the [official Pi 1.5.0 package manager](https://unpkg.com/@earendil-works/pi-coding-agent@1.5.0/dist/core/package-manager.js): `getGitInstallRoot` selects `<agent>/git` or `<cwd>/.pi/git`, `getGitInstallPath` appends the source host/path, and `ensureGitRef` resets changed commits before `cleanAndInstallGitDependencies` runs `git clean -fdx` inside the checkout. An unchanged commit normally repairs missing dependencies without cleaning, except when retrying an interrupted update.
 
 On the next notes operation, an existing checkout-local `.pi/notes/` directory moves to the relocated location. **Access notes with this version before updating a package that still has checkout-local notes**; migration cannot recover notes already deleted by an update. If relocated storage already exists, incoming notes go into `from-checkout-<time>`, with `-1`, `-2`, etc. added when needed, without replacing existing entries or merging same-named notes. Posthorse attempts to link the old `.pi/notes` path to the relocated directory so older sessions can still reach it until the next update removes the link. Notes subsequently recreated inside the checkout are migrated on another notes operation. Notes tracked by the package itself can reappear on update and produce additional migrated copies.
 

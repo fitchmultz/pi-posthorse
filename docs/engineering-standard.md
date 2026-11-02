@@ -1047,7 +1047,7 @@ file/rule/operation inventory, with one directive per selector.
 
 Pi's `ToolDefinition.execute` requires five positional arguments, ending in the
 tool context. The qualified floor declaration is
-`@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts:514`.
+`@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts:533`.
 The direct signature keeps the framework contract visible:
 
 ```ts
