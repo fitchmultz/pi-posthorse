@@ -5,9 +5,9 @@ For a quick start, see the [README](../README.md).
 
 ## Install
 
-Posthorse requires Node.js `>=24.12.0` and Pi `>=1.4.0`. Update an older host before you install Posthorse.
+Posthorse requires Node.js `>=24.12.0` and Pi `>=1.5.0`. Update an older host before you install Posthorse.
 
-Review the [Pi 1.4.0 release notes](https://github.com/earendil-works/pi/releases/tag/v1.4.0) before upgrading the host. Posthorse does not migrate host settings or other extensions.
+Review the [Pi 1.5.0 release notes](https://github.com/earendil-works/pi/releases/tag/v1.5.0) before upgrading the host. Posthorse does not migrate host settings or other extensions.
 
 ```bash
 pi install npm:pi-posthorse                        # from npm

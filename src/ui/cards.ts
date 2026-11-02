@@ -121,6 +121,7 @@ interface ResultFacts {
 	readonly expanded: boolean;
 	readonly imageCount: number;
 	readonly showImages: boolean;
+	readonly expandKey: string;
 }
 
 function submittedText(facts: ResultFacts): string {
@@ -310,7 +311,12 @@ function collapsedView(
 		const attachments =
 			attachment.length > 0 ? [truncateToWidth(theme.fg("muted", attachment), width)] : [];
 		const hidden = details || rows.length > shown.length;
-		return [...summaryRows, ...shown, ...attachments, ...(hidden ? [hint(theme, width)] : [])];
+		return [
+			...summaryRows,
+			...shown,
+			...attachments,
+			...(hidden ? [hint(theme, width, facts.expandKey)] : []),
+		];
 	};
 }
 
@@ -343,6 +349,8 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 					expanded,
 					imageCount: result.content.filter((part) => part.type === "image").length,
 					showImages: context.showImages,
+					// Pi injects keyText so the hint shows the user's configured keys.
+					expandKey: context.keyText("app.tools.expand"),
 				},
 				theme,
 			);

@@ -14,7 +14,7 @@
 			"matchManagers": ["npm"],
 			"matchDepTypes": ["devDependencies"],
 			"matchPackageNames": ["@earendil-works/**"],
-			"allowedVersions": ">=1.4.0"
+			"allowedVersions": ">=1.5.0"
 		}
 	]
 }

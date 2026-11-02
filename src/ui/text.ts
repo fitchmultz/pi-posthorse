@@ -1,4 +1,4 @@
-import { keyText, type Theme } from "@earendil-works/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text, stripTerminalSequences, truncateToWidth } from "@earendil-works/pi-tui";
 
 export type OutputColor = "toolOutput" | "muted" | "dim" | "error" | "warning";
@@ -81,8 +81,7 @@ export function leadingRows(
 	};
 }
 
-export function hint(theme: Theme, width: number): string {
-	const key = keyText("app.tools.expand");
+export function hint(theme: Theme, width: number, key: string): string {
 	return truncateToWidth(
 		theme.fg("dim", key.length > 0 ? `… ${key} to expand` : "… details hidden"),
 		width,

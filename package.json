@@ -51,8 +51,8 @@
 		"lint:fix:oxlint": "oxlint --fix ."
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": ">=1.4.0",
-		"@earendil-works/pi-tui": ">=1.4.0",
+		"@earendil-works/pi-coding-agent": ">=1.5.0",
+		"@earendil-works/pi-tui": ">=1.5.0",
 		"typebox": "*"
 	},
 	"peerDependenciesMeta": {
@@ -67,9 +67,9 @@
 		}
 	},
 	"devDependencies": {
-		"@earendil-works/pi-ai": "1.4.0",
-		"@earendil-works/pi-coding-agent": "1.4.0",
-		"@earendil-works/pi-tui": "1.4.0",
+		"@earendil-works/pi-ai": "1.5.0",
+		"@earendil-works/pi-coding-agent": "1.5.0",
+		"@earendil-works/pi-tui": "1.5.0",
 		"@types/node": "24.19.1",
 		"oxc-parser": "0.156.0",
 		"oxfmt": "0.75.0",
