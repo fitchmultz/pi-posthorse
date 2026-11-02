@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.7 - 2026-11-02
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Recheck unreported Cursor reviews in automatic releases (#123) ([4c8d314](https://github.com/fitchmultz/pi-posthorse/commit/4c8d31489f9dbb7e9a4525e8a98c9548d930d4f7))
+
+### What's Changed
+
+- Recheck unreported Cursor reviews in automatic releases by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/123
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.6...v0.10.7
+
 ## 0.10.6 - 2026-11-02
 
 <!-- npm-release:unreleased:start -->
