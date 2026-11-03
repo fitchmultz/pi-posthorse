@@ -23,7 +23,7 @@ Give Pi your task. For example:
 
 ## How rollover works
 
-Posthorse can nudge the model to update task notes before rollover, then continue working. The nudge does not require `new_context` or wake an agent after its final answer. Large turns can reach rollover before the nudge.
+Posthorse can send a routine task-note reminder before rollover. The reminder tells the model to save current task state if needed, then immediately continue the prescribed work. The context window is not a task deadline. The reminder does not require `new_context` or wake an agent after its final answer. Large turns can reach rollover before the reminder. See [Reminder timing](docs/reminder-timing.md) for the trigger and its relationship to Pi's reserve and retention settings.
 
 Automatic rollover retains a safe recent-message tail using Pi's `compaction.keepRecentTokens`, alongside a bounded recovery record for discarded inputs and tool evidence. It never calls a summarization model. The model must restore notes and check live state before it continues. Optional `new_context` deliberately retains no prior messages; manual `/compact` uses Pi's normal summarization.
 

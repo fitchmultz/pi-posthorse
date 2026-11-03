@@ -624,126 +624,133 @@ nodeTest(
 	},
 );
 
-nodeTest(
-	"budget policy sends one best-effort reminder below the line and lets Pi own rollover",
-	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-test-"));
-		try {
-			// A project file that disagrees with Pi's effective policy must be ignored: Pi decides trust, not Posthorse.
-			mkdirSync(join(dir, ".pi"));
-			writeFileSync(
-				join(dir, ".pi", "settings.json"),
-				JSON.stringify({ compaction: { enabled: false, reserveTokens: 1 } }),
-			);
-			const { handlers, messages, tools } = await setup();
-			const contextWindow = 100_000;
-			const reserve = 64_000;
-			const threshold = contextWindow - reserve;
-			const rolloverAt = threshold + 1;
-			const remindAt = 32_401; // Last 3,600 tokens of the 36,000 usable tokens.
-			let tokens = remindAt - 1;
-			const branch: Record<string, unknown>[] = [{ type: "context_window", id: "window-2" }];
-			let branchReads = 0;
-			const context: TestContext = {
-				cwd: dir,
-				model: { contextWindow },
-				sessionManager: {
-					...indexedBranch(branch),
-					getSessionFile: (): string | undefined => undefined,
-					buildSessionProjection: emptyProjection,
-					getBranch: () => {
-						branchReads++;
-						return branch;
+for (const { contextWindow, reserve, remindAt } of [
+	{ contextWindow: 100_000, reserve: 64_000, remindAt: 32_401 },
+	{ contextWindow: 335_000, reserve: 16_384, remindAt: 286_756 },
+	{ contextWindow: 335_000, reserve: 64_000, remindAt: 243_901 },
+	{ contextWindow: 262_144, reserve: 64_000, remindAt: 178_331 },
+	{ contextWindow: 262_144, reserve: 16_384, remindAt: 221_185 },
+	{ contextWindow: 1_048_576, reserve: 16_384, remindAt: 1_000_193 },
+]) {
+	nodeTest(
+		`budget policy sends one reminder and lets Pi own rollover (window=${contextWindow}, reserve=${reserve})`,
+		async () => {
+			const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-test-"));
+			try {
+				// A project file that disagrees with Pi's effective policy must be ignored: Pi decides trust, not Posthorse.
+				mkdirSync(join(dir, ".pi"));
+				writeFileSync(
+					join(dir, ".pi", "settings.json"),
+					JSON.stringify({ compaction: { enabled: false, reserveTokens: 1 } }),
+				);
+				const { handlers, messages, tools } = await setup();
+				const threshold = contextWindow - reserve;
+				const rolloverAt = threshold + 1;
+				let tokens = remindAt - 1;
+				const branch: Record<string, unknown>[] = [
+					{ type: "context_window", id: "window-2" },
+				];
+				let branchReads = 0;
+				const context: TestContext = {
+					cwd: dir,
+					model: { contextWindow },
+					sessionManager: {
+						...indexedBranch(branch),
+						getSessionFile: (): string | undefined => undefined,
+						buildSessionProjection: emptyProjection,
+						getBranch: () => {
+							branchReads++;
+							return branch;
+						},
+						getSessionDir: () => dir,
 					},
-					getSessionDir: () => dir,
-				},
-				getContextUsage: () => ({
-					tokens,
+					getContextUsage: () => ({
+						tokens,
+						contextWindow,
+						percent: (tokens / contextWindow) * 100,
+					}),
+					getCompactionSettings: () => ({
+						enabled: true,
+						reserveTokens: reserve,
+					}),
+					getSystemPrompt: () => "You are a test assistant.",
+				};
+
+				requireValue(handlers.get("session_start"))({}, context);
+				turnEnd(handlers, context);
+				assert.equal(messages.length, 0, "no reminder below the band");
+				assert.equal(branchReads, 0, "below-band turns must not fetch history");
+				tokens = remindAt;
+				await run(tools, "new_context", {}, context);
+				turnEnd(handlers, context, [{ toolName: "new_context", toolCallId: "id" }]);
+				assert.equal(messages.length, 0);
+				requireValue(handlers.get("turn_end"))(
+					{ message: { role: "assistant", stopReason: "error" }, toolResults: [] },
+					context,
+				);
+				assert.equal(messages.length, 0);
+				requireValue(handlers.get("turn_end"))(
+					{ message: { role: "assistant", stopReason: "aborted" }, toolResults: [] },
+					context,
+				);
+				assert.equal(messages.length, 0);
+				assert.equal(
+					branchReads,
+					0,
+					"successful rollover batches, errors, and aborts need no history",
+				);
+
+				turnEnd(handlers, context);
+				assert.equal(messages.length, 1);
+				assert.match(requireValue(messages[0]).content, /Routine task-note update/);
+				assert.deepEqual(requireValue(messages[0]).details, {
+					windowId: "window-2",
 					contextWindow,
-					percent: (tokens / contextWindow) * 100,
-				}),
-				getCompactionSettings: () => ({ enabled: true, reserveTokens: reserve }),
-				getSystemPrompt: () => "You are a test assistant.",
-			};
+					reserveTokens: reserve,
+				});
+				assert.equal(
+					branchReads,
+					0,
+					"reminder checks use by-id ancestry, not a full branch copy",
+				);
+				branch.push({
+					type: "custom_message",
+					customType: "posthorse-reminder",
+					details: requireValue(messages[0]).details,
+				});
 
-			requireValue(handlers.get("session_start"))({}, context);
-			turnEnd(handlers, context);
-			assert.equal(messages.length, 0, "no reminder below the band");
-			assert.equal(branchReads, 0, "below-band turns must not fetch history");
-			tokens = remindAt;
-			await run(tools, "new_context", {}, context);
-			turnEnd(handlers, context, [{ toolName: "new_context", toolCallId: "id" }]);
-			assert.equal(messages.length, 0);
-			requireValue(handlers.get("turn_end"))(
-				{ message: { role: "assistant", stopReason: "error" }, toolResults: [] },
-				context,
-			);
-			assert.equal(messages.length, 0);
-			requireValue(handlers.get("turn_end"))(
-				{ message: { role: "assistant", stopReason: "aborted" }, toolResults: [] },
-				context,
-			);
-			assert.equal(messages.length, 0);
-			assert.equal(
-				branchReads,
-				0,
-				"successful rollover batches, errors, and aborts need no history",
-			);
+				tokens = threshold;
+				turnEnd(handlers, context);
+				assert.equal(messages.length, 1, "Pi does not roll at exact threshold equality");
+				branch.pop();
+				messages.length = 0;
+				turnEnd(handlers, context);
+				assert.equal(messages.length, 1, "Posthorse still offers a checkpoint at equality");
+				assert.equal(branchReads, 0, "in-band checks do not materialize the branch");
 
-			turnEnd(handlers, context);
-			assert.equal(messages.length, 1);
-			assert.match(requireValue(messages[0]).content, /Notes checkpoint/);
-			assert.match(
-				requireValue(messages[0]).content,
-				/current-state note .*available file-editing tools.*Then continue working; let automatic rollover happen without calling new_context\.$/,
-			);
-			assert.deepEqual(requireValue(messages[0]).details, {
-				windowId: "window-2",
-				contextWindow,
-				reserveTokens: reserve,
-			});
-			assert.equal(
-				branchReads,
-				0,
-				"reminder checks use by-id ancestry, not a full branch copy",
-			);
-			branch.push({
-				type: "custom_message",
-				customType: "posthorse-reminder",
-				details: requireValue(messages[0]).details,
-			});
-
-			tokens = threshold;
-			turnEnd(handlers, context);
-			assert.equal(messages.length, 1, "Pi does not roll at exact threshold equality");
-			branch.pop();
-			messages.length = 0;
-			turnEnd(handlers, context);
-			assert.equal(messages.length, 1, "Posthorse still offers a checkpoint at equality");
-			assert.equal(branchReads, 0, "in-band checks do not materialize the branch");
-
-			messages.length = 0;
-			tokens = rolloverAt;
-			turnEnd(handlers, context);
-			assert.equal(
-				messages.length,
-				0,
-				"Pi owns the first token that actually triggers rollover",
-			);
-			assert.equal(branchReads, 0, "rollover equality must not fetch history");
-			tokens += 1_000;
-			turnEnd(handlers, context);
-			assert.equal(
-				messages.length,
-				0,
-				"Posthorse also stays out of Pi's over-threshold path",
-			);
-			assert.equal(branchReads, 0, "over-threshold turns must not fetch history");
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	},
-);
+				messages.length = 0;
+				tokens = rolloverAt;
+				turnEnd(handlers, context);
+				assert.equal(
+					messages.length,
+					0,
+					"Pi owns the first token that actually triggers rollover",
+				);
+				assert.equal(branchReads, 0, "rollover equality must not fetch history");
+				tokens += 1_000;
+				turnEnd(handlers, context);
+				assert.equal(
+					messages.length,
+					0,
+					"Posthorse also stays out of Pi's over-threshold path",
+				);
+				assert.equal(branchReads, 0, "over-threshold turns must not fetch history");
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		},
+	);
+}
 
 nodeTest(
 	"reminders respect live pending messages and tool calls even with a stop reason",
@@ -804,7 +811,7 @@ nodeTest("a large reserve does not send checkpoint reminders in a fresh window",
 	);
 	turnEnd(handlers, usageContext(base, 400_000, 9001, 390_000));
 	assert.equal(messages.length, 1);
-	assert.match(requireValue(messages[0]).content, /1,000 tokens remain/);
+	assert.match(requireValue(messages[0]).content, /Routine task-note update/);
 });
 
 nodeTest(
@@ -1072,8 +1079,11 @@ nodeTest(
 		);
 		assert.equal(sections.other, "Keep this policy");
 		const guidance = guidanceFor(handlers, context);
-		assert.match(guidance, /Context self-management \(Posthorse\)/);
-		assert.match(guidance, /\(goal, progress, decisions, next steps\).*file-editing tools/);
+		assert.match(guidance, /Automatic context management \(Posthorse\)/);
+		assert.match(
+			guidance,
+			/goal, progress, decisions, and next steps[\s\S]*file-editing tools/,
+		);
 		assert.match(guidance, /verify live state/);
 		assert.match(guidance, /Configured context capacity: 100,000 tokens/);
 		assert.match(guidance, /rollover line is 83,617 tokens used/);
@@ -1109,7 +1119,7 @@ nodeTest(
 		};
 		const guidance = guidanceFor(handlers, context);
 		assert.match(guidance, /Pi compaction is disabled/);
-		assert.match(guidance, /Context self-management \(Posthorse\)/);
+		assert.match(guidance, /Automatic context management \(Posthorse\)/);
 		assert.match(guidance, /Configured context capacity: 100,000 tokens/);
 		assert.doesNotMatch(guidance, /rollover line is .* tokens used/);
 		turnEnd(handlers, context);
@@ -2800,10 +2810,10 @@ nodeTest(
 			// 32,768 - 16,384 leaves 16,384 usable: line at 16,385 (50%), band 1,638 tokens wide.
 			const context = usageContext(base, 32_768, 15_000);
 			const guidance = guidanceFor(handlers, context);
-			assert.match(guidance, /rollover line \(50% used\)/);
+			assert.match(guidance, /rollover line is 16,385 tokens used/);
 			turnEnd(handlers, context);
 			assert.equal(messages.length, 1);
-			assert.match(requireValue(messages[0]).content, /1,385 tokens remain/);
+			assert.match(requireValue(messages[0]).content, /Routine task-note update/);
 			assert.ok(automaticResult(handlers, context, []));
 		}
 
@@ -2811,14 +2821,12 @@ nodeTest(
 			const { handlers, tools, context: base } = await setup();
 			const large = usageContext(base, 400_000, 1_000, 64_000);
 			const guidance = guidanceFor(handlers, large);
-			assert.match(guidance, /rollover line \(84% used\)/);
 			assert.match(guidance, /Configured context capacity: 400,000 tokens/);
 			assert.match(guidance, /rollover line is 336,001 tokens used/);
 			assert.match(guidance, /No routine budget checks are needed/);
 			// A 272K window with a 64K reserve has its line at 208,001 (76%).
 			const sol = usageContext(base, 272_000, 205_000, 64_000);
 			const switched = guidanceFor(handlers, sol);
-			assert.match(switched, /rollover line \(76% used\)/);
 			assert.match(switched, /Configured context capacity: 272,000 tokens/);
 			assert.match(switched, /rollover line is 208,001 tokens used/);
 			assert.doesNotMatch(switched, /400,000|336,001/);

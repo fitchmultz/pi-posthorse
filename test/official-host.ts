@@ -299,7 +299,7 @@ nodeTest(
 		assert.equal(boundary.usage, undefined, "no summarization model usage");
 		assert.equal(requireValue(fresh[0]).role, "system");
 		assert.match(getCurrentSystemPrompt(fresh), /OFFICIAL_SYSTEM_POLICY/);
-		assert.match(getCurrentSystemPrompt(fresh), /Context self-management/);
+		assert.match(getCurrentSystemPrompt(fresh), /Automatic context management/);
 		for (const prompt of [initial, getCurrentSystemPrompt(fresh)]) {
 			assert.match(prompt, /Configured context capacity: 100,000 tokens/);
 			assert.match(prompt, /rollover line is 83,617 tokens used/);
@@ -408,7 +408,10 @@ for (const forced of [false, true]) {
 				assert.match(prompt, /Configured context capacity: 272,000 tokens/);
 				assert.match(prompt, /rollover line is 208,001 tokens used/);
 				assert.doesNotMatch(prompt, /100,000|83,617/);
-				assert.equal(prompt.split("## Context self-management (Posthorse)").length - 1, 1);
+				assert.equal(
+					prompt.split("## Automatic context management (Posthorse)").length - 1,
+					1,
+				);
 				assert.match(prompt, /OFFICIAL_SYSTEM_POLICY/);
 				if (forced) {
 					assert.match(prompt, /OTHER_POLICY/);
@@ -572,7 +575,7 @@ nodeTest("explicit handoff admission counts the real prompt and active tool sche
 	);
 	assert.equal(
 		fresh.filter((message) =>
-			textOf(message).startsWith("## Context self-management (Posthorse)"),
+			textOf(message).startsWith("## Automatic context management (Posthorse)"),
 		).length,
 		1,
 	);
@@ -1347,7 +1350,7 @@ nodeTest(
 		assert.doesNotMatch(JSON.stringify(requests), /OLD_NOTES_NUDGE/);
 		assert.match(
 			JSON.stringify(requests[1]),
-			/Notes checkpoint:[\s\S]*continue working; let automatic rollover happen without calling new_context/,
+			/Routine task-note update\.[\s\S]*Then immediately execute the next prescribed task step in this run/,
 		);
 		assert.equal(h.faux.state.callCount, 2);
 	},
@@ -1593,9 +1596,12 @@ nodeTest(
 		await h.session.prompt("p".repeat(305_000));
 		assert.equal(requests.length, 2);
 		for (const request of requests) {
-			assert.match(getCurrentSystemPrompt(request), /Context self-management \(Posthorse\)/);
+			assert.match(
+				getCurrentSystemPrompt(request),
+				/Automatic context management \(Posthorse\)/,
+			);
 		}
-		assert.match(JSON.stringify(requests[1]), /Notes checkpoint:/);
+		assert.match(JSON.stringify(requests[1]), /Routine task-note update\./);
 		assert.equal(
 			h.sessionManager
 				.getBranch()
@@ -1655,7 +1661,7 @@ nodeTest(
 			assert.match(getCurrentSystemPrompt(request), /rollover line is 68,001 tokens/);
 		}
 		assert.match(textOf(toolResult(h, "get_context_remaining")), /line at 68,001/);
-		assert.match(JSON.stringify(requests), /Notes checkpoint:/);
+		assert.match(JSON.stringify(requests), /Routine task-note update\./);
 		assert.equal(
 			h.sessionManager
 				.getBranch()
