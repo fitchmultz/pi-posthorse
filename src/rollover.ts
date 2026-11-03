@@ -5,7 +5,7 @@ import type {
 	ExtensionContext,
 	TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
-import { budgetFor, CHECKPOINT_STEPS, freshPayloadChars, type Budget } from "./budget.ts";
+import { budgetFor, CHECKPOINT_GUIDANCE, freshPayloadChars, type Budget } from "./budget.ts";
 import {
 	isRecord,
 	isReminderType,
@@ -83,9 +83,7 @@ function endsRun(
 		ctx.hasPendingMessages?.() !== true
 	);
 }
-function reminderBudget(
-	host: PolicyContext,
-): { readonly budget: Budget; readonly tokens: number } | undefined {
+function reminderBudget(host: PolicyContext): Budget | undefined {
 	const usage = host.getContextUsage();
 	if (usage === undefined || usage.tokens === null || usage.contextWindow <= 0) {
 		return undefined;
@@ -100,14 +98,13 @@ function reminderBudget(
 		return undefined;
 	}
 	const buffer = Math.min(REMINDER_BUFFER_TOKENS, Math.floor(budget.usable * 0.1));
-	return usage.tokens < budget.rolloverAt - buffer ? undefined : { budget, tokens: usage.tokens };
+	return usage.tokens < budget.rolloverAt - buffer ? undefined : budget;
 }
 function sendReminder(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	available: {
 		readonly budget: Budget;
-		readonly tokens: number;
 		readonly pendingMessages: readonly {
 			readonly role: string;
 			readonly customType?: string | undefined;
@@ -116,7 +113,7 @@ function sendReminder(
 	},
 	reminders: ReminderLookup,
 ): void {
-	const { budget, tokens } = available;
+	const { budget } = available;
 	const state = reminders.read(ctx);
 	const fingerprint: ReminderFingerprint = {
 		windowId: state.windowId,
@@ -137,7 +134,7 @@ function sendReminder(
 	pi.sendMessage(
 		{
 			customType: REMINDER_TYPE,
-			content: `[posthorse] Notes checkpoint: ${(budget.rolloverAt - tokens).toLocaleString("en-US")} tokens remain before Pi's automatic rollover line. Please ${CHECKPOINT_STEPS}.`,
+			content: `[posthorse] Routine task-note update.\n${CHECKPOINT_GUIDANCE}`,
 			display: true,
 			details: fingerprint,
 		},
@@ -481,7 +478,7 @@ export function registerRollover(
 			sendReminder(
 				pi,
 				ctx,
-				{ ...available, pendingMessages: event.context.pendingMessages },
+				{ budget: available, pendingMessages: event.context.pendingMessages },
 				reminders,
 			);
 		}

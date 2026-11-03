@@ -2055,16 +2055,16 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 					? (messages
 							.map(textOf)
 							.find((text) =>
-								text.includes("## Context self-management (Posthorse)"),
+								text.includes("## Automatic context management (Posthorse)"),
 							) ?? "")
 					: prompt;
 				assert.equal(
-					guidance.split("## Context self-management (Posthorse)").length - 1,
+					guidance.split("## Automatic context management (Posthorse)").length - 1,
 					1,
 				);
 				assert.match(guidance, /verify live state/);
 				assert.match(guidance, /available file-editing tools at its absolute path/);
-				assert.match(guidance, /already current, leave it unchanged/);
+				assert.match(guidance, /Leave an already-current note unchanged/);
 				assert.match(guidance, /Preserve decisions and safety constraints/);
 				if (mode.startsWith("forced-")) {
 					assert.match(prompt, /OTHER_EXTENSION_POLICY/);
@@ -2081,7 +2081,10 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 				);
 				const initialPrompt = requireValue(requireValue(captures[0])[0]);
 				assert.ok(initialPrompt.role === "system");
-				assert.match(initialPrompt.sections?.posthorse ?? "", /Context self-management/);
+				assert.match(
+					initialPrompt.sections?.posthorse ?? "",
+					/Automatic context management/,
+				);
 				assert.ok(
 					requireValue(captures[1])
 						.slice(1)
@@ -2192,7 +2195,7 @@ for (const mode of ["unforced", "forced", "forced-user-to-custom"]) {
 		assert.equal(
 			[prompt, ...request.filter((message) => message.role !== "system").map(textOf)]
 				.join("\n")
-				.split("## Context self-management (Posthorse)").length - 1,
+				.split("## Automatic context management (Posthorse)").length - 1,
 			1,
 		);
 		if (forced) {
@@ -2501,14 +2504,14 @@ for (const { continuation, stopReason } of settlementCases) {
 					);
 			if (continuation !== "none") {
 				assert.equal(reminders().length, 1);
-				assert.match(JSON.stringify(requests.slice(1)), /Notes checkpoint:/);
+				assert.match(JSON.stringify(requests.slice(1)), /Routine task-note update\./);
 				assert.match(
 					textOf(reminders()[0]),
-					/Then continue working; let automatic rollover happen without calling new_context/,
+					/Keep working on the assigned task[\s\S]*current context window is not a deadline[\s\S]*Then immediately execute the next prescribed task step in this run[\s\S]*Approaching context rollover is not a blocker/,
 				);
 				assert.doesNotMatch(
 					JSON.stringify(requests.slice(1)),
-					/Stop normal work|Then call new_context/,
+					/Stop normal work|Then call new_context|[\d,]+ tokens remain/,
 				);
 				assert.equal(
 					requireValue(
@@ -2553,7 +2556,7 @@ for (const { continuation, stopReason } of settlementCases) {
 				1,
 				"a skipped final answer does not consume the reminder",
 			);
-			assert.match(JSON.stringify(requests.at(-1)), /Notes checkpoint:/);
+			assert.match(JSON.stringify(requests.at(-1)), /Routine task-note update\./);
 			h.faux.setResponses([
 				fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
 					stopReason: "toolUse",
@@ -2601,7 +2604,7 @@ nodeTest(
 		await h.session.prompt("Continue without automatic rollover");
 		assert.ok(input !== undefined && input !== "");
 		assert.match(input, /Pi compaction is disabled/);
-		assert.doesNotMatch(input, /Notes checkpoint:|then call new_context now/);
+		assert.doesNotMatch(input, /Routine task-note update\.|then call new_context now/);
 		assert.deepEqual(reminders(), [original]);
 	},
 );
@@ -2645,7 +2648,7 @@ nodeTest(
 			/Context window \S+ starts here/,
 			"the compaction removed the window marker",
 		);
-		assert.match(input ?? "", /Notes checkpoint:/);
+		assert.match(input ?? "", /Routine task-note update\./);
 	},
 );
 
