@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.9 - 2026-11-03
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- fix: keep task-note reminders focused on continued work (#128) ([3d11a60](https://github.com/fitchmultz/pi-posthorse/commit/3d11a6062149ecf7fca8750dc51ad6e67080e575))
+
+### What's Changed
+
+- Keep task-note reminders focused on continued work by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/128
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.8...v0.10.9
+
 ## 0.10.8 - 2026-11-03
 
 <!-- npm-release:unreleased:start -->
