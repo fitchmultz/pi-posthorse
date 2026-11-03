@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.8 - 2026-11-03
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Skip no-op releases and restate malformed remediation dispositions (#126) ([66c7949](https://github.com/fitchmultz/pi-posthorse/commit/66c79491304cd6fc64477a4c4cc0b517c5950540))
+
+### What's Changed
+
+- Skip no-op releases and restate malformed remediation dispositions by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/126
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.7...v0.10.8
+
 ## 0.10.7 - 2026-11-02
 
 <!-- npm-release:unreleased:start -->
