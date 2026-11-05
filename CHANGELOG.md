@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Adopt engineering standard 5.2 with current published Oxlint and Oxfmt tools. Remove inline lint suppressions and their site allowlist, reject hidden formatting suppressions, and keep full compiler and host qualification coverage.
+
 ## 0.10.9 - 2026-11-03
 
 <!-- npm-release:unreleased:start -->

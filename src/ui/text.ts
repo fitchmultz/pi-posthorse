@@ -1,15 +1,14 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text, stripTerminalSequences, truncateToWidth } from "@earendil-works/pi-tui";
+import { isRecord } from "../records.ts";
+
+export { isRecord } from "../records.ts";
 
 export type OutputColor = "toolOutput" | "muted" | "dim" | "error" | "warning";
 
 export function clean(value: string): string {
 	// Tool previews must not execute terminal controls or Unicode interlinear annotations.
 	return stripTerminalSequences(value).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f\ufff9-\ufffb]/g, "");
-}
-
-export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export function argsOf(value: unknown): Readonly<Record<string, unknown>> {

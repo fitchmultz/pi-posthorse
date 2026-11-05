@@ -2,7 +2,7 @@
 
 ## Code quality and acceptance
 
-Follow [Engineering standard 5.1.2](docs/engineering-standard.md). Its Appendix B owns the
+Follow [Engineering standard 5.2](docs/engineering-standard.md). Its Appendix B owns the
 repository mappings and evidence-based quality exceptions. Preserve accurate contracts,
 assertions, lifecycle ownership, and source coverage while improving the implementation.
 

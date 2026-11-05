@@ -1,11 +1,4 @@
-import type { SourcePolicy, SourceComment } from "./quality-source.ts";
-import { exceptionSites } from "./quality-sites.ts";
-
-type ExceptionSite = (typeof exceptionSites)[number];
-interface SuppressionAudit {
-	readonly problems: readonly string[];
-	readonly used: readonly ExceptionSite[];
-}
+import type { SourcePolicy } from "./quality-source.ts";
 
 function compilerProblem(file: string, text: string): string | undefined {
 	if (/^@ts-(?:ignore|nocheck)\b/u.test(text)) {
@@ -21,54 +14,31 @@ function compilerProblem(file: string, text: string): string | undefined {
 	return;
 }
 
-function authorize(
-	source: SourcePolicy,
-	comment: SourceComment,
-): ExceptionSite | string | undefined {
-	const text = comment.text.replace(/^[/*\s]+|\*\/$/gu, "").trim();
-	const compiler = compilerProblem(source.file, text);
+function directiveProblem(file: string, text: string): string | undefined {
+	const compiler = compilerProblem(file, text);
 	if (compiler !== undefined) {
 		return compiler;
 	}
-	if (/^eslint-(?:disable|enable)\b/u.test(text)) {
-		return "use native, recorded Oxlint directives";
+	if (/^(?:oxfmt|prettier)-ignore\b/u.test(text)) {
+		return "formatting suppressions require a recorded byte or readability contract";
 	}
-	if (!/^oxlint-(?:disable|enable)\b/u.test(text)) {
-		return;
+	if (/^(?:eslint|oxlint)-(?:disable|enable)\b/u.test(text)) {
+		return "lint suppressions are not permitted";
 	}
-	const match = /^oxlint-disable-next-line\s+([\w/-]+)\s+--\s+(QX-\d{3}):\s+(.+)$/u.exec(text);
-	if (match === null) {
-		return "only one named next-line rule with QX identifier and reason is permitted";
-	}
-	const site = exceptionSites.find(
-		(candidate) =>
-			candidate.file === source.file &&
-			candidate.rule === match[1] &&
-			candidate.id === match[2] &&
-			source.operations.some(
-				(operation) =>
-					operation.line === comment.endLine + 1 &&
-					operation.selector === candidate.selector,
-			),
-	);
-	return site ?? "unapproved exception file, rule, origin, or operation";
+	return;
 }
 
-/** Native unused-disable diagnostics supplement this operation-bound authorization check. */
-export function inspectSuppressions(source: SourcePolicy): SuppressionAudit {
-	const used = new Set<ExceptionSite>();
+/** Inspect actual comments, including used suppressions that native unused checks cannot reject. */
+export function inspectSuppressions(source: SourcePolicy): {
+	readonly problems: readonly string[];
+} {
 	const problems: string[] = [];
 	for (const comment of source.comments) {
-		const result = authorize(source, comment);
-		if (result === undefined) {
-			continue;
+		const text = comment.text.replace(/^[/*\s]+|\*\/$/gu, "").trim();
+		const problem = directiveProblem(source.file, text);
+		if (problem !== undefined) {
+			problems.push(`${source.file}:${comment.line + 1}: ${problem}`);
 		}
-		if (typeof result !== "string" && !used.has(result)) {
-			used.add(result);
-			continue;
-		}
-		const problem = typeof result === "string" ? result : "duplicate exception operation";
-		problems.push(`${source.file}:${comment.line + 1}: ${problem}`);
 	}
-	return { problems, used: [...used] };
+	return { problems };
 }

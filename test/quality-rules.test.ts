@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { suite, test as nodeTest } from "node:test";
+import { suite, test } from "node:test";
 import { objectValue } from "../scripts/quality-settings.ts";
 import { ruleCases } from "./quality-rule-cases.ts";
 import { optionCases } from "./quality-rule-options.ts";
@@ -76,9 +76,9 @@ const structuralCases = [
 ];
 
 // Every probe owns a temporary project, so independent CLI runs can overlap.
-await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
+await suite("configured lint policy", { concurrency: probeConcurrency }, async () => {
 	for (const example of [...ruleCases, ...optionCases]) {
-		nodeTest(`configured rule boundary: ${example.name}`, async () => {
+		await test(`configured rule boundary: ${example.name}`, async () => {
 			await expectFindings(
 				{ compiler: { types: ["node"] }, files: { "pass.ts": example.pass } },
 				[],
@@ -96,7 +96,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 	}
 
 	for (const example of structuralCases) {
-		nodeTest(`configured structural boundary: ${example.name}`, async () => {
+		await test(`configured structural boundary: ${example.name}`, async () => {
 			await expectFindings(
 				{ compiler: { types: ["node"] }, files: { "pass.ts": example.pass } },
 				[],
@@ -113,7 +113,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		});
 	}
 
-	nodeTest("test role retains branching and parameter limits while exempting size", async () => {
+	await test("test role retains branching and parameter limits while exempting size", async () => {
 		await expectFindings({ files: { "pass.test.ts": branches(14) } }, []);
 		await expectFindings({ files: { "fail.test.ts": branches(15) } }, [
 			{ code: "eslint/complexity", file: "fail.test.ts", line: 1 },
@@ -136,7 +136,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest("modified complexity counts one switch rather than every case", async () => {
+	await test("modified complexity counts one switch rather than every case", async () => {
 		const cases = Array.from(
 			{ length: 20 },
 			(_, index) => `case ${index}: return ${index};`,
@@ -151,7 +151,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest("declaration files retain API safety without structural metrics", async () => {
+	await test("declaration files retain API safety without structural metrics", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -167,60 +167,51 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest(
-		"defined baseline choices retain accurate resource and diagnostic contracts",
-		async () => {
-			await expectFindings(
-				{
-					files: {
-						"pass.ts": [
-							"export function read(input: { count: number }): number { return input.count; }",
-							"export const callback: () => void = () => Math.abs(1);",
-							"export function diagnostic(input: unknown): string { return String(input); }",
-							"export async function forward(input: unknown): Promise<void> { await Promise.reject(input); }",
-							"export const controls = /[\\u0000]/u;",
-							"export function isString(input: unknown): input is string { return typeof input === 'string'; }",
-							"export function alreadyString(input: string): boolean { if (isString(input)) { return true; } return false; }",
-						].join("\n"),
-					},
+	await test("defined baseline choices retain accurate resource and diagnostic contracts", async () => {
+		await expectFindings(
+			{
+				files: {
+					"pass.ts": [
+						"export function read(input: { count: number }): number { return input.count; }",
+						"export const callback: () => void = () => Math.abs(1);",
+						"export function diagnostic(input: unknown): string { return String(input); }",
+						"export async function forward(input: unknown): Promise<void> { await Promise.reject(input); }",
+						"export const controls = /[\\u0000]/u;",
+						"export function isString(input: unknown): input is string { return typeof input === 'string'; }",
+						"export function alreadyString(input: string): boolean { if (isString(input)) { return true; } return false; }",
+					].join("\n"),
 				},
-				[],
-			);
-		},
-	);
+			},
+			[],
+		);
+	});
 
-	nodeTest(
-		"nullable object presence checks and genuine void shorthand remain permitted",
-		async () => {
-			await expectFindings(
-				{
-					files: {
-						"presence.ts":
-							"export function value(input: { readonly count: number } | undefined): number { if (input) { return input.count; } return 0; }",
-						"void.ts": "export const value: () => void = () => console.log('done');",
-					},
+	await test("nullable object presence checks and genuine void shorthand remain permitted", async () => {
+		await expectFindings(
+			{
+				files: {
+					"presence.ts":
+						"export function value(input: { readonly count: number } | undefined): number { if (input) { return input.count; } return 0; }",
+					"void.ts": "export const value: () => void = () => console.log('done');",
 				},
-				[],
-			);
-		},
-	);
+			},
+			[],
+		);
+	});
 
-	nodeTest(
-		"async interfaces may complete immediately and caught failures retain identity",
-		async () => {
-			await expectFindings(
-				{
-					files: {
-						"pass.ts":
-							"export async function value(): Promise<number> { return 1; } export function propagate(): void { try { console.log('done'); } catch (error) { console.log('failed'); throw error; } }",
-					},
+	await test("async interfaces may complete immediately and caught failures retain identity", async () => {
+		await expectFindings(
+			{
+				files: {
+					"pass.ts":
+						"export async function value(): Promise<number> { return 1; } export function propagate(): void { try { console.log('done'); } catch (error) { console.log('failed'); throw error; } }",
 				},
-				[],
-			);
-		},
-	);
+			},
+			[],
+		);
+	});
 
-	nodeTest("sequential asynchronous work retains native await ownership", async () => {
+	await test("sequential asynchronous work retains native await ownership", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -232,33 +223,30 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest(
-		"terminal Promise callbacks may be void but interior callbacks must return",
-		async () => {
-			await expectFindings(
-				{
-					compiler: { types: ["node"] },
-					files: {
-						"pass.ts":
-							"export async function value(): Promise<void> { await Promise.resolve(1).then((input) => { console.log(input); }); }",
-					},
+	await test("terminal Promise callbacks may be void but interior callbacks must return", async () => {
+		await expectFindings(
+			{
+				compiler: { types: ["node"] },
+				files: {
+					"pass.ts":
+						"export async function value(): Promise<void> { await Promise.resolve(1).then((input) => { console.log(input); }); }",
 				},
-				[],
-			);
-			await expectFindings(
-				{
-					compiler: { types: ["node"] },
-					files: {
-						"fail.ts":
-							"export async function value(): Promise<void> { await Promise.resolve(1).then((input) => { console.log(input); }).then(() => 1); }",
-					},
+			},
+			[],
+		);
+		await expectFindings(
+			{
+				compiler: { types: ["node"] },
+				files: {
+					"fail.ts":
+						"export async function value(): Promise<void> { await Promise.resolve(1).then((input) => { console.log(input); }).then(() => 1); }",
 				},
-				[{ code: "promise/always-return", file: "fail.ts", line: 1 }],
-			);
-		},
-	);
+			},
+			[{ code: "promise/always-return", file: "fail.ts", line: 1 }],
+		);
+	});
 
-	nodeTest("redundant catch rethrows remain detectable", async () => {
+	await test("redundant catch rethrows remain detectable", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -270,22 +258,19 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest(
-		"local sort and reverse stay allowed while void generic contracts stay real",
-		async () => {
-			await expectFindings(
-				{
-					files: {
-						"pass.ts":
-							"export const sorted = [2, 1].sort((a, b) => a - b); export const reversed = [1, 2].reverse(); export const pending: PromiseWithResolvers<void> = Promise.withResolvers();",
-					},
+	await test("local sort and reverse stay allowed while void generic contracts stay real", async () => {
+		await expectFindings(
+			{
+				files: {
+					"pass.ts":
+						"export const sorted = [2, 1].sort((a, b) => a - b); export const reversed = [1, 2].reverse(); export const pending: PromiseWithResolvers<void> = Promise.withResolvers();",
 				},
-				[],
-			);
-		},
-	);
+			},
+			[],
+		);
+	});
 
-	nodeTest("dynamic execution constructs remain forbidden", async () => {
+	await test("dynamic execution constructs remain forbidden", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -304,7 +289,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest("type imports and exports preserve runtime module contracts", async () => {
+	await test("type imports and exports preserve runtime module contracts", async () => {
 		await expectFindings(
 			{
 				compiler: { types: ["node"] },
@@ -327,7 +312,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest("duplicate and self imports remain detectable", async () => {
+	await test("duplicate and self imports remain detectable", async () => {
 		await expectFindings(
 			{
 				compiler: { types: ["node"] },
@@ -348,7 +333,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest("native import analysis detects static dependency cycles", async () => {
+	await test("native import analysis detects static dependency cycles", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -363,40 +348,37 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest(
-		"QX-011 records the published importer's external and awaited-dynamic cycle limits",
-		async () => {
-			await expectFindings(
-				{
-					files: {
-						"external.ts":
-							"import { foreign } from '@quality/cycle'; export function external(): number { return foreign(); }",
-						"node_modules/@quality/cycle/package.json": JSON.stringify({
-							name: "@quality/cycle",
-							version: "1.0.0",
-							type: "module",
-							exports: "./index.ts",
-						}),
-						"node_modules/@quality/cycle/index.ts":
-							"import { external } from '../../../external.ts'; export function foreign(): number { return external(); }",
-					},
-					paths: ["external.ts"],
+	await test("QX-011 records the published importer's external and awaited-dynamic cycle limits", async () => {
+		await expectFindings(
+			{
+				files: {
+					"external.ts":
+						"import { foreign } from '@quality/cycle'; export function external(): number { return foreign(); }",
+					"node_modules/@quality/cycle/package.json": JSON.stringify({
+						name: "@quality/cycle",
+						version: "1.0.0",
+						type: "module",
+						exports: "./index.ts",
+					}),
+					"node_modules/@quality/cycle/index.ts":
+						"import { external } from '../../../external.ts'; export function foreign(): number { return external(); }",
 				},
-				[],
-			);
-			await expectFindings(
-				{
-					files: {
-						"a.ts": "export async function a(): Promise<number> { const { b } = await import('./b.ts'); return b(); }",
-						"b.ts": "import { a } from './a.ts'; export async function b(): Promise<number> { return a(); }",
-					},
+				paths: ["external.ts"],
+			},
+			[],
+		);
+		await expectFindings(
+			{
+				files: {
+					"a.ts": "export async function a(): Promise<number> { const { b } = await import('./b.ts'); return b(); }",
+					"b.ts": "import { a } from './a.ts'; export async function b(): Promise<number> { return a(); }",
 				},
-				[],
-			);
-		},
-	);
+			},
+			[],
+		);
+	});
 
-	nodeTest("type-only cycles are not exempt from import boundaries", async () => {
+	await test("type-only cycles are not exempt from import boundaries", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -411,7 +393,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest("string timer callbacks are implied evaluation", async () => {
+	await test("string timer callbacks are implied evaluation", async () => {
 		await expectFindings(
 			{
 				compiler: { types: ["node"] },
@@ -430,7 +412,7 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest("allowed scalar interpolation and contextual void contracts stay valid", async () => {
+	await test("allowed scalar interpolation and contextual void contracts stay valid", async () => {
 		await expectFindings(
 			{
 				files: {
@@ -442,107 +424,91 @@ await suite("configured lint policy", { concurrency: probeConcurrency }, () => {
 		);
 	});
 
-	nodeTest(
-		"generic callback results retain their actual contract without artificial readonly wrappers",
-		async () => {
-			await expectFindings(
-				{
-					files: {
-						"pass.ts":
-							"export function invoke<T>(operation: () => T): T { return operation(); }",
-						"fail.ts":
-							"export function invoke<T>(operation: () => T): T { console.log(JSON.parse('null').name); return operation(); }",
-					},
+	await test("generic callback results retain their actual contract without artificial readonly wrappers", async () => {
+		await expectFindings(
+			{
+				files: {
+					"pass.ts":
+						"export function invoke<T>(operation: () => T): T { return operation(); }",
+					"fail.ts":
+						"export function invoke<T>(operation: () => T): T { console.log(JSON.parse('null').name); return operation(); }",
 				},
-				[{ code: "typescript/no-unsafe-member-access", file: "fail.ts", line: 1 }],
-			);
-		},
-	);
+			},
+			[{ code: "typescript/no-unsafe-member-access", file: "fail.ts", line: 1 }],
+		);
+	});
 
-	nodeTest(
-		"inferred callback inputs do not waive parameter-property mutation protection",
-		async () => {
-			await expectFindings(
-				{
-					files: {
-						"pass.ts":
-							"export const values = [{ count: 1 }].map((item) => item.count);",
-						"fail.ts":
-							"export const values = [{ count: 1 }].map((item) => { item.count += 1; return item.count; });",
-					},
+	await test("inferred callback inputs do not waive parameter-property mutation protection", async () => {
+		await expectFindings(
+			{
+				files: {
+					"pass.ts": "export const values = [{ count: 1 }].map((item) => item.count);",
+					"fail.ts":
+						"export const values = [{ count: 1 }].map((item) => { item.count += 1; return item.count; });",
 				},
-				[{ code: "eslint/no-param-reassign", file: "fail.ts", line: 1 }],
-			);
-		},
-	);
+			},
+			[{ code: "eslint/no-param-reassign", file: "fail.ts", line: 1 }],
+		);
+	});
 
-	nodeTest(
-		"native Promise executors deliberately discard timer handles using block bodies",
-		async () => {
-			await expectFindings(
-				{
-					compiler: { types: ["node"] },
-					files: {
-						"pass.ts":
-							"export const work = new Promise<void>((resolve) => { setTimeout(resolve, 1); });",
-						"fail.ts":
-							"export const work = new Promise<void>((resolve) => setTimeout(resolve, 1));",
-					},
+	await test("native Promise executors deliberately discard timer handles using block bodies", async () => {
+		await expectFindings(
+			{
+				compiler: { types: ["node"] },
+				files: {
+					"pass.ts":
+						"export const work = new Promise<void>((resolve) => { setTimeout(resolve, 1); });",
+					"fail.ts":
+						"export const work = new Promise<void>((resolve) => setTimeout(resolve, 1));",
 				},
-				[{ code: "eslint/no-promise-executor-return", file: "fail.ts", line: 1 }],
-			);
-		},
-	);
+			},
+			[{ code: "eslint/no-promise-executor-return", file: "fail.ts", line: 1 }],
+		);
+	});
 
-	nodeTest(
-		"PromiseLike values have readonly permission but no floating-Promise exemption",
-		async () => {
-			await expectFindings(
-				{
-					files: {
-						"pass.ts":
-							"export declare const work: PromiseLike<number>; export async function value(): Promise<number> { return await work; }",
-						"fail.ts":
-							"export declare const work: PromiseLike<number>; export function value(): void { work; }",
-					},
+	await test("PromiseLike values have readonly permission but no floating-Promise exemption", async () => {
+		await expectFindings(
+			{
+				files: {
+					"pass.ts":
+						"export declare const work: PromiseLike<number>; export async function value(): Promise<number> { return await work; }",
+					"fail.ts":
+						"export declare const work: PromiseLike<number>; export function value(): void { work; }",
 				},
-				[
-					{ code: "typescript/no-floating-promises", file: "fail.ts", line: 1 },
-					{ code: "eslint/no-unused-expressions", file: "fail.ts", line: 1 },
-				],
-			);
-		},
-	);
+			},
+			[
+				{ code: "typescript/no-floating-promises", file: "fail.ts", line: 1 },
+				{ code: "eslint/no-unused-expressions", file: "fail.ts", line: 1 },
+			],
+		);
+	});
 
-	nodeTest(
-		"normal lint fixes cannot manufacture unknown contracts from explicit any",
-		async () => {
-			const text = "export type Value = any;";
-			const project = fixture({ files: { "fail.ts": text } });
-			try {
-				const result = await runCli(
-					join(repository, "node_modules/.bin/oxlint"),
-					["--fix", "--format=json", "fail.ts"],
-					project.root,
-				);
-				assert.equal(result.signal, null);
-				assert.equal(result.stderr, "");
-				assert.equal(result.status, 1);
-				const output: unknown = JSON.parse(result.stdout);
-				assert.ok(objectValue(output) && Array.isArray(output.diagnostics));
-				const locations = output.diagnostics.map((value: unknown) => {
-					assert.ok(objectValue(value) && Array.isArray(value.labels));
-					const label: unknown = value.labels[0];
-					assert.ok(objectValue(label) && objectValue(label.span));
-					return { code: value.code, file: value.filename, line: label.span.line };
-				});
-				assert.deepEqual(locations, [
-					{ code: "typescript(no-explicit-any)", file: "fail.ts", line: 1 },
-				]);
-				assert.equal(readFileSync(join(project.root, "fail.ts"), "utf8"), text);
-			} finally {
-				project.dispose();
-			}
-		},
-	);
+	await test("normal lint fixes cannot manufacture unknown contracts from explicit any", async () => {
+		const text = "export type Value = any;";
+		const project = fixture({ files: { "fail.ts": text } });
+		try {
+			const result = await runCli(
+				join(repository, "node_modules/.bin/oxlint"),
+				["--fix", "--format=json", "fail.ts"],
+				project.root,
+			);
+			assert.equal(result.signal, null);
+			assert.equal(result.stderr, "");
+			assert.equal(result.status, 1);
+			const output: unknown = JSON.parse(result.stdout);
+			assert.ok(objectValue(output) && Array.isArray(output.diagnostics));
+			const locations = output.diagnostics.map((value: unknown) => {
+				assert.ok(objectValue(value) && Array.isArray(value.labels));
+				const label: unknown = value.labels[0];
+				assert.ok(objectValue(label) && objectValue(label.span));
+				return { code: value.code, file: value.filename, line: label.span.line };
+			});
+			assert.deepEqual(locations, [
+				{ code: "typescript(no-explicit-any)", file: "fail.ts", line: 1 },
+			]);
+			assert.equal(readFileSync(join(project.root, "fail.ts"), "utf8"), text);
+		} finally {
+			project.dispose();
+		}
+	});
 });

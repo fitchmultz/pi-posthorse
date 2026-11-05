@@ -9,12 +9,9 @@ import {
 	type ExtensionRuntime,
 } from "@earendil-works/pi-coding-agent";
 
-export interface FixturePolicy {
-	readonly enabled: boolean;
-	readonly reserveTokens: number;
-}
+import { isRecord, type CompactionPolicy } from "../src/contracts.ts";
 
-export function fixturePolicy(context: ExtensionContext): FixturePolicy {
+export function fixturePolicy(context: ExtensionContext): CompactionPolicy {
 	if (
 		!("getCompactionSettings" in context) ||
 		typeof context.getCompactionSettings !== "function"
@@ -55,10 +52,6 @@ export function requireValue<T>(value: T | null | undefined, label = "fixture va
 		throw new Error(`Missing ${label}`);
 	}
 	return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export function record(value: unknown): Record<string, unknown> {

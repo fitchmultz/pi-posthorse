@@ -330,9 +330,7 @@ export function registerNotes(
 				}),
 			),
 		}),
-		// Pi's fixed tool contract supplies id, params, signal, updates, and context.
-		// oxlint-disable-next-line max-params -- QX-002: Pi supplies five fixed positional tool arguments.
-		async execute(_id, params, signal, _onUpdate, ctx) {
+		async execute(...[_id, params, signal, , ctx]) {
 			// Migrate newly returned legacy package notes without changing this session’s binding.
 			notesDir(ctx.cwd);
 			const session = await store.get(ctx);
