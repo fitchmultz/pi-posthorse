@@ -1056,6 +1056,36 @@ Adoption requires the current candidate's checks and independent reviews,
 including both latest-host lanes, before merge. A local pass is not hosted
 acceptance.
 
+### Maintainer-directed Node registration policy
+
+The maintainer explicitly directs this adoption to use zero lint-rule allowances unless the
+compliant implementation causes a concrete failure or worse outcome. For this repository, that
+direction supersedes Section 6.4's blanket restriction on converting registrations to awaited calls.
+The supplied standard above remains unchanged; this is an explicit adoption decision, not a claim
+that Section 6.4 already permits the conversion. No lint option is relaxed.
+
+Top-level `await test(...)` waits for the test to finish before module evaluation continues.
+Inside a suite, it waits only for registration; Node owns child execution and completion. The
+native-rule suite uses an asynchronous builder with its existing `concurrency` option. Awaiting
+registrations does not make those children sequential. These contracts are documented in the
+installed `@types/node/test.d.ts:95-99,158-167` and confirmed by a Node 24.22.2 ordering probe.
+
+This is an intentional test-registration timing change, not a behavior-neutral text rewrite.
+The comparison used an isolated worktree before removing the allowance. On Node 24.22.1 with
+npm 12.2.0, the original registration version passed 414 tests and the awaited version preserved
+all behavioral assertions. After replacing the obsolete allowance controls, `npm run verify`
+passed all seven gates, including 413 tests and one official-host-only skip, on tree
+`4fe35c01c011638baadfe2a85f8b0a8c147eeb67`. The same tree is commit
+`0aeb891476d23ce86838649f58509b030a157cee`. Both exact latest-host lanes passed in
+[CI run 42034752542](https://github.com/fitchmultz/pi-posthorse/actions/runs/42034752542).
+The fork lane owns the background-codemode case skipped by the official host.
+
+`test/quality-registrations.test.ts` now requires unawaited registrations, context subtests,
+same-named local and foreign calls, and floating work inside tests to fail native semantic lint.
+`scripts/release-quality-controls.sh` verifies that a failed assertion still fails aggregate
+acceptance. The two `allowForKnownSafe*` arrays stay empty. Revisit this decision if module
+initialization, hooks, or suite scheduling acquires a contract that these tests do not cover.
+
 ### QX-011: Published import-cycle detection limits
 
 Protection: `import/no-cycle`, Oxlint 1.91.0. The baseline settings remain

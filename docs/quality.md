@@ -79,8 +79,10 @@ repository-specific rule allowances, inline lint suppressions, violation budgets
 findings. Policy rejects actual lint and formatting suppression comments while leaving literal
 examples alone. Native unused-disable reporting remains active.
 
-Node registrations explicitly await completion. The concurrent native-rule suite awaits registration
-inside its asynchronous suite builder and retains the runner's configured concurrency. The same
+Top-level Node tests await completion. Inside a suite, `await test(...)` waits only for registration;
+Node owns child execution and completion. The asynchronous native-rule suite builder retains the
+runner's configured concurrency. Appendix B records the maintainer-directed departure from §6.4's
+blanket restriction and its full-suite qualification. The same
 floating-Promise rule applies to registrations, context subtests, local and imported calls, and test
 bodies. `test/quality-registrations.test.ts` verifies valid ownership and rejected floating work.
 
