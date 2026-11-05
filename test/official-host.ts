@@ -125,11 +125,6 @@ async function fixture(t: TestContext, options: FixtureOptions = {}) {
 	faux.setResponses = (steps) =>
 		setResponses(
 			steps.map((step): FauxResponseFactory => async (ctx, opts, state, model) => {
-				// Faux computes usage from this same options object after the callback resolves.
-				// Disable its synthetic cache double count without changing the real capacity assertion.
-				assert.ok(opts);
-				// oxlint-disable-next-line no-param-reassign -- QX-003: faux reads this request-owned options object after the hook.
-				opts.cacheRetention = "none";
 				// Constructed fixtures must not look older than a compaction committed during this run.
 				await new Promise((resolve) => {
 					setTimeout(resolve, 2);

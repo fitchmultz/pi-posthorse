@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { exceptionSites } from "./quality-sites.ts";
 
 type Configuration = Readonly<Record<string, unknown>>;
 
@@ -143,7 +142,7 @@ export function settingsProblems(root: string, inventory: readonly string[]): re
 			],
 		}),
 	];
-	for (const id of new Set(["QX-001", "QX-011", ...exceptionSites.map((site) => site.id)])) {
+	for (const id of ["QX-001", "QX-011"]) {
 		if (!standard.includes(`### ${id}:`)) {
 			problems.push(`Missing quality-exception record: ${id}`);
 		}

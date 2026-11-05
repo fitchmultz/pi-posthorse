@@ -42,7 +42,7 @@ nodeTest(
 );
 
 nodeTest(
-	"QX-010 loader accepts the installed graph and rejects a foreign SDK before execution",
+	"the loader accepts the installed graph and rejects a foreign SDK before execution",
 	() => {
 		const root = mkdtempSync(join(tmpdir(), "posthorse-sdk-identity-"));
 		const installed = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));

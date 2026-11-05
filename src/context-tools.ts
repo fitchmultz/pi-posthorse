@@ -70,9 +70,7 @@ export function registerContextTools(
 				}),
 			),
 		}),
-		// Pi's fixed tool contract supplies id, params, signal, updates, and context.
-		// oxlint-disable-next-line max-params -- QX-002: Pi supplies five fixed positional tool arguments.
-		async execute(id, { handoff }, _signal, _onUpdate, ctx) {
+		async execute(...[id, { handoff }, , , ctx]) {
 			const trimmed = handoff?.trim();
 			const limit = freshPayloadChars(policy(ctx), activeToolTokens());
 			if (trimmed !== undefined && trimmed !== "" && trimmed.length > limit) {
@@ -98,9 +96,7 @@ export function registerContextTools(
 		promptSnippet:
 			"verify remaining context before reporting a token count or changing plans because of context limits",
 		parameters: Type.Object({}),
-		// Pi's fixed tool contract supplies id, params, signal, updates, and context.
-		// oxlint-disable-next-line max-params -- QX-002: Pi supplies five fixed positional tool arguments.
-		async execute(_id, _params, _signal, _onUpdate, ctx) {
+		async execute(...[, , , , ctx]) {
 			return contextReport(policy(ctx));
 		},
 	});

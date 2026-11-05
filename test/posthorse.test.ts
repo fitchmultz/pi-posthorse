@@ -130,10 +130,7 @@ async function setup() {
 	const handlers = new Map<string, Handler>();
 	for (const [name, callbacks] of loaded.extension.handlers) {
 		const callback = requireValue(callbacks[0], name);
-		handlers.set(name, (event, context) => {
-			const value: unknown = Reflect.apply(callback, undefined, [event, context]);
-			return value;
-		});
+		handlers.set(name, callback);
 	}
 	const tools = new Map<string, Tool>();
 	for (const [name, registration] of loaded.extension.tools) {

@@ -1,6 +1,6 @@
 # Code quality and acceptance
 
-[Engineering standard 5.1.2](engineering-standard.md) owns the requirements, source profiles,
+[Engineering standard 5.2](engineering-standard.md) owns the requirements, source profiles,
 and evidence-based exception process. Its Appendix B records Posthorse's mappings and decisions.
 
 ## Commands
@@ -61,6 +61,11 @@ Oxfmt retains tabs with width four, double quotes, semicolons, and LF. Markdown 
 spaces. Sorting and JSDoc transformations remain disabled. npm owns the lockfile; illustration
 assets retain their existing byte ownership. The source package has no emitted build step.
 
+`.github/actionlint.yaml` maps the real `ubuntu-26.04` runner label because the latest
+Actionlint 1.7.12 catalog does not recognize it. Actionlint also rejects GitHub's
+`concurrency.queue` field in the existing release workflow. It is not an acceptance gate;
+these are checker limitations, not suppressed Oxlint findings.
+
 ## Editor
 
 `.vscode/extensions.json` recommends `oxc.oxc-vscode`. The workspace settings select its formatter,
@@ -69,23 +74,25 @@ not acceptance evidence; the required npm commands and CI check the committed de
 
 ## Exceptions and detection limits
 
-Appendix B contains the comparisons and remaining protections for each decision. The executable
-site inventory is `scripts/quality-sites.ts`. Native next-line directives identify one rule,
-a QX identifier, and a reason. Authorization checks the real comment, target AST operation,
-enclosing named and anonymous owners, actual SDK declaration where applicable, and duplication.
-Native unused-disable reporting remains required.
+Appendix B records the one configuration allowance, QX-001, and the published import
+checker's detection limits, QX-011. There are no inline lint suppressions, violation
+budgets, or grandfathered findings. Policy rejects actual lint and formatting suppression
+comments while leaving literal examples alone. Native unused-disable reporting remains active.
 
-QX-001 permits only the needed `node:test` registration alias in genuine test scopes. Context
-subtests, local and foreign same-named functions, ordinary async calls, and work inside a test
-remain checked. QX-002 preserves the SDK's fixed five-argument execute methods. QX-003 permits
-only the two request-owned faux option writes. QX-005 preserves one required absent signal slot.
-QX-010 preserves two graph-selected native module bindings under the canonical loader's identity
-checks. Ordinary application mutation, unsafe propagation, and explicit-undefined checks remain.
+QX-001 permits the declaration-qualified `nodeTest` registration alias in test scopes.
+Node owns registration completion. Awaiting every registration would change module and
+hook timing. All six native controls run in `npm test`: registration calls pass, while
+context subtests, same-named local and foreign calls, floating work inside tests, and unrelated
+Promises fail. This is not an allowance for ordinary unowned asynchronous work.
 
-QX-011 records published import-analysis limits: the qualified native importer detects the
-retained static and type-only cycle controls, but not cycles through external packages or the
-awaited-dynamic-cycle control. External and dynamic module boundaries still need review. These
-limitations are not a claim that such cycles are safe or completely checked.
+SDK tool callbacks destructure their contextual argument tuple and retain the native positional
+contract. History fixtures pass the Node test runner's cancellation signal. Both host suites
+use the same installed SDK and companion graph as the compiler; the qualification workflow
+selects each host in isolation. Faux computes its own usage without fixture option mutation.
+
+QX-011 records published import-analysis limits. The qualified native importer detects static
+and type-only cycles, but not cycles through external packages or awaited dynamic imports.
+All baseline import rules and options remain enabled. These limits grant no source exemption.
 
 ## Verification evidence
 

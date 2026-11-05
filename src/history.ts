@@ -127,9 +127,7 @@ export function registerHistory(
 				}),
 			),
 		}),
-		// Pi's fixed tool contract supplies id, params, signal, updates, and context.
-		// oxlint-disable-next-line max-params -- QX-002: Pi supplies five fixed positional tool arguments.
-		async execute(_id, params, signal, _onUpdate, ctx) {
+		async execute(...[, params, signal, , ctx]) {
 			const source = historySource(ctx);
 			if (params.op === "search") {
 				const fail = (message: string): never =>

@@ -1,3 +1,4 @@
+import { sdkEntry } from "./pi-loader.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -15,13 +16,12 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { findPackageJSON } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { test as nodeTest, type TestContext } from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import type * as NativeSdk from "@earendil-works/pi-coding-agent";
-import type * as NativeAi from "@earendil-works/pi-ai";
+import { fileURLToPath } from "node:url";
+import * as NativeSdk from "@earendil-works/pi-coding-agent";
+import * as NativeAi from "@earendil-works/pi-ai";
 import { record, requireValue, stringValue } from "./harness.ts";
 import { isRecord } from "../src/contracts.ts";
 import { textOf, messageEntry, posthorseBoundaries } from "./host-helpers.ts";
@@ -30,12 +30,7 @@ type TranscriptMessages = NativeAi.TranscriptContext["messages"];
 import type { HistoryParams } from "../src/history-search.ts";
 import type { NotesParams } from "../src/notes.ts";
 import { retainFile, retainSession } from "./fixture-files.ts";
-const alternateHost = process.env.PI_HOST_INDEX;
-const hostIndex =
-	alternateHost !== undefined && alternateHost !== ""
-		? pathToFileURL(alternateHost).href
-		: import.meta.resolve("@earendil-works/pi-coding-agent");
-// oxlint-disable-next-line typescript/no-unsafe-assignment -- QX-010: pi-loader verifies the runtime SDK against the compiler's installed graph.
+
 const {
 	AgentSessionRuntime,
 	createAgentSession,
@@ -50,13 +45,8 @@ const {
 	SessionManager,
 	SettingsManager,
 	wrapRegisteredTools,
-}: typeof NativeSdk = await import(hostIndex);
+} = NativeSdk;
 
-// Resolve the faux provider from the selected host's graph as well.
-const aiManifest = pathToFileURL(requireValue(findPackageJSON("@earendil-works/pi-ai", hostIndex)));
-const aiPackage = record(JSON.parse(readFileSync(aiManifest, "utf8")));
-const aiExport = record(record(aiPackage.exports)["."]);
-// oxlint-disable-next-line typescript/no-unsafe-assignment -- QX-010: the selected SDK owns this provider package and its public exports.
 const {
 	fauxProvider,
 	fauxAssistantMessage,
@@ -64,7 +54,7 @@ const {
 	getCurrentSystemPrompt,
 	getCurrentTools,
 	InMemoryCredentialStore,
-}: typeof NativeAi = await import(new URL(stringValue(aiExport.import), aiManifest).href);
+} = NativeAi;
 const { createPosthorse } = await import("../index.ts");
 const nextCursor = (text: string) =>
 	text.match(
@@ -100,17 +90,6 @@ async function fixture(t: TestContext, options: FixtureOptions = {}) {
 			},
 		],
 	});
-	const setResponses = faux.setResponses;
-	faux.setResponses = (steps) =>
-		setResponses(
-			steps.map((step): NativeAi.FauxResponseFactory => (ctx, opts, state, model) => {
-				// Avoid faux's synthetic first-prompt input/cache-write double count in capacity checks.
-				assert.ok(opts);
-				// oxlint-disable-next-line no-param-reassign -- QX-003: faux reads this request-owned options object after the hook.
-				opts.cacheRetention = "none";
-				return typeof step === "function" ? step(ctx, opts, state, model) : step;
-			}),
-		);
 	const modelRuntime = await ModelRuntime.create({
 		credentials: new InMemoryCredentialStore(),
 		modelsPath: null,
@@ -821,7 +800,7 @@ nodeTest(
 );
 
 async function loadedHistory(t: TestContext) {
-	t.diagnostic(`native history SDK: ${hostIndex}`);
+	t.diagnostic(`native history SDK: ${sdkEntry}`);
 	const cwd = mkdtempSync(join(tmpdir(), "posthorse-history-"));
 	const evidence = process.env.PI_COMPAT_EVIDENCE_DIR;
 	const managers =
@@ -881,8 +860,7 @@ async function loadedHistory(t: TestContext) {
 			managers?.set(sessionManager.getSessionFile() ?? sessionManager, sessionManager);
 			// Isolate extension extraction from the host's separate usage-estimation cost.
 			const runner = new ExtensionRunner(extensions, runtime, cwd, sessionManager, models);
-			// oxlint-disable-next-line unicorn/no-useless-undefined -- QX-005: the SDK requires its signal slot; this direct history fixture has no abort signal.
-			const ctx = runner.createToolContext("history-regression", undefined);
+			const ctx = runner.createToolContext("history-regression", t.signal);
 			t.mock.getter(ctx, "model", () => model);
 			t.mock.method(ctx, "getContextUsage", () => ({
 				tokens: 1_000,
@@ -895,7 +873,7 @@ async function loadedHistory(t: TestContext) {
 				handler({ type: "turn_start", turnIndex: 0, timestamp: 1 }, ctx),
 			);
 			const [result] = await Promise.all([
-				history.execute("history-regression", params, undefined, undefined, ctx),
+				history.execute("history-regression", params, t.signal, undefined, ctx),
 				...handlers,
 			]);
 			return fixtureResult(result);
@@ -1096,12 +1074,12 @@ nodeTest(
 		});
 		let serialized = 0;
 		const stringify = JSON.stringify;
-		t.mock.method(JSON, "stringify", (value: unknown, replacer: unknown, space: unknown) => {
+		t.mock.method(JSON, "stringify", (...args: Parameters<typeof stringify>) => {
+			const value: unknown = args[0];
 			if (isRecord(value) && value.historyProjectionProbe === true) {
 				serialized++;
 			}
-			const result: unknown = Reflect.apply(stringify, JSON, [value, replacer, space]);
-			return result;
+			return stringify(...args);
 		});
 		const first = await h.call(manager, { op: "search", query: "PROJECTION_NEEDLE", limit: 2 });
 		assert.deepEqual(
@@ -1162,12 +1140,12 @@ for (const all of [false, true]) {
 		}
 		let serialized = 0;
 		const stringify = JSON.stringify;
-		t.mock.method(JSON, "stringify", (value: unknown, replacer: unknown, space: unknown) => {
+		t.mock.method(JSON, "stringify", (...args: Parameters<typeof stringify>) => {
+			const value: unknown = args[0];
 			if (value === lastArguments) {
 				serialized++;
 			}
-			const result: unknown = Reflect.apply(stringify, JSON, [value, replacer, space]);
-			return result;
+			return stringify(...args);
 		});
 		const result = await h.call(manager, { op: "search", query: "MATCH_EDIT_ARGUMENT", all });
 		assert.match(textOf(result), /No history matches/);
@@ -1374,12 +1352,12 @@ nodeTest(
 		const serialization = t.mock.method(
 			JSON,
 			"stringify",
-			(value: unknown, replacer: unknown, space: unknown) => {
+			(...args: Parameters<typeof stringify>) => {
+				const value: unknown = args[0];
 				if (isRecord(value) && value.archivePayload === "unselected") {
 					unselectedArguments++;
 				}
-				const result: unknown = Reflect.apply(stringify, JSON, [value, replacer, space]);
-				return result;
+				return stringify(...args);
 			},
 		);
 		const read = await h.call(persisted, { op: "read", id: abandoned });

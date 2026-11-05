@@ -1,6 +1,8 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PosthorseDisplay } from "../ui.ts";
 
+export { isRecord } from "./records.ts";
+
 export type CompactionPolicy = {
 	readonly enabled: boolean;
 	readonly reserveTokens: number;
@@ -108,9 +110,6 @@ export const REMINDER_TYPE = "posthorse-reminder";
 export const AUTO_HANDOFF_PREFIX = "Automatic context rollover recovery record.";
 export const EMPTY_HANDOFF = "Fresh context. Restore relevant notes and history before continuing.";
 
-export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 export function unknownArray(value: unknown): readonly unknown[] | undefined {
 	return Array.isArray(value) ? value : undefined;
 }
