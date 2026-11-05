@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+## 0.10.10 - 2026-11-05
+
+<!-- npm-release:unreleased:start -->
+
 - Adopt engineering standard 5.2 with current published Oxlint and Oxfmt tools. Remove inline lint suppressions and their site allowlist, reject hidden formatting suppressions, and keep full compiler and host qualification coverage.
+
+<!-- npm-release:unreleased:end -->
+
+- Adopt engineering standard 5.2 with zero lint exceptions (#130) ([2437544](https://github.com/fitchmultz/pi-posthorse/commit/24375447ddb2e3d21fd6e2ca928a1e5c0c63a5ff))
+
+### What's Changed
+
+- Adopt engineering standard 5.2 with zero lint exceptions by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/130
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.9...v0.10.10
 
 ## 0.10.9 - 2026-11-03
 
