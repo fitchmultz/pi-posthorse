@@ -50,23 +50,20 @@ function standardBlock(standard: string, heading: string): Configuration {
 	return value;
 }
 
-/** Appendix A owns the baseline; these are the enumerated repository mappings and QX-001. */
+/** Appendix A owns the rules; only the Node plugin and test-support paths are mapped. */
 function mappedLint(baseline: Configuration): Configuration {
 	if (!objectValue(baseline.rules) || !Array.isArray(baseline.overrides)) {
 		throw new Error("Appendix A needs rules and source profiles");
 	}
-	const floating = baseline.rules["typescript/no-floating-promises"];
 	const profiles: readonly unknown[] = baseline.overrides;
 	const [tests, ...otherProfiles] = profiles;
 	if (
-		!Array.isArray(floating) ||
-		!objectValue(floating[1]) ||
 		!objectValue(tests) ||
 		!Array.isArray(tests.files) ||
 		!objectValue(tests.rules) ||
 		!Array.isArray(baseline.plugins)
 	) {
-		throw new Error("Appendix A needs the Node ownership options and test profile");
+		throw new Error("Appendix A needs plugins and the test profile");
 	}
 	const plugins: readonly unknown[] = baseline.plugins;
 	const testFiles: readonly unknown[] = tests.files;
@@ -77,18 +74,6 @@ function mappedLint(baseline: Configuration): Configuration {
 			{
 				...tests,
 				files: [...testFiles, "test/*.ts"],
-				rules: {
-					...tests.rules,
-					"typescript/no-floating-promises": [
-						"error",
-						{
-							...floating[1],
-							allowForKnownSafeCalls: [
-								{ from: "package", package: "node:test", name: ["nodeTest"] },
-							],
-						},
-					],
-				},
 			},
 			...otherProfiles,
 		],
@@ -142,7 +127,7 @@ export function settingsProblems(root: string, inventory: readonly string[]): re
 			],
 		}),
 	];
-	for (const id of ["QX-001", "QX-011"]) {
+	for (const id of ["QX-011"]) {
 		if (!standard.includes(`### ${id}:`)) {
 			problems.push(`Missing quality-exception record: ${id}`);
 		}

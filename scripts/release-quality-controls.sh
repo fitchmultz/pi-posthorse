@@ -134,7 +134,7 @@ expect_verify_rejection format format:check 'src/budget.ts' \
   'Format issues found in above 1 files.'
 
 restore_controls
-printf '\n%s\n' $'nodeTest("release quality control: failed assertion", () => {\n\tassert.equal(1, 2);\n});' >> test/posthorse.test.ts
+printf '\n%s\n' $'await test("release quality control: failed assertion", () => {\n\tassert.equal(1, 2);\n});' >> test/posthorse.test.ts
 assertion_line=$(( $(wc -l < test/posthorse.test.ts) - 1 ))
 expect_verify_rejection assertion test 'release quality control: failed assertion' \
   'ERR_ASSERTION' "test/posthorse.test.ts:$assertion_line:"

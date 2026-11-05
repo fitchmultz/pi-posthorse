@@ -329,23 +329,7 @@
 				],
 				"max-statements": "off",
 				"max-lines-per-function": "off",
-				"max-lines": "off",
-				"typescript/no-floating-promises": [
-					"error",
-					{
-						"checkThenables": true,
-						"ignoreIIFE": false,
-						"ignoreVoid": false,
-						"allowForKnownSafeCalls": [
-							{
-								"from": "package",
-								"package": "node:test",
-								"name": ["nodeTest"]
-							}
-						],
-						"allowForKnownSafePromises": []
-					}
-				]
+				"max-lines": "off"
 			}
 		},
 		{

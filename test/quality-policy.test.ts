@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test as nodeTest } from "node:test";
+import { test } from "node:test";
 import { checkPolicy } from "../scripts/quality-policy.ts";
 import { inspectSuppressions } from "../scripts/quality-directives.ts";
 import { sourcePolicies } from "../scripts/quality-source.ts";
 import { expectFindings, fixture, repository, runCli } from "./quality-support.ts";
 
-nodeTest("suppression policy reads actual comments, not strings, regexes or documentation", () => {
+await test("suppression policy reads actual comments, not strings, regexes or documentation", () => {
 	const project = fixture({
 		files: {
 			"examples.ts": [
@@ -35,7 +35,7 @@ nodeTest("suppression policy reads actual comments, not strings, regexes or docu
 	}
 });
 
-nodeTest("suppression governance sees empty containers and punctuation gaps", async (t) => {
+await test("suppression governance sees empty containers and punctuation gaps", async (t) => {
 	for (const container of [
 		"export const empty = { /* oxlint-disable eqeqeq */ };",
 		"export const empty = [ /* oxlint-disable eqeqeq */ ];",
@@ -62,7 +62,7 @@ nodeTest("suppression governance sees empty containers and punctuation gaps", as
 	}
 });
 
-nodeTest("JSX text is not a directive, but JSX expression comments are", () => {
+await test("JSX text is not a directive, but JSX expression comments are", () => {
 	const project = fixture({
 		files: {
 			"example.tsx": [
@@ -85,7 +85,7 @@ nodeTest("JSX text is not a directive, but JSX expression comments are", () => {
 	}
 });
 
-nodeTest("used formatter suppressions cannot hide maintained source from acceptance", async (t) => {
+await test("used formatter suppressions cannot hide maintained source from acceptance", async (t) => {
 	for (const directive of ["oxfmt-ignore", "prettier-ignore"]) {
 		await t.test(directive, async () => {
 			const project = fixture({
@@ -134,7 +134,7 @@ nodeTest("used formatter suppressions cannot hide maintained source from accepta
 	}
 });
 
-nodeTest("used next-line directives cannot borrow an old exception in any file", async () => {
+await test("used next-line directives cannot borrow an old exception in any file", async () => {
 	const files = {
 		"original.ts": [
 			"export function original(value: number): boolean {",
@@ -166,7 +166,7 @@ nodeTest("used next-line directives cannot borrow an old exception in any file",
 	}
 });
 
-nodeTest("only described dedicated negative type tests may use expect-error", () => {
+await test("only described dedicated negative type tests may use expect-error", () => {
 	const files = {
 		"production.ts":
 			"// @ts-expect-error: A string violates this numeric contract.\nexport const value: number = 'wrong';\n",
@@ -190,6 +190,6 @@ nodeTest("only described dedicated negative type tests may use expect-error", ()
 	}
 });
 
-nodeTest("the real repository has complete source, project, profile and exception coverage", () => {
+await test("the real repository has complete source, project, profile and exception coverage", () => {
 	assert.deepEqual(checkPolicy(repository), []);
 });

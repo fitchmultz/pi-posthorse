@@ -1020,7 +1020,7 @@ Oxfmt 0.76.0, oxc-parser 0.157.0, and TypeScript 7.0.2. `package-lock.json`
 records their full installation. There is no custom semantic engine.
 
 `.oxlintrc.json` implements Appendix A with the Node plugin and the test-only
-`test/*.ts` support mapping. The Node registration adjustment is QX-001.
+`test/*.ts` support mapping. There are no repository-specific rule allowances.
 All other implementation code retains the production profile. Inline lint suppressions
 are prohibited; no site inventory, finding baseline, or diagnostic filtering is used.
 Source inventory includes
@@ -1055,35 +1055,6 @@ their candidate-source check, and the release-control `source.txt` receipt.
 Adoption requires the current candidate's checks and independent reviews,
 including both latest-host lanes, before merge. A local pass is not hosted
 acceptance.
-
-### QX-001: Declaration-qualified Node registrations
-
-Rule: `typescript/no-floating-promises`, Oxlint 1.91.0 with tsgolint 7.0.2005.
-Scope: genuine test registrations through
-`import { test as nodeTest } from "node:test"` in the defined test profile.
-The only safe-call entry is package `node:test`, name `nodeTest`.
-All other floating-Promise options, including `ignoreVoid: false`, stay at baseline.
-
-The finding is an unowned registration Promise. The installed
-`@types/node/test.d.ts:95-99` documents that Node owns top-level registration completion;
-awaiting each existing registration changes module evaluation and hook timing.
-Replacing every registration with `await nodeTest(...)` is therefore not a
-behavior-neutral alternative. The alias keeps the registration declaration
-distinct from `TestContext.test` without changing execution.
-
-`test/quality-allowances.test.ts` exercises top-level and suite-body registrations,
-an unawaited context subtest, local and foreign same-named functions, floating
-work in a body, and an unrelated async call. It requires the intended native
-diagnostic in every rejected case, and rejects a wrong-package qualifier.
-Run `npm run quality:probes`; the same controls are required by `npm test` and `npm run verify`.
-
-Eligibility ground: changing registration timing breaks the Node runner's lifecycle contract.
-There are no inline directives or safe Promise-type allowances.
-
-Detection lost: calling the imported registration inside a running test can
-create a subtest while matching its declaration. Running-test code uses context
-methods and owns their Promises. Revisit when Node declarations, aliases, or
-the native matcher change. This decision and its controls receive the adoption PR review.
 
 ### QX-011: Published import-cycle detection limits
 

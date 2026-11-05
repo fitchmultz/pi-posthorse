@@ -74,16 +74,15 @@ not acceptance evidence; the required npm commands and CI check the committed de
 
 ## Exceptions and detection limits
 
-Appendix B records the one configuration allowance, QX-001, and the published import
-checker's detection limits, QX-011. There are no inline lint suppressions, violation
-budgets, or grandfathered findings. Policy rejects actual lint and formatting suppression
-comments while leaving literal examples alone. Native unused-disable reporting remains active.
+Appendix B records the published import checker's detection limits, QX-011. There are no
+repository-specific rule allowances, inline lint suppressions, violation budgets, or grandfathered
+findings. Policy rejects actual lint and formatting suppression comments while leaving literal
+examples alone. Native unused-disable reporting remains active.
 
-QX-001 permits the declaration-qualified `nodeTest` registration alias in test scopes.
-Node owns registration completion. Awaiting every registration would change module and
-hook timing. All six native controls run in `npm test`: registration calls pass, while
-context subtests, same-named local and foreign calls, floating work inside tests, and unrelated
-Promises fail. This is not an allowance for ordinary unowned asynchronous work.
+Node registrations explicitly await completion. The concurrent native-rule suite awaits registration
+inside its asynchronous suite builder and retains the runner's configured concurrency. The same
+floating-Promise rule applies to registrations, context subtests, local and imported calls, and test
+bodies. `test/quality-registrations.test.ts` verifies valid ownership and rejected floating work.
 
 SDK tool callbacks destructure their contextual argument tuple and retain the native positional
 contract. History fixtures pass the Node test runner's cancellation signal. Both host suites

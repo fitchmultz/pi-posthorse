@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { test as nodeTest } from "node:test";
+import { test } from "node:test";
 import { sourcePolicies } from "../scripts/quality-source.ts";
 import { expectFindings, fixture, repository, runCli } from "./quality-support.ts";
 
-nodeTest("all maintained JavaScript receives syntactic and semantic Promise checks", async () => {
+await test("all maintained JavaScript receives syntactic and semantic Promise checks", async () => {
 	await expectFindings(
 		{
 			files: {
@@ -19,7 +19,7 @@ nodeTest("all maintained JavaScript receives syntactic and semantic Promise chec
 	);
 });
 
-nodeTest("semantic analysis covers TS, inherited checkJs and explicit ts-check", async () => {
+await test("semantic analysis covers TS, inherited checkJs and explicit ts-check", async () => {
 	await expectFindings(
 		{
 			files: {
@@ -44,7 +44,7 @@ nodeTest("semantic analysis covers TS, inherited checkJs and explicit ts-check",
 	);
 });
 
-nodeTest("canonical compiler errors remain a separate gate from semantic lint", async (t) => {
+await test("canonical compiler errors remain a separate gate from semantic lint", async (t) => {
 	for (const [literal, status] of [
 		["1", 0],
 		["'wrong'", 1],
@@ -80,7 +80,7 @@ nodeTest("canonical compiler errors remain a separate gate from semantic lint", 
 	}
 });
 
-nodeTest("canonical compiler checks JavaScript alongside TypeScript", async () => {
+await test("canonical compiler checks JavaScript alongside TypeScript", async () => {
 	const files = {
 		"checked.ts": "export const value = (1).missing;\n",
 		"javascript.js": "export const value = (1).missing;\n",
@@ -108,61 +108,58 @@ nodeTest("canonical compiler checks JavaScript alongside TypeScript", async () =
 	}
 });
 
-nodeTest(
-	"handwritten declarations receive real compiler checking and reject unused expected errors",
-	async (t) => {
-		const cases = [
-			{
-				file: "boundary.d.ts",
-				text: "export declare const value: number;\n",
-				status: 0,
-				code: undefined,
-			},
-			{
-				file: "boundary.d.ts",
-				text: "export declare const value: MissingType;\n",
-				status: 2,
-				code: "TS2304",
-			},
-			{
-				file: "contract.test-d.ts",
-				text: "// @ts-expect-error: A string cannot satisfy this numeric contract.\nexport const value: number = 'wrong';\n",
-				status: 0,
-				code: undefined,
-			},
-			{
-				file: "contract.test-d.ts",
-				text: "// @ts-expect-error: A string cannot satisfy this numeric contract.\nexport const value: number = 1;\n",
-				status: 1,
-				code: "TS2578",
-			},
-		] as const;
-		for (const example of cases) {
-			await t.test(example.text, async () => {
-				const project = fixture({
-					files: { [example.file]: example.text },
-					compiler: { skipLibCheck: false },
-				});
-				try {
-					const result = await runCli(
-						join(repository, "node_modules/.bin/tsc"),
-						["--noEmit"],
-						project.root,
-					);
-					assert.equal(result.signal, null);
-					assert.equal(result.status, example.status, result.stdout);
-					assert.equal(result.stderr, "");
-					if (example.code === undefined) {
-						assert.equal(result.stdout, "");
-					} else {
-						assert.ok(result.stdout.includes(`${example.file}(1,`), result.stdout);
-						assert.ok(result.stdout.includes(`error ${example.code}:`), result.stdout);
-						assert.equal(result.stdout.match(/error TS\d+:/gu)?.length, 1);
-					}
-				} finally {
-					project.dispose();
-				}
+await test("handwritten declarations receive real compiler checking and reject unused expected errors", async (t) => {
+	const cases = [
+		{
+			file: "boundary.d.ts",
+			text: "export declare const value: number;\n",
+			status: 0,
+			code: undefined,
+		},
+		{
+			file: "boundary.d.ts",
+			text: "export declare const value: MissingType;\n",
+			status: 2,
+			code: "TS2304",
+		},
+		{
+			file: "contract.test-d.ts",
+			text: "// @ts-expect-error: A string cannot satisfy this numeric contract.\nexport const value: number = 'wrong';\n",
+			status: 0,
+			code: undefined,
+		},
+		{
+			file: "contract.test-d.ts",
+			text: "// @ts-expect-error: A string cannot satisfy this numeric contract.\nexport const value: number = 1;\n",
+			status: 1,
+			code: "TS2578",
+		},
+	] as const;
+	for (const example of cases) {
+		await t.test(example.text, async () => {
+			const project = fixture({
+				files: { [example.file]: example.text },
+				compiler: { skipLibCheck: false },
 			});
-		}
-	},
-);
+			try {
+				const result = await runCli(
+					join(repository, "node_modules/.bin/tsc"),
+					["--noEmit"],
+					project.root,
+				);
+				assert.equal(result.signal, null);
+				assert.equal(result.status, example.status, result.stdout);
+				assert.equal(result.stderr, "");
+				if (example.code === undefined) {
+					assert.equal(result.stdout, "");
+				} else {
+					assert.ok(result.stdout.includes(`${example.file}(1,`), result.stdout);
+					assert.ok(result.stdout.includes(`error ${example.code}:`), result.stdout);
+					assert.equal(result.stdout.match(/error TS\d+:/gu)?.length, 1);
+				}
+			} finally {
+				project.dispose();
+			}
+		});
+	}
+});
