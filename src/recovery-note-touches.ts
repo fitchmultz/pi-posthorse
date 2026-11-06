@@ -14,19 +14,20 @@ export type ScannedNoteEntry = {
 	readonly entryId: string;
 	readonly inRetained: boolean;
 };
-type NoteOpKind = "full-write" | "partial-write" | "read" | "clear" | "observed-write";
+type ContentTouchKind = "full-write" | "partial-write" | "read" | "clear";
 export type NoteTarget = {
 	readonly notePath: string;
 	readonly absPath?: string | undefined;
 	readonly referenceScope?: string | undefined;
 };
 export type NoteTouch = NoteTarget & {
-	readonly kind: NoteOpKind;
 	readonly entryId: string;
-	readonly inRetained: boolean;
 	readonly receiptId?: string | undefined;
 	readonly owner?: NoteOwner | undefined;
-};
+} & (
+		| { readonly kind: ContentTouchKind; readonly inRetained: boolean }
+		| { readonly kind: "observed-write"; readonly inRetained: false }
+	);
 type ToolResultInfo = {
 	readonly entryId: string;
 	readonly sourceId: string;
@@ -104,8 +105,8 @@ function resolveNoteTarget(
 
 function extractNotesResultTarget(
 	text: string,
-): { readonly kind: NoteOpKind; readonly rawPath: string } | undefined {
-	const patterns: readonly (readonly [RegExp, NoteOpKind])[] = [
+): { readonly kind: ContentTouchKind; readonly rawPath: string } | undefined {
+	const patterns: readonly (readonly [RegExp, ContentTouchKind])[] = [
 		[/^Wrote ([^\r\n]+)$/mu, "full-write"],
 		[/^Appended to ([^\r\n]+)$/mu, "partial-write"],
 		[/^File: ([^\r\n]+)$/mu, "read"],
@@ -223,7 +224,7 @@ function fileToolTouches(
 	});
 }
 
-function notesCallKind(args: Readonly<Record<string, unknown>>): NoteOpKind | undefined {
+function notesCallKind(args: Readonly<Record<string, unknown>>): ContentTouchKind | undefined {
 	if (args.op === "write") {
 		return args.content === "" ? "clear" : "full-write";
 	}
@@ -304,13 +305,13 @@ function touchesFromNested(message: MessageLike, context: TouchContext): NoteTou
 			name === "notes"
 				? notesToolTouches(args, optionalString(raw.result), context)
 				: fileToolTouches(name, args, { details: raw.result, isError: false }, context);
-		return touches.map((touch) =>
+		return touches.map((touch): NoteTouch =>
 			Object.assign({}, touch, {
 				kind:
 					touch.kind === "read" || touch.kind === "clear" ? touch.kind : "observed-write",
 				inRetained: false,
 				receiptId: context.sourceId,
-			}),
+			} satisfies Pick<NoteTouch, "kind" | "inRetained" | "receiptId">),
 		);
 	});
 }
