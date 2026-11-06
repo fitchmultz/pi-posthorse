@@ -36,34 +36,31 @@ export type PageAccess = {
 	readonly error: (ctx: PolicyContext, message: string, cursor?: string) => never;
 	readonly notes: (ctx: PolicyContext, page: NotesPage) => TextResult;
 };
+type PageAccounting = {
+	readonly pendingTokens: number;
+	readonly usage: number | null | undefined;
+};
+function reconcile(accounting: PageAccounting, usage: PageAccounting["usage"]): PageAccounting {
+	// Native usage may already include serial results, but not parallel siblings.
+	const counted =
+		typeof usage === "number" && typeof accounting.usage === "number"
+			? Math.max(0, usage - accounting.usage)
+			: 0;
+	return { pendingTokens: Math.max(0, accounting.pendingTokens - counted), usage };
+}
 /** Shared by note and history tools. Reservations precede delivery and reset at a turn boundary. */
 export class PageReservations {
-	private pendingTokens = 0;
-	private previousUsage: number | null | undefined;
+	private accounting: PageAccounting = { pendingTokens: 0, usage: undefined };
 	private readonly toolTokens: () => number;
 	constructor(toolTokens: () => number) {
 		this.toolTokens = toolTokens;
 	}
 	reset(): void {
-		this.pendingTokens = 0;
-		this.previousUsage = undefined;
+		this.accounting = { pendingTokens: 0, usage: undefined };
 	}
 	size(ctx: PolicyContext, request: PageRequest): number {
-		const usage = ctx.getContextUsage()?.tokens;
-		// Native usage may already include serial results, but not parallel siblings.
-		if (
-			usage !== undefined &&
-			usage !== null &&
-			this.previousUsage !== undefined &&
-			this.previousUsage !== null
-		) {
-			this.pendingTokens = Math.max(
-				0,
-				this.pendingTokens - Math.max(0, usage - this.previousUsage),
-			);
-		}
-		this.previousUsage = usage;
-		const remaining = pageCapacity(ctx, this.toolTokens) - this.pendingTokens;
+		this.accounting = reconcile(this.accounting, ctx.getContextUsage()?.tokens);
+		const remaining = pageCapacity(ctx, this.toolTokens) - this.accounting.pendingTokens;
 		const chars = Math.min(
 			MAX_PAGE_CHARS,
 			Math.max(0, remaining - PAGE_MARGIN_TOKENS) * 4 -
@@ -74,6 +71,15 @@ export class PageReservations {
 		}
 		return chars;
 	}
+	private reserve(text: string, imageCount = 0): void {
+		this.accounting = {
+			...this.accounting,
+			pendingTokens:
+				this.accounting.pendingTokens +
+				Math.ceil(text.length / 4) +
+				imageCount * (ESTIMATED_IMAGE_CHARS / 4),
+		};
+	}
 	private refuse(remaining: number, request: PageRequest): never {
 		const position =
 			request.cursor !== undefined && request.cursor !== ""
@@ -82,17 +88,16 @@ export class PageReservations {
 		const message = `Too little context remains to read a page safely. Call new_context first, then retry ${position}.`;
 		// Even refusals consume context; omit repeated guidance when it no longer fits.
 		const text = Math.ceil(message.length / 4) <= remaining ? message : "";
-		this.pendingTokens += Math.ceil(text.length / 4);
+		this.reserve(text);
 		throw new Error(text);
 	}
 	result(text: string, images: readonly ImageLike[], display: PosthorseDisplay): TextResult {
-		this.pendingTokens +=
-			Math.ceil(text.length / 4) + images.length * (ESTIMATED_IMAGE_CHARS / 4);
+		this.reserve(text, images.length);
 		return textResult(text, images, display);
 	}
 	error(ctx: PolicyContext, message: string, cursor?: string): never {
 		this.size(ctx, { offset: 0, cursor });
-		this.pendingTokens += Math.ceil(message.length / 4);
+		this.reserve(message);
 		throw new Error(message);
 	}
 	notes(ctx: PolicyContext, page: NotesPage): TextResult {
