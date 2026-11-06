@@ -20,6 +20,7 @@ import { registerGuidance } from "./guidance.ts";
 import { safeJsonStringify } from "./message-text.ts";
 import { hasRetainedRolloverMarker } from "./recovery.ts";
 import { automaticRecovery } from "./retention.ts";
+import { ResetRequests } from "./reset-requests.ts";
 import type { NotesRecovery } from "./note-evidence.ts";
 type RolloverResources = {
 	readonly resetPages: () => void;
@@ -426,7 +427,7 @@ export function registerRollover(
 	activeToolTokens: () => number,
 	resources: RolloverResources,
 ): void {
-	const resetRequests = new Map<string, string>();
+	const resetRequests = new ResetRequests(pi);
 	const reminders = createReminderLookup();
 	const resetTurn = () => {
 		resetRequests.clear();
@@ -444,12 +445,7 @@ export function registerRollover(
 	registerReminderFilter(pi, policy, reminders);
 	registerAutomaticRollover(pi, policy, activeToolTokens, resources.notes);
 	pi.on("turn_end", (event, ctx) => {
-		const requested = event.toolResults.find(
-			(result) => result.toolName === "new_context" && resetRequests.has(result.toolCallId),
-		);
-		const summary =
-			requested === undefined ? undefined : resetRequests.get(requested.toolCallId);
-		resetRequests.clear();
+		const summary = resetRequests.take(event.toolResults);
 		const host = policy(ctx);
 		if (
 			event.message.role === "assistant" &&
@@ -457,7 +453,7 @@ export function registerRollover(
 		) {
 			return;
 		}
-		if (summary !== undefined && !event.toolResults.some((result) => result.isError)) {
+		if (summary !== undefined) {
 			return explicitReset(event, ctx, summary, () =>
 				freshPayloadChars(host, activeToolTokens(), event.context.pendingMessages),
 			);
@@ -485,6 +481,6 @@ export function registerRollover(
 		return;
 	});
 	registerContextTools(pi, policy, activeToolTokens, (id, handoff) => {
-		resetRequests.set(id, handoff);
+		resetRequests.request(id, handoff);
 	});
 }

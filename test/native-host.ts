@@ -760,6 +760,60 @@ await test("fork notes associate late cancelled background effects with their la
 	);
 });
 
+await test("background composition cannot arm a later foreground reset or block an independent request", async (t) => {
+	const started = Promise.withResolvers<null>();
+	const released = Promise.withResolvers<null>();
+	const requested = Promise.withResolvers<boolean>();
+	t.after(() => released.resolve(null));
+	const h = await fixture(t, {
+		enabled: false,
+		async extension(pi) {
+			await createCodemodeExtension()(pi);
+			pi.registerTool({
+				name: "hold",
+				label: "Hold",
+				description: "Wait for the foreground reset in this lifecycle test.",
+				parameters: { type: "object", properties: {} },
+				async execute() {
+					started.resolve(null);
+					await released.promise;
+					return { content: [{ type: "text", text: "Released." }], details: {} };
+				},
+			});
+		},
+		afterExtension(pi) {
+			pi.on("tool_execution_end", (event) => {
+				if (event.toolName === "new_context" && event.parentToolCallId !== undefined) {
+					requested.resolve(event.isError);
+				}
+			});
+		},
+	});
+	h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "codemode"]);
+	const codemode = requireValue(h.session.getAllTools().find((tool) => tool.name === "codemode"));
+	if (!codemode.description.includes('"background": true')) {
+		assert.notEqual(process.env.PI_COMPAT_HOST, "fork");
+		t.skip("The fork qualification owns background codemode.");
+		return;
+	}
+	const launch = await nativeCall(
+		h,
+		fauxToolCall("codemode", {
+			code: '// @options: {"background": true}\nawait tools.hold({}); await tools.new_context({handoff:"BACKGROUND_MUST_NOT_RESET"});',
+		}),
+	);
+	assert.equal(launch.isError, false);
+	await started.promise;
+	const direct = await nativeCall(h, fauxToolCall("new_context", { handoff: "FOREGROUND" }));
+	assert.equal(direct.isError, false);
+	assert.equal(posthorseBoundaries(h.sessionManager).length, 1);
+	assert.equal(requireValue(posthorseBoundaries(h.sessionManager)[0]).summary, "FOREGROUND");
+	released.resolve(null);
+	assert.equal(await requested.promise, true);
+	await h.session.waitForIdle();
+	assert.equal(posthorseBoundaries(h.sessionManager).length, 1);
+});
+
 async function loadedHistory(t: TestContext) {
 	t.diagnostic(`native history SDK: ${sdkEntry}`);
 	const cwd = mkdtempSync(join(tmpdir(), "posthorse-history-"));

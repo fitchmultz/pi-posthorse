@@ -140,10 +140,24 @@ async function setup() {
 					Check(registration.definition.parameters, params),
 					"Unit tool arguments must satisfy the registered schema",
 				);
+				handlers.get("tool_execution_start")?.(
+					{ type: "tool_execution_start", toolCallId: id, toolName: name, args: params },
+					context,
+				);
 				const value: unknown = await Reflect.apply(
 					registration.definition.execute.bind(registration.definition),
 					undefined,
 					[id, params, signal, onUpdate, context],
+				);
+				handlers.get("tool_execution_end")?.(
+					{
+						type: "tool_execution_end",
+						toolCallId: id,
+						toolName: name,
+						result: value,
+						isError: false,
+					},
+					context,
 				);
 				return fixtureResult(value);
 			},
