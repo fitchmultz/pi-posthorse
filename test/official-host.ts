@@ -16,6 +16,7 @@ import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
 	createAgentSession,
+	createCodemodeExtension,
 	DefaultResourceLoader,
 	ModelRuntime,
 	SessionManager,
@@ -2065,6 +2066,59 @@ await test("multiple successful explicit requests select the first handoff", asy
 	assert.match(fresh, /FIRST_HANDOFF/);
 	assert.doesNotMatch(fresh, /LAST_HANDOFF/);
 });
+
+for (const failure of ["none", "before", "after", "validation"]) {
+	await test(`composed explicit resets settle the native foreground call (${failure})`, async (t) => {
+		const h = await fixture(t, { extension: createCodemodeExtension(), enabled: false });
+		h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "codemode"]);
+		const missing = 'try { await tools.notes({op:"read",path:"missing.md"}); } catch {}';
+		const request = 'text(await tools.new_context({handoff:"COMPOSED_HANDOFF"}));';
+		const code = [
+			...(failure === "before" ? [missing] : []),
+			request,
+			...(failure === "after" ? [missing] : []),
+			...(failure === "validation" ? ["try { await tools.notes({}); } catch {}"] : []),
+		].join("\n");
+		let resumed: string | undefined;
+		h.faux.setResponses([
+			toolTurn(fauxToolCall("codemode", { code })),
+			(ctx) => {
+				resumed = JSON.stringify(ctx.messages);
+				return fauxAssistantMessage("Finished.");
+			},
+		]);
+		await h.session.prompt("COMPOSED_ORIGINAL_INPUT");
+		assert.equal(toolResult(h, "codemode").isError, false);
+		assert.match(textOf(toolResult(h, "codemode")), /Requested a fresh Pi context/);
+		assert.ok(resumed !== undefined);
+		assert.equal(boundaries(h).length, failure === "none" ? 1 : 0);
+		assert.equal(resumed.includes("COMPOSED_ORIGINAL_INPUT"), failure !== "none");
+		if (failure === "none") {
+			assert.equal(requireValue(boundaries(h)[0]).summary, "COMPOSED_HANDOFF");
+		}
+	});
+}
+
+for (const nestedFirst of [true, false]) {
+	await test(`mixed direct and composed resets keep foreground source order (nestedFirst=${nestedFirst})`, async (t) => {
+		const h = await fixture(t, { extension: createCodemodeExtension() });
+		h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "codemode"]);
+		const nested = fauxToolCall("codemode", {
+			code: 'await tools.new_context({handoff:"NESTED_FIRST"}); await tools.new_context({handoff:"NESTED_SECOND"});',
+		});
+		const direct = fauxToolCall("new_context", { handoff: "DIRECT" });
+		h.faux.setResponses([
+			toolTurn(...(nestedFirst ? [nested, direct] : [direct, nested])),
+			fauxAssistantMessage("Finished."),
+		]);
+		await h.session.prompt("Use the first foreground request.");
+		assert.equal(boundaries(h).length, 1);
+		assert.equal(
+			requireValue(boundaries(h)[0]).summary,
+			nestedFirst ? "NESTED_FIRST" : "DIRECT",
+		);
+	});
+}
 
 await test("eligible early length recovery (keepRecentTokens=1) makes no summary request", async (t) => {
 	const h = await fixture(t, { keepRecentTokens: 1 });

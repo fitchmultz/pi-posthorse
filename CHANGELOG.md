@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Honor `new_context` requests made through foreground tool composition. Keep native call provenance, reject resets after caught nested tool failures, and consume each request only with its foreground receipt.
+
 ## 0.10.10 - 2026-11-05
 
 <!-- npm-release:unreleased:start -->

@@ -40,7 +40,11 @@ async function setup() {
 			exposure: "direct",
 			sourceInfo,
 		}));
-	return { tools, messages: loaded.extension.messageRenderers };
+	return {
+		tools,
+		messages: loaded.extension.messageRenderers,
+		handlers: loaded.extension.handlers,
+	};
 }
 
 class RenderOnlyTUI extends TuiMainScreen {
@@ -129,11 +133,18 @@ async function execute(
 		readonly sessionManager: Readonly<ReturnType<typeof context>["sessionManager"]>;
 	},
 ) {
-	const definition = requireValue((await setup()).tools.get(name));
+	const loaded = await setup();
+	const definition = requireValue(loaded.tools.get(name));
 	assert.ok(
 		Check(definition.parameters, args),
 		"Executed renderer fixtures must satisfy the registered tool schema",
 	);
+	for (const handler of loaded.handlers.get("tool_execution_start") ?? []) {
+		await Reflect.apply(handler, undefined, [
+			{ type: "tool_execution_start", toolCallId: "tool-1", toolName: name, args },
+			ctx,
+		]);
+	}
 	const value: unknown = await Reflect.apply(definition.execute.bind(definition), undefined, [
 		"tool-1",
 		args,
