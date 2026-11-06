@@ -2,8 +2,27 @@
 
 ## Unreleased
 
+## 0.10.11 - 2026-11-06
+
+<!-- npm-release:unreleased:start -->
+
 - Honor `new_context` requests made through foreground tool composition. Keep native call provenance, reject resets after caught nested tool failures, and consume each request only with its foreground receipt.
 - Preserve ownership of private copies after failed adoption verification. Report the destination for a fresh read, and keep deleted private notes from falling back to their source. Keep initialization and adoption outcomes explicit, and associate patch moves only with their update header.
+
+<!-- npm-release:unreleased:end -->
+
+- Fix composed context reset settlement (1/6) (#132) ([379fb7e](https://github.com/fitchmultz/pi-posthorse/commit/379fb7e27e4b01b8016bb322476532034646b7bb))
+
+### What's Changed
+
+- Fix composed context reset settlement (1/6) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/132
+- Model note recovery content proof explicitly (2/6) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/133
+- refactor: separate package notes migration phases (4/6) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/137
+- refactor: make history cursor progress explicit (5/6) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/136
+- refactor: make rollover and reminder decisions explicit (6/6) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/138
+- fix: preserve ownership after partial note adoption (3/6) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/135
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.10...v0.10.11
 
 ## 0.10.10 - 2026-11-05
 
