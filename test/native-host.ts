@@ -760,59 +760,81 @@ await test("fork notes associate late cancelled background effects with their la
 	);
 });
 
-await test("background composition cannot arm a later foreground reset or block an independent request", async (t) => {
-	const started = Promise.withResolvers<null>();
-	const released = Promise.withResolvers<null>();
-	const requested = Promise.withResolvers<boolean>();
-	t.after(() => released.resolve(null));
-	const h = await fixture(t, {
-		enabled: false,
-		async extension(pi) {
-			await createCodemodeExtension()(pi);
-			pi.registerTool({
-				name: "hold",
-				label: "Hold",
-				description: "Wait for the foreground reset in this lifecycle test.",
-				parameters: { type: "object", properties: {} },
-				async execute() {
-					started.resolve(null);
-					await released.promise;
-					return { content: [{ type: "text", text: "Released." }], details: {} };
-				},
-			});
-		},
-		afterExtension(pi) {
-			pi.on("tool_execution_end", (event) => {
-				if (event.toolName === "new_context" && event.parentToolCallId !== undefined) {
-					requested.resolve(event.isError);
-				}
-			});
-		},
+for (const earlyRequest of [true, false]) {
+	await test(`background composition binds a reset only to its active foreground call (early=${earlyRequest})`, async (t) => {
+		const started = Promise.withResolvers<null>();
+		const released = Promise.withResolvers<null>();
+		const requested = Promise.withResolvers<boolean>();
+		t.after(() => released.resolve(null));
+		const h = await fixture(t, {
+			enabled: false,
+			async extension(pi) {
+				await createCodemodeExtension()(pi);
+				pi.registerTool({
+					name: "hold",
+					label: "Hold",
+					description: "Wait for the foreground reset in this lifecycle test.",
+					parameters: { type: "object", properties: {} },
+					async execute() {
+						started.resolve(null);
+						await released.promise;
+						return { content: [{ type: "text", text: "Released." }], details: {} };
+					},
+				});
+				pi.on("tool_result", async (event) => {
+					if (event.toolName === "codemode") {
+						await started.promise;
+					}
+				});
+			},
+			afterExtension(pi) {
+				pi.on("tool_execution_end", (event) => {
+					if (event.toolName === "new_context" && event.parentToolCallId !== undefined) {
+						requested.resolve(event.isError);
+					}
+				});
+			},
+		});
+		h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "codemode"]);
+		const codemode = requireValue(
+			h.session.getAllTools().find((tool) => tool.name === "codemode"),
+		);
+		if (!codemode.description.includes('"background": true')) {
+			assert.notEqual(process.env.PI_COMPAT_HOST, "fork");
+			t.skip("The fork qualification owns background codemode.");
+			return;
+		}
+		const launch = await nativeCall(
+			h,
+			fauxToolCall("codemode", {
+				code: [
+					'// @options: {"background": true}',
+					...(earlyRequest
+						? ['await tools.new_context({handoff:"EARLY_REQUEST"});']
+						: []),
+					"await tools.hold({});",
+					...(!earlyRequest
+						? ['await tools.new_context({handoff:"LATE_REQUEST"});']
+						: []),
+				].join("\n"),
+			}),
+		);
+		assert.equal(launch.isError, false);
+		await started.promise;
+		assert.equal(posthorseBoundaries(h.sessionManager).length, earlyRequest ? 1 : 0);
+		const direct = await nativeCall(h, fauxToolCall("new_context", { handoff: "FOREGROUND" }));
+		assert.equal(direct.isError, false);
+		assert.equal(posthorseBoundaries(h.sessionManager).length, earlyRequest ? 2 : 1);
+		assert.equal(
+			requireValue(posthorseBoundaries(h.sessionManager).at(-1)).summary,
+			"FOREGROUND",
+		);
+		released.resolve(null);
+		assert.equal(await requested.promise, !earlyRequest);
+		await h.session.waitForIdle();
+		assert.equal(posthorseBoundaries(h.sessionManager).length, earlyRequest ? 2 : 1);
 	});
-	h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "codemode"]);
-	const codemode = requireValue(h.session.getAllTools().find((tool) => tool.name === "codemode"));
-	if (!codemode.description.includes('"background": true')) {
-		assert.notEqual(process.env.PI_COMPAT_HOST, "fork");
-		t.skip("The fork qualification owns background codemode.");
-		return;
-	}
-	const launch = await nativeCall(
-		h,
-		fauxToolCall("codemode", {
-			code: '// @options: {"background": true}\nawait tools.hold({}); await tools.new_context({handoff:"BACKGROUND_MUST_NOT_RESET"});',
-		}),
-	);
-	assert.equal(launch.isError, false);
-	await started.promise;
-	const direct = await nativeCall(h, fauxToolCall("new_context", { handoff: "FOREGROUND" }));
-	assert.equal(direct.isError, false);
-	assert.equal(posthorseBoundaries(h.sessionManager).length, 1);
-	assert.equal(requireValue(posthorseBoundaries(h.sessionManager)[0]).summary, "FOREGROUND");
-	released.resolve(null);
-	assert.equal(await requested.promise, true);
-	await h.session.waitForIdle();
-	assert.equal(posthorseBoundaries(h.sessionManager).length, 1);
-});
+}
 
 async function loadedHistory(t: TestContext) {
 	t.diagnostic(`native history SDK: ${sdkEntry}`);

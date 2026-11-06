@@ -11,7 +11,6 @@ type RequestState =
 	| { readonly kind: "failed" };
 type ForegroundCall = {
 	readonly id: string;
-	readonly active: Set<string>;
 	state: RequestState;
 };
 
@@ -35,12 +34,11 @@ export class ResetRequests {
 		const parent = event.parentToolCallId;
 		const root: ForegroundCall | undefined =
 			parent === undefined
-				? { id: event.toolCallId, active: new Set(), state: { kind: "pending" } }
+				? { id: event.toolCallId, state: { kind: "pending" } }
 				: this.#active.get(parent);
 		if (root === undefined || (parent !== undefined && !this.#active.has(root.id))) {
 			return;
 		}
-		root.active.add(event.toolCallId);
 		this.#active.set(event.toolCallId, root);
 		if (parent === undefined) {
 			this.#roots.set(root.id, root);
@@ -52,16 +50,13 @@ export class ResetRequests {
 		if (root === undefined) {
 			return;
 		}
-		root.active.delete(event.toolCallId);
 		if (root.state.kind !== "pending") {
 			return;
 		}
 		if (event.isError) {
 			root.state = { kind: "failed" };
 		} else if (event.toolCallId === root.id) {
-			// A launch receipt cannot settle a request while its detached children still run.
-			root.state =
-				root.active.size === 0 ? { ...root.state, kind: "settled" } : { kind: "settled" };
+			root.state = { ...root.state, kind: "settled" };
 		}
 	}
 	request(id: string, handoff: string): void {
