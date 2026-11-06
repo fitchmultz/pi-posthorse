@@ -27,6 +27,7 @@ import { fixturePolicy, loadFixture, requireValue, record, stringValue } from ".
 import { createPosthorse } from "../index.ts";
 import { buildAutoHandoff } from "../src/recovery.ts";
 import type { EntryLike } from "../src/contracts.ts";
+import { noteOperations } from "../src/note-tool-effects.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 import { Type, type TSchema } from "typebox";
 import { Check } from "typebox/value";
@@ -5148,6 +5149,40 @@ await test("automatic recovery tracks session notes across tools, codemode, cont
 		/latest full write is in the retained tail above at entry replacement-call\]/,
 	);
 	assert.doesNotMatch(restored, /verified effect at entry observed-receipt/);
+});
+
+await test("note guards associate a move only with the immediately preceding update header", () => {
+	for (const newline of ["\n", "\r\n", "\r"]) {
+		const patch = (headers: readonly string[]) =>
+			["*** Begin Patch", ...headers, "*** End Patch"].join(newline);
+		assert.deepEqual(
+			noteOperations(
+				"apply_patch",
+				patch(["*** Update File: source", "*** Move to: target"]),
+			),
+			[
+				{ path: "source", action: "delete" },
+				{ path: "target", action: "create" },
+			],
+		);
+		for (const { header, action } of [
+			{ header: "*** Add File: source", action: "create" },
+			{ header: "*** Delete File: source", action: "delete" },
+		]) {
+			assert.deepEqual(
+				noteOperations("apply_patch", patch([header, "*** Move to: target"])),
+				[{ path: "source", action }],
+			);
+		}
+		assert.deepEqual(noteOperations("apply_patch", patch(["*** Move to: target"])), []);
+		assert.deepEqual(
+			noteOperations(
+				"apply_patch",
+				patch(["*** Update File: source", "@@", "*** Move to: target"]),
+			),
+			[{ path: "source", action: "edit" }],
+		);
+	}
 });
 
 await test("automatic recovery keeps verified paths from a partially failed editing receipt", () => {

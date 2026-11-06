@@ -23,6 +23,7 @@ function patchOperations(input: unknown): NoteOperation[] {
 		return [];
 	}
 	const operations: NoteOperation[] = [];
+	let update: { readonly path: string; readonly end: number } | undefined;
 	for (const match of input.matchAll(
 		/^\*\*\* (Update File|Add File|Delete File|Move to): ([^\r\n]+)$/gmu,
 	)) {
@@ -31,10 +32,15 @@ function patchOperations(input: unknown): NoteOperation[] {
 			continue;
 		}
 		if (match[1] === "Move to") {
-			const previous = operations.pop();
-			if (previous !== undefined) {
-				operations.push({ ...previous, action: "delete" });
+			if (
+				update !== undefined &&
+				/^(?:\r\n|\r|\n)$/u.test(input.slice(update.end, match.index))
+			) {
+				operations[operations.length - 1] = { path: update.path, action: "delete" };
+				operations.push({ path, action: "create" });
 			}
+			update = undefined;
+			continue;
 		}
 		let action: NoteAction = "create";
 		if (match[1] === "Update File") {
@@ -43,6 +49,7 @@ function patchOperations(input: unknown): NoteOperation[] {
 			action = "delete";
 		}
 		operations.push({ path, action });
+		update = action === "edit" ? { path, end: match.index + match[0].length } : undefined;
 	}
 	return operations;
 }
