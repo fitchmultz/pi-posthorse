@@ -1,8 +1,10 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, TurnEndEvent } from "@earendil-works/pi-coding-agent";
+import { budgetFor, type Budget } from "./budget.ts";
 import {
 	isRecord,
 	isReminderType,
 	type EntryLike,
+	type PolicyContext,
 	type ProjectedEntry,
 	type ReminderFingerprint,
 } from "./contracts.ts";
@@ -46,6 +48,78 @@ export function hasReminder(
 			isReminderType(entry.customType) &&
 			reminderMatches(entry.details, fingerprint),
 	);
+}
+const REMINDER_BUFFER_TOKENS = 32_000;
+type ReminderDecision =
+	| {
+			readonly kind: "skip";
+			readonly reason: "run-ended" | "unknown-usage" | "unavailable-budget" | "outside-band";
+	  }
+	| { readonly kind: "already-present" }
+	| { readonly kind: "send"; readonly fingerprint: ReminderFingerprint };
+function reminderBudget(
+	host: PolicyContext,
+):
+	| Extract<ReminderDecision, { readonly kind: "skip" }>
+	| { readonly kind: "available"; readonly budget: Budget } {
+	const usage = host.getContextUsage();
+	if (usage === undefined || usage.tokens === null || usage.contextWindow <= 0) {
+		return { kind: "skip", reason: "unknown-usage" };
+	}
+	const budget = budgetFor(host, usage.contextWindow);
+	if (budget === undefined || !budget.enabled || !budget.supported) {
+		return { kind: "skip", reason: "unavailable-budget" };
+	}
+	const buffer = Math.min(REMINDER_BUFFER_TOKENS, Math.floor(budget.usable * 0.1));
+	if (usage.tokens < budget.rolloverAt - buffer || usage.tokens >= budget.rolloverAt) {
+		return { kind: "skip", reason: "outside-band" };
+	}
+	return { kind: "available", budget };
+}
+function endsRun(
+	event: TurnEndEvent,
+	ctx: { readonly hasPendingMessages?: () => boolean },
+): boolean {
+	return (
+		event.message.role === "assistant" &&
+		!event.message.content.some((part) => part.type === "toolCall") &&
+		!event.continue &&
+		event.context.pendingMessages.length === 0 &&
+		ctx.hasPendingMessages?.() !== true
+	);
+}
+export function reminderDecision(
+	event: TurnEndEvent,
+	ctx: ExtensionContext,
+	host: PolicyContext,
+	reminders: ReminderLookup,
+): ReminderDecision {
+	if (endsRun(event, ctx)) {
+		return { kind: "skip", reason: "run-ended" };
+	}
+	const available = reminderBudget(host);
+	if (available.kind === "skip") {
+		return available;
+	}
+	const { budget } = available;
+	const state = reminders.read(ctx);
+	const fingerprint: ReminderFingerprint = {
+		windowId: state.windowId,
+		contextWindow: budget.contextWindow,
+		reserveTokens: budget.reserveTokens,
+	};
+	if (
+		hasReminder(state.reminders, fingerprint) ||
+		event.context.pendingMessages.some(
+			(message) =>
+				message.role === "custom" &&
+				isReminderType(message.customType) &&
+				reminderMatches(message.details, fingerprint),
+		)
+	) {
+		return { kind: "already-present" };
+	}
+	return { kind: "send", fingerprint };
 }
 function onlyReminders(entries: readonly EntryLike[]): EntryLike[] {
 	return entries.filter(
