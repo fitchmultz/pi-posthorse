@@ -135,15 +135,18 @@ async function copyNote(note: SnapshotNote, destination: string): Promise<CopyRe
 		};
 	}
 }
-/** Publication is the ownership boundary. An existing unrelated directory is never overwritten. */
-export async function snapshot(
+type SnapshotPreparation =
+	| { readonly kind: "existing"; readonly binding: ForkBinding }
+	| { readonly kind: "empty" }
+	| { readonly kind: "staging"; readonly stage: string; readonly container: string };
+async function prepareSnapshot(
 	binding: ForkBinding,
 	notes: readonly SnapshotNote[],
-): Promise<ForkBinding> {
+): Promise<SnapshotPreparation> {
 	const directory = scopeDirectory(binding);
 	const existing = await readManifest(directory);
 	if (existing !== undefined && sameOwner(existing.owner, binding.owner)) {
-		return existing;
+		return { kind: "existing", binding: existing };
 	}
 	const container = dirname(directory);
 	if (
@@ -157,10 +160,22 @@ export async function snapshot(
 		throw new Error(`Incomplete notes snapshot: preserving unexpected data at ${container}.`);
 	}
 	if (notes.length === 0) {
-		return binding;
+		return { kind: "empty" };
 	}
 	await mkdir(dirname(container), { recursive: true });
 	const stage = await mkdtemp(join(dirname(container), ".staging-"));
+	return { kind: "staging", stage, container };
+}
+/** Publication is the ownership boundary. An existing unrelated directory is never overwritten. */
+export async function snapshot(
+	binding: ForkBinding,
+	notes: readonly SnapshotNote[],
+): Promise<ForkBinding> {
+	const preparation = await prepareSnapshot(binding, notes);
+	if (preparation.kind !== "staging") {
+		return preparation.kind === "existing" ? preparation.binding : binding;
+	}
+	const { stage, container } = preparation;
 	try {
 		// Keep each file's identity and digest paired with the bytes actually copied.
 		const seeds = await mapBatch(notes, async (note) => {
@@ -179,7 +194,7 @@ export async function snapshot(
 		return complete;
 	} catch (error) {
 		throw new Error(
-			`Incomplete notes snapshot for ${directory}: ${error instanceof Error ? error.message : String(error)}`,
+			`Incomplete notes snapshot for ${scopeDirectory(binding)}: ${error instanceof Error ? error.message : String(error)}`,
 			{ cause: error },
 		);
 	} finally {
