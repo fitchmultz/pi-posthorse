@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Honor `new_context` requests made through foreground tool composition. Keep native call provenance, reject resets after caught nested tool failures, and consume each request only with its foreground receipt.
+- Preserve ownership of private copies after failed adoption verification. Report the destination for a fresh read, and keep deleted private notes from falling back to their source. Keep initialization and adoption outcomes explicit, and associate patch moves only with their update header.
 
 ## 0.10.10 - 2026-11-05
 

@@ -35,6 +35,7 @@ import type { NotesRecovery } from "./note-evidence.ts";
 
 type NotesManager = ExtensionContext["sessionManager"];
 export type NoteCall = { readonly id: string; readonly rootId: string };
+type Adoption = "owned" | "unavailable" | "adopted";
 export type NoteRead = {
 	readonly address: NoteAddress;
 	readonly path: string;
@@ -172,16 +173,16 @@ export class SessionNotes {
 		};
 		return { address, path: notePath(address, relative), writable: reference === undefined };
 	}
-	async adopt(path: string, call: NoteCall): Promise<boolean> {
+	async adopt(path: string, call: NoteCall): Promise<Adoption> {
 		const relative = noteRelative(path);
 		if (this.owns(relative)) {
-			return false;
+			return "owned";
 		}
 		const source = await this.#reference(relative);
 		if (source === undefined) {
-			return false;
+			return "unavailable";
 		}
-		const seed = await adoptNote(this.binding, {
+		const result = await adoptNote(this.binding, {
 			path: relative,
 			source,
 			lineage: source,
@@ -194,20 +195,26 @@ export class SessionNotes {
 					scope: this.binding.scope,
 					path: relative,
 					kind: "adopt",
-					seed,
+					...(result.kind === "verified" ? { seed: result.seed } : {}),
 				},
 			],
 			call,
 		);
+		if (result.kind === "unverified") {
+			throw new Error(
+				`Private copy created at ${notePath(this.binding, relative)}; source not edited, but copy verification failed. Read the private copy before retrying.`,
+				{ cause: result.error },
+			);
+		}
 		try {
-			await saveAdoption(this.binding, seed);
+			await saveAdoption(this.binding, result.seed);
 		} catch (error) {
 			throw new Error(
 				`Private copy created at ${notePath(this.binding, relative)}; source not edited, but its adoption manifest could not be saved. Read the private copy before retrying.`,
 				{ cause: error },
 			);
 		}
-		return true;
+		return "adopted";
 	}
 	async prepareWrite(): Promise<void> {
 		await ensureManifest(this.binding);
@@ -215,7 +222,7 @@ export class SessionNotes {
 	async guardReference(path: string, call: NoteCall): Promise<string> {
 		const destination = notePath(this.binding, path);
 		const copied = await withFileMutationQueue(destination, () => this.adopt(path, call));
-		return copied
+		return copied === "adopted"
 			? `Private copy created at ${destination}; the source was not edited. Read the private copy, then retry the edit on that path.`
 			: `This session writes only ${this.directory}. Read ${destination}, then retry there; the foreign path was not edited.`;
 	}
@@ -232,15 +239,19 @@ export type NotesStore = {
 	readonly roots: () => readonly string[];
 	readonly recovery: (ctx: ExtensionContext) => NotesRecovery | undefined;
 };
+type SessionState =
+	| { readonly kind: "initializing"; readonly value: Promise<SessionNotes> }
+	| { readonly kind: "ready"; readonly value: SessionNotes };
 export function createNotesStore(pi: ExtensionAPI): NotesStore {
-	const sessions = new Map<string, Promise<SessionNotes>>();
-	const ready = new Map<string, SessionNotes>();
+	const sessions = new Map<string, SessionState>();
 	const roots = new Set<string>();
 	const get = (ctx: ExtensionContext): Promise<SessionNotes> => {
 		const key = sessionKey(ctx);
 		const existing = sessions.get(key);
 		if (existing !== undefined) {
-			return existing;
+			return existing.kind === "initializing"
+				? existing.value
+				: Promise.resolve(existing.value);
 		}
 		const bindings = bindingsOf(ctx.sessionManager.getEntries());
 		const header = ctx.sessionManager.getHeader();
@@ -260,19 +271,22 @@ export function createNotesStore(pi: ExtensionAPI): NotesStore {
 				for (const scope of session.scopes) {
 					roots.add(scope.root);
 				}
-				ready.set(key, session);
+				sessions.set(key, { kind: "ready", value: session });
 				return session;
 			})
 			.catch((error: unknown) => {
 				sessions.delete(key);
 				throw error;
 			});
-		sessions.set(key, initialized);
+		sessions.set(key, { kind: "initializing", value: initialized });
 		return initialized;
 	};
 	return {
 		get,
 		roots: () => [...roots],
-		recovery: (ctx: ExtensionContext) => ready.get(sessionKey(ctx))?.recovery,
+		recovery: (ctx: ExtensionContext) => {
+			const state = sessions.get(sessionKey(ctx));
+			return state?.kind === "ready" ? state.value.recovery : undefined;
+		},
 	};
 }

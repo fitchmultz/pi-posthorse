@@ -102,7 +102,7 @@ async function guardOperation(
 	}
 	if (existingEdit(tool, operation) && !session.owns(address.path)) {
 		const copied = await withFileMutationQueue(path, () => session.adopt(address.path, call));
-		if (copied) {
+		if (copied === "adopted") {
 			return `Private copy created at ${path}; no requested edit ran. Read this copy, then retry the edit.`;
 		}
 	}

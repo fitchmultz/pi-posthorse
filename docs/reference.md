@@ -200,6 +200,11 @@ private copy and requires a fresh read before retrying there. Creation-only oper
 pre-create a destination or change creation semantics. `notes append` adopts and appends within
 one same-file queue admission, preserving the inherited prefix.
 
+If adoption copies a note but cannot verify the copy or save its metadata, the error identifies
+the private destination and asks for a fresh read before retrying. The private copy is recorded
+as owned, so deleting it cannot restore the parent reference. The source is not edited.
+Initial fork snapshots instead discard their unpublished staging directory on verification failure.
+
 These checks apply to original sessions too, so a parent cannot use those tools to edit a child's
 notes or managed metadata. They are not a filesystem sandbox. Shell commands and custom programs
 can still change files outside their scope. Private notes cannot follow aliases outside their
