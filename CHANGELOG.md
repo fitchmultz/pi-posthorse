@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+## 0.10.12 - 2026-11-06
+
+<!-- npm-release:unreleased:start -->
+
 - Preserve incremental tool declarations after retained-tail rollover so later tool discovery keeps the earlier request prefix intact. Keep retained conversation order and reminder filtering in Pi's full-transcript context hook.
+
+<!-- npm-release:unreleased:end -->
+
+- fix: preserve incremental tool declarations after rollover (#141) ([1bc78ae](https://github.com/fitchmultz/pi-posthorse/commit/1bc78ae55d322bb5821a1211fe70979cfa71c258))
+
+### What's Changed
+
+- fix: preserve cached prefixes after rollover (1/3) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/141
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.11...v0.10.12
 
 ## 0.10.11 - 2026-11-06
 
