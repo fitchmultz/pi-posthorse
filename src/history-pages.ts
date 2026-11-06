@@ -10,10 +10,13 @@ import { excerpt, shortKey, sourceTag } from "./message-text.ts";
 import type { HistoryMatches, HistoryParams } from "./history-search.ts";
 import type { PageAccess } from "./paging.ts";
 
+type Continuation<Position> =
+	| { readonly kind: "complete" }
+	| { readonly kind: "more"; readonly next: Position };
 type SearchPage = {
 	readonly parts: readonly string[];
 	readonly spans: readonly { readonly headerLength: number; readonly length: number }[];
-	readonly next?: string | undefined;
+	readonly continuation: Continuation<string>;
 };
 function cursorFor(matches: HistoryMatches, hit: HistoryHit, offset: number): string {
 	return Buffer.from(JSON.stringify([hit.id, hit.priority, offset, matches.key])).toString(
@@ -56,7 +59,7 @@ function searchParts(matches: HistoryMatches, chars: number): SearchPage {
 	const parts: string[] = [];
 	const spans: Array<{ headerLength: number; length: number }> = [];
 	let available = chars;
-	let next: string | undefined;
+	let continuation: Continuation<string> = { kind: "complete" };
 	for (const hit of matches.hits) {
 		const fragment = hitFragment(hit, matches.cursor, available, parts.length === 0);
 		if (fragment === undefined) {
@@ -65,15 +68,15 @@ function searchParts(matches: HistoryMatches, chars: number): SearchPage {
 		parts.push(fragment.part);
 		spans.push({ headerLength: fragment.headerLength, length: fragment.part.length });
 		available -= fragment.part.length + 1;
-		next =
+		continuation =
 			fragment.end < hit.text.length || parts.length < matches.hits.length
-				? cursorFor(matches, hit, fragment.end)
-				: undefined;
+				? { kind: "more", next: cursorFor(matches, hit, fragment.end) }
+				: { kind: "complete" };
 		if (available <= 0 || parts.length >= matches.limit) {
 			break;
 		}
 	}
-	return { parts, spans, next };
+	return { parts, spans, continuation };
 }
 export function searchPage(
 	matches: HistoryMatches,
@@ -98,12 +101,14 @@ export function searchPage(
 		page.parts.length > 0
 			? page.parts.join("\n")
 			: `No history matches "${excerpt(params.query ?? "", 200)}".`;
-	const tail = skippedNote + (page.next === undefined ? "" : searchFooter(page.next));
+	const tail =
+		skippedNote +
+		(page.continuation.kind === "more" ? searchFooter(page.continuation.next) : "");
 	return pages.result(body + tail, [], {
 		kind: "history-search",
 		entries: [...page.spans],
 		footerLength: tail.length,
-		more: page.next !== undefined,
+		more: page.continuation.kind === "more",
 		skipped: matches.skipped,
 	});
 }
@@ -155,9 +160,13 @@ export function historyReadPage(
 		item.text.length,
 		offset + chars - (images.length - firstImage) * ESTIMATED_IMAGE_CHARS,
 	);
-	const more =
+	const continuation: Continuation<{ readonly offset: number; readonly imageOffset: number }> =
 		end < item.text.length || imageEnd < item.images.length
-			? `\nMore remains; call history read with id "${shownId}" and offset ${end}${item.images.length > 0 ? ` and imageOffset ${imageEnd}` : ""}.`
+			? { kind: "more", next: { offset: end, imageOffset: imageEnd } }
+			: { kind: "complete" };
+	const more =
+		continuation.kind === "more"
+			? `\nMore remains; call history read with id "${shownId}" and offset ${continuation.next.offset}${item.images.length > 0 ? ` and imageOffset ${continuation.next.imageOffset}` : ""}.`
 			: "";
 	const header = `${item.entry.timestamp ?? ""}${sourceTag(source)} [window ${item.windowId}] [${shownId}] [chars ${offset}-${end} of ${item.text.length}] `;
 	return access.pages.result(`${header}${item.text.slice(offset, end)}${more}`, images, {

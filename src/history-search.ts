@@ -115,12 +115,14 @@ type SearchProgress = {
 	readonly seeking: (priority: 0 | 1) => boolean;
 	readonly enough: () => boolean;
 };
+type CursorProgress =
+	| { readonly kind: "seeking"; readonly cursor: HistoryCursor }
+	| { readonly kind: "collecting"; readonly cursor?: HistoryCursor };
 /** Owns ranking, lookahead and one cursor's progress; never holds the whole archive. */
 class SearchAccumulator {
 	readonly groups: [HistoryHit[], HistoryHit[]] = [[], []];
-	readonly cursor: HistoryCursor | undefined;
 	readonly limit: number;
-	private found: boolean;
+	private progress: CursorProgress;
 	private readonly fail: (message: string) => never;
 	constructor(
 		limit: number,
@@ -128,24 +130,27 @@ class SearchAccumulator {
 		fail: (message: string) => never,
 	) {
 		this.limit = limit;
-		this.cursor = cursor;
-		this.found = cursor === undefined;
+		this.progress = cursor === undefined ? { kind: "collecting" } : { kind: "seeking", cursor };
 		this.fail = fail;
 	}
+	get cursor(): HistoryCursor | undefined {
+		return this.progress.cursor;
+	}
 	add(hit: HistoryHit): void {
-		const cursor = this.cursor;
+		const progress = this.progress;
+		const cursor = progress.cursor;
 		if (cursor !== undefined && hit.priority < cursor[1]) {
 			return;
 		}
-		if (cursor !== undefined && hit.priority === cursor[1] && !this.found) {
-			if (hit.id !== cursor[0]) {
+		if (progress.kind === "seeking" && hit.priority === progress.cursor[1]) {
+			if (hit.id !== progress.cursor[0]) {
 				return;
 			}
-			this.found = true;
-			if (cursor[2] > hit.text.length) {
+			if (progress.cursor[2] > hit.text.length) {
 				this.fail("History cursor is past the entry; restart the search without it.");
 			}
-			if (cursor[2] === hit.text.length) {
+			this.progress = { kind: "collecting", cursor: progress.cursor };
+			if (progress.cursor[2] === hit.text.length) {
 				return;
 			}
 		}
@@ -154,13 +159,13 @@ class SearchAccumulator {
 		}
 	}
 	seeking(priority: 0 | 1): boolean {
-		return this.cursor !== undefined && !this.found && priority === this.cursor[1];
+		return this.progress.kind === "seeking" && priority === this.progress.cursor[1];
 	}
 	enough(): boolean {
 		return this.groups[0].length > this.limit;
 	}
 	results(): HistoryHit[] {
-		if (!this.found) {
+		if (this.progress.kind === "seeking") {
 			this.fail("History cursor entry no longer matches; restart the search without it.");
 		}
 		return this.groups.flat();
