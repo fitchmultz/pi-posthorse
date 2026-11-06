@@ -132,7 +132,27 @@ async function setup() {
 	const handlers = new Map<string, Handler>();
 	for (const [name, callbacks] of loaded.extension.handlers) {
 		const callback = requireValue(callbacks[0], name);
-		handlers.set(name, callback);
+		handlers.set(
+			name,
+			name === "context_with_system"
+				? (event, context) => {
+						const current = { ...event };
+						let transformed: Record<string, unknown> | undefined;
+						for (const handler of callbacks) {
+							const result: unknown = handler(current, context);
+							assert.ok(
+								!(result instanceof Promise),
+								"Fixture context handlers are synchronous",
+							);
+							if (result !== undefined) {
+								transformed = record(result);
+								Object.assign(current, transformed);
+							}
+						}
+						return transformed;
+					}
+				: callback,
+		);
 	}
 	const tools = new Map<string, Tool>();
 	for (const [name, registration] of loaded.extension.tools) {
@@ -832,11 +852,19 @@ await test("each safety evaluation reads native usage and policy once, including
 			policyReads++;
 			return { enabled, reserveTokens: 16_384 };
 		};
-		const once = async <T>(action: () => T, expectedPolicyReads = 1): Promise<Awaited<T>> => {
+		const once = async <T>(
+			action: () => T,
+			expectedPolicyReads = 1,
+			expectedUsageReads = 1,
+		): Promise<Awaited<T>> => {
 			usageReads = 0;
 			policyReads = 0;
 			const result = await action();
-			assert.equal(usageReads, 1, "one authoritative native acquisition per evaluation");
+			assert.equal(
+				usageReads,
+				expectedUsageReads,
+				"one native acquisition per policy consumer",
+			);
 			assert.equal(
 				policyReads,
 				expectedPolicyReads,
@@ -891,14 +919,23 @@ await test("each safety evaluation reads native usage and policy once, including
 			customType: "posthorse-reminder",
 			details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 },
 		};
+		const head = { role: "system", content: "" };
 		assert.deepEqual(
-			await once(() =>
-				requireValue(handlers.get("context"))(
-					{ messages: Array.from({ length: 30 }, () => ({ ...reminder })) },
-					context,
-				),
+			await once(
+				() =>
+					requireValue(handlers.get("context_with_system"))(
+						{
+							messages: [
+								head,
+								...Array.from({ length: 30 }, () => ({ ...reminder })),
+							],
+						},
+						context,
+					),
+				2,
+				2,
 			),
-			{ messages: [] },
+			{ messages: [head] },
 		);
 		available = false;
 		assert.match(
@@ -1112,15 +1149,22 @@ await test("disabling compaction filters persisted reminders without changing hi
 		},
 	};
 	const owner = { role: "user", content: "continue" };
+	const head = { role: "system", content: "" };
 	assert.equal(
-		requireValue(handlers.get("context"))({ messages: [owner, reminder] }, context),
+		requireValue(handlers.get("context_with_system"))(
+			{ messages: [head, owner, reminder] },
+			context,
+		),
 		undefined,
 	);
 	enabled = false;
 	assert.deepEqual(
-		requireValue(handlers.get("context"))({ messages: [owner, reminder] }, context),
+		requireValue(handlers.get("context_with_system"))(
+			{ messages: [head, owner, reminder] },
+			context,
+		),
 		{
-			messages: [owner],
+			messages: [head, owner],
 		},
 	);
 	assert.equal(requireValue(branch[0]).content, "Checkpoint now", "raw history stays intact");
@@ -1131,6 +1175,11 @@ await test("disabling compaction filters persisted reminders without changing hi
 
 await test("reminder-free context and fork reminder filtering never read history", async () => {
 	const { handlers, context } = await setup();
+	const head = {
+		role: "system",
+		content: "",
+		sections: { posthorse: guidanceFor(handlers, context) },
+	};
 	const marker = {
 		role: "custom",
 		customType: "context-window",
@@ -1144,9 +1193,12 @@ await test("reminder-free context and fork reminder filtering never read history
 		branchReads++;
 		return [];
 	};
-	for (const messages of [[], [user, other], [marker, user, other]]) {
+	for (const messages of [[head], [head, user, other], [head, marker, user, other]]) {
 		const original = structuredClone(messages);
-		assert.equal(requireValue(handlers.get("context"))({ messages }, context), undefined);
+		assert.equal(
+			requireValue(handlers.get("context_with_system"))({ messages }, context),
+			undefined,
+		);
 		assert.deepEqual(messages, original, "unrelated messages remain unchanged");
 	}
 	const current = {
@@ -1161,17 +1213,18 @@ await test("reminder-free context and fork reminder filtering never read history
 		details: { ...current.details, windowId: "old" },
 	};
 	assert.deepEqual(
-		requireValue(handlers.get("context"))(
-			{ messages: [marker, user, other, stale, current] },
+		requireValue(handlers.get("context_with_system"))(
+			{ messages: [head, marker, user, other, stale, current] },
 			context,
 		),
-		{ messages: [marker, user, other, current] },
+		{ messages: [head, marker, user, other, current] },
 	);
 	assert.equal(branchReads, 0, "the fork's window marker identifies the window");
 });
 
 await test("context filtering removes reminders from an older window or a different budget", async () => {
 	const { handlers, context } = await setup();
+	const head = { role: "system", content: "" };
 	const marker = {
 		role: "custom",
 		customType: "context-window",
@@ -1204,14 +1257,17 @@ await test("context filtering removes reminders from an older window or a differ
 	};
 	const other = { role: "custom", customType: "intercom_message", content: "keep" };
 	const filtered = record(
-		requireValue(handlers.get("context"))(
-			{ messages: [marker, old, otherModel, otherReserve, other, current] },
+		requireValue(handlers.get("context_with_system"))(
+			{ messages: [head, marker, old, otherModel, otherReserve, other, current] },
 			context,
 		),
 	);
-	assert.deepEqual(filtered.messages, [marker, other, current]);
+	assert.deepEqual(filtered.messages, [head, marker, other, current]);
 	assert.equal(
-		requireValue(handlers.get("context"))({ messages: [marker, other, current] }, context),
+		requireValue(handlers.get("context_with_system"))(
+			{ messages: [head, marker, other, current] },
+			context,
+		),
 		undefined,
 	);
 	// Before any rollover the window is "initial"; a reminder computed for another model size is still stale.
@@ -1222,9 +1278,12 @@ await test("context filtering removes reminders from an older window or a differ
 		details: { windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 },
 	};
 	const filteredInitial = record(
-		requireValue(handlers.get("context"))({ messages: [otherModel, initial] }, context),
+		requireValue(handlers.get("context_with_system"))(
+			{ messages: [head, otherModel, initial] },
+			context,
+		),
 	);
-	assert.deepEqual(filteredInitial.messages, [initial]);
+	assert.deepEqual(filteredInitial.messages, [head, initial]);
 });
 
 await test("history reads current entries without opening every archived session", async () => {

@@ -1,6 +1,6 @@
 import type {
 	BoundaryResult,
-	ContextEvent,
+	ContextWithSystemEvent,
 	ExtensionAPI,
 	ExtensionContext,
 	SessionBeforeCompactEvent,
@@ -113,25 +113,41 @@ function staleReminderPredicate(
 		isReminderType(message.customType) &&
 		(!enabled || !reminderMatches(message.details, fingerprint));
 }
+function retainedTailEnd(
+	messages: ContextWithSystemEvent["messages"],
+	start: number,
+	count: number,
+): number | undefined {
+	let remaining = count;
+	for (let index = start; index < messages.length; index += 1) {
+		if (messages[index]?.role !== "system") {
+			remaining -= 1;
+		}
+		if (remaining === 0) {
+			return index + 1;
+		}
+	}
+	return undefined;
+}
 function chronologicalRetainedTail(
-	messages: ContextEvent["messages"],
+	messages: ContextWithSystemEvent["messages"],
 	ctx: ExtensionContext,
 	stale: StaleReminderPredicate,
-): ContextEvent["messages"] {
-	const first = messages[0];
-	if (
-		messages.length >= 2 &&
-		first?.role === "compactionSummary" &&
-		hasRetainedRolloverMarker(first.summary)
-	) {
+): ContextWithSystemEvent["messages"] {
+	const summaryIndex = messages.findIndex((message) => message.role !== "system");
+	const first = messages[summaryIndex];
+	if (first?.role === "compactionSummary" && hasRetainedRolloverMarker(first.summary)) {
 		const count = countRetainedMessages(ctx, stale);
-		if (count > 0 && 1 + count <= messages.length) {
-			const retainedSlice = messages.slice(1, 1 + count);
-			const afterSlice = messages.slice(1 + count);
-			if (retainedSlice[0]?.role !== "assistant") {
-				return [...retainedSlice, first, ...afterSlice];
+		const end = count > 0 ? retainedTailEnd(messages, summaryIndex + 1, count) : undefined;
+		if (end !== undefined) {
+			const prefix = messages.slice(0, summaryIndex);
+			const retainedSlice = messages.slice(summaryIndex + 1, end);
+			const afterSlice = messages.slice(end);
+			if (retainedSlice.find((message) => message.role !== "system")?.role !== "assistant") {
+				return [...prefix, ...retainedSlice, first, ...afterSlice];
 			}
 			return [
+				...prefix,
 				{
 					role: "custom",
 					customType: "posthorse-retained-tail",
@@ -152,7 +168,7 @@ function registerReminderFilter(
 	policy: SnapshotReader,
 	reminders: ReminderLookup,
 ): void {
-	pi.on("context", (event, ctx) => {
+	pi.on("context_with_system", (event, ctx) => {
 		const stale = staleReminderPredicate(event.messages, ctx, policy, reminders);
 		const filtered = event.messages.some(stale)
 			? event.messages.filter((message) => !stale(message))
@@ -411,8 +427,8 @@ export function registerRollover(
 	pi.on("session_tree", () => {
 		reminders.reset();
 	});
-	registerGuidance(pi, policy);
 	registerReminderFilter(pi, policy, reminders);
+	registerGuidance(pi, policy);
 	registerAutomaticRollover(pi, policy, activeToolTokens, resources.notes);
 	pi.on("turn_end", (event, ctx) => {
 		const summary = resetRequests.take(event.toolResults);

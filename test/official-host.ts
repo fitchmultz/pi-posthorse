@@ -827,6 +827,90 @@ for (const reserveTokens of [64_000, 32_000, 24_000]) {
 	});
 }
 
+for (const forced of [false, true]) {
+	await test(`tool discovery after retained-tail rollover preserves ${forced ? "conversation" : "full request"} prefix`, async (t) => {
+		const h = await fixture(t, {
+			keepRecentTokens: 1_000,
+			extension(pi) {
+				if (forced) {
+					pi.on("before_agent_start", () => ({ systemPrompt: "FORCED_CACHE_POLICY" }));
+				}
+				pi.registerTool({
+					name: "load_tool",
+					label: "Load tool",
+					description: "Discover another tool during the conversation",
+					parameters: { type: "object", properties: {} },
+					async execute() {
+						pi.setActiveTools([...pi.getActiveTools(), "discovered_tool"]);
+						return { content: [{ type: "text", text: "Tool loaded." }], details: {} };
+					},
+				});
+				pi.registerTool({
+					name: "discovered_tool",
+					label: "Discovered tool",
+					description: "A tool made available after rollover",
+					defaultActive: false,
+					parameters: { type: "object", properties: {} },
+					async execute() {
+						return {
+							content: [{ type: "text", text: "DISCOVERED_RECEIPT" }],
+							details: {},
+						};
+					},
+				});
+			},
+			seed(manager) {
+				manager.appendMessage({
+					role: "user",
+					content: `DISCARDED_OWNER ${"o".repeat(400_000)}`,
+					timestamp: 1,
+				});
+				manager.appendMessage(fauxAssistantMessage("RETAINED_ASSISTANT"));
+				manager.appendMessage({
+					role: "user",
+					content: `RETAINED_OWNER ${"r".repeat(16_000)}`,
+					timestamp: 2,
+				});
+			},
+		});
+		let before: TranscriptMessages | undefined;
+		let after: TranscriptMessages | undefined;
+		h.faux.setResponses([
+			(ctx) => {
+				before = structuredClone(ctx.messages);
+				return toolTurn(fauxToolCall("load_tool", {}));
+			},
+			(ctx) => {
+				after = structuredClone(ctx.messages);
+				return toolTurn(fauxToolCall("discovered_tool", {}));
+			},
+			fauxAssistantMessage("Done."),
+		]);
+		await h.session.prompt("Continue and discover the tool.");
+		assert.equal(boundaries(h).length, 1);
+		assert.ok(before !== undefined && after !== undefined);
+		const retained = before.findIndex((message) =>
+			textOf(message).startsWith("RETAINED_OWNER"),
+		);
+		const recovery = before.findIndex((message) =>
+			textOf(message).includes("Automatic context rollover recovery record."),
+		);
+		assert.ok(retained >= 0 && recovery > retained, "the retained tail precedes recovery");
+		assert.ok(!getCurrentTools(before).some((tool) => tool.name === "discovered_tool"));
+		assert.ok(getCurrentTools(after).some((tool) => tool.name === "discovered_tool"));
+		// Pi intentionally folds tools into a forced prompt's head; its conversation still stays stable.
+		const prefix = forced ? before.slice(1) : before;
+		const continuation = forced ? after.slice(1) : after;
+		assert.deepEqual(
+			continuation.slice(0, prefix.length),
+			prefix,
+			"discovery only appends to the sent prefix",
+		);
+		assert.equal(textOf(toolResult(h, "discovered_tool")), "DISCOVERED_RECEIPT");
+		assert.equal(h.faux.state.callCount, 3);
+	});
+}
+
 for (const { reason, asynchronous } of [
 	{ reason: "threshold", asynchronous: false },
 	{ reason: "threshold", asynchronous: true },

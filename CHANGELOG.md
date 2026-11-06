@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve incremental tool declarations after retained-tail rollover so later tool discovery keeps the earlier request prefix intact. Keep retained conversation order and reminder filtering in Pi's full-transcript context hook.
+
 ## 0.10.11 - 2026-11-06
 
 <!-- npm-release:unreleased:start -->
