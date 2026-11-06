@@ -17,6 +17,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { basename, dirname, join, relative } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -589,6 +591,77 @@ await test("fork notes keep ownership across tree navigation, adoption, deletion
 	);
 	assert.equal(stillDeleted.isError, true);
 	assert.match(textOf(stillDeleted), /No note/u);
+});
+
+await test("fork adoption reports a private copy left by failed source verification", async (t) => {
+	const parent = await fixture(t);
+	await notesCall(parent, { op: "write", path: "selected.md", content: "selected" });
+	const forkPoint = requireValue(parent.sessionManager.getLeafId());
+	await notesCall(parent, { op: "write", path: "changing.md", content: "original reference" });
+	const otherBranch = requireValue(parent.sessionManager.getLeafId());
+	const child = await fixture(t, {
+		cwd: parent.cwd,
+		manager: (cwd, directory) => {
+			const manager = SessionManager.forkFrom(
+				requireValue(parent.sessionManager.getSessionFile()),
+				cwd,
+				directory,
+			);
+			manager.branch(forkPoint);
+			return manager;
+		},
+	});
+	const selected = await notesCall(child, { op: "read", path: "selected.md" });
+	const directory = dirname(requireValue(/^File: ([^\n]+)/u.exec(selected)?.[1]));
+	await child.session.navigateTree(otherBranch, { summarize: false });
+	const source = join(parent.cwd, ".pi", "notes", "changing.md");
+	const destination = join(directory, "changing.md");
+	const copyFile = fsPromises.copyFile;
+	const copy = t.mock.method(
+		fsPromises,
+		"copyFile",
+		async (...args: Parameters<typeof copyFile>) => {
+			await copyFile(...args);
+			if (args[0] === source) {
+				writeFileSync(source, "source changed after the copy");
+			}
+		},
+	);
+	syncBuiltinESMExports();
+	try {
+		const result = await nativeCall(
+			child,
+			fauxToolCall("notes", { op: "append", path: "changing.md", content: "not appended" }),
+		);
+		assert.equal(result.isError, true);
+		assert.match(
+			textOf(result),
+			/Private copy created.*verification failed.*Read the private copy/u,
+		);
+		assert.equal(readFileSync(destination, "utf8"), "original reference");
+		assert.equal(readFileSync(source, "utf8"), "source changed after the copy");
+	} finally {
+		copy.mock.restore();
+		syncBuiltinESMExports();
+	}
+	assert.match(
+		await notesCall(child, { op: "read", path: "changing.md" }),
+		/\noriginal reference$/u,
+	);
+	unlinkSync(destination);
+	const deleted = await nativeCall(
+		child,
+		fauxToolCall("notes", { op: "read", path: "changing.md" }),
+	);
+	assert.equal(
+		deleted.isError,
+		true,
+		"deleting a private copy must not restore its source reference",
+	);
+	assert.match(textOf(deleted), /No note/u);
+	await notesCall(child, { op: "append", path: "changing.md", content: "private update" });
+	assert.equal(readFileSync(destination, "utf8"), "private update\n");
+	assert.equal(readFileSync(source, "utf8"), "source changed after the copy");
 });
 
 const noteRecoveryTools: NativeSdk.ExtensionFactory = async (pi) => {

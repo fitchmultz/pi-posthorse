@@ -108,30 +108,45 @@ export async function mapBatch<Input, Output>(
 	}
 	return results;
 }
-async function copyNote(note: SnapshotNote, destination: string): Promise<NoteSeed> {
+type CopyResult =
+	| { readonly kind: "verified"; readonly seed: NoteSeed }
+	| { readonly kind: "unverified"; readonly error: Error };
+async function copyNote(note: SnapshotNote, destination: string): Promise<CopyResult> {
 	const source = notePath(note.source, note.source.path);
 	const [before] = await Promise.all([
 		stat(source),
 		mkdir(dirname(destination), { recursive: true }),
 	]);
 	await copyFile(source, destination, constants.COPYFILE_EXCL);
-	const after = await stat(source);
-	if (!sameIdentity(before, after)) {
-		throw new Error(`Source note changed during snapshot: ${source}. Retry initialization.`);
+	try {
+		const after = await stat(source);
+		if (!sameIdentity(before, after)) {
+			throw new Error(
+				`Source note changed during snapshot: ${source}. Retry initialization.`,
+			);
+		}
+		await utimes(destination, before.atimeMs / 1000, before.mtimeMs / 1000);
+		const [digest, destInfo] = await Promise.all([fileDigest(destination), stat(destination)]);
+		return { kind: "verified", seed: { ...note, digest, identity: fileIdentity(destInfo) } };
+	} catch (error) {
+		return {
+			kind: "unverified",
+			error: error instanceof Error ? error : new Error(String(error)),
+		};
 	}
-	await utimes(destination, before.atimeMs / 1000, before.mtimeMs / 1000);
-	const [digest, destInfo] = await Promise.all([fileDigest(destination), stat(destination)]);
-	return { ...note, digest, identity: fileIdentity(destInfo) };
 }
-/** Publication is the ownership boundary. An existing unrelated directory is never overwritten. */
-export async function snapshot(
+type SnapshotPreparation =
+	| { readonly kind: "existing"; readonly binding: ForkBinding }
+	| { readonly kind: "empty" }
+	| { readonly kind: "staging"; readonly stage: string; readonly container: string };
+async function prepareSnapshot(
 	binding: ForkBinding,
 	notes: readonly SnapshotNote[],
-): Promise<ForkBinding> {
+): Promise<SnapshotPreparation> {
 	const directory = scopeDirectory(binding);
 	const existing = await readManifest(directory);
 	if (existing !== undefined && sameOwner(existing.owner, binding.owner)) {
-		return existing;
+		return { kind: "existing", binding: existing };
 	}
 	const container = dirname(directory);
 	if (
@@ -145,22 +160,41 @@ export async function snapshot(
 		throw new Error(`Incomplete notes snapshot: preserving unexpected data at ${container}.`);
 	}
 	if (notes.length === 0) {
-		return binding;
+		return { kind: "empty" };
 	}
 	await mkdir(dirname(container), { recursive: true });
 	const stage = await mkdtemp(join(dirname(container), ".staging-"));
+	return { kind: "staging", stage, container };
+}
+/** Publication is the ownership boundary. An existing unrelated directory is never overwritten. */
+export async function snapshot(
+	binding: ForkBinding,
+	notes: readonly SnapshotNote[],
+): Promise<ForkBinding> {
+	const preparation = await prepareSnapshot(binding, notes);
+	if (preparation.kind !== "staging") {
+		return preparation.kind === "existing" ? preparation.binding : binding;
+	}
+	const { stage, container } = preparation;
 	try {
 		// Keep each file's identity and digest paired with the bytes actually copied.
-		const seeds = await mapBatch(notes, (note) =>
-			copyNote(note, notePath({ root: stage, scope: "notes" }, note.path)),
-		);
+		const seeds = await mapBatch(notes, async (note) => {
+			const result = await copyNote(
+				note,
+				notePath({ root: stage, scope: "notes" }, note.path),
+			);
+			if (result.kind === "unverified") {
+				throw result.error;
+			}
+			return result.seed;
+		});
 		const complete: ForkBinding = { ...binding, seeds };
 		await writeFile(join(stage, "manifest.json"), JSON.stringify(complete), { flag: "wx" });
 		await rename(stage, container);
 		return complete;
 	} catch (error) {
 		throw new Error(
-			`Incomplete notes snapshot for ${directory}: ${error instanceof Error ? error.message : String(error)}`,
+			`Incomplete notes snapshot for ${scopeDirectory(binding)}: ${error instanceof Error ? error.message : String(error)}`,
 			{ cause: error },
 		);
 	} finally {
@@ -168,7 +202,7 @@ export async function snapshot(
 	}
 }
 /** Called inside the destination's native mutation queue, never queues that path recursively. */
-export async function adoptNote(binding: NoteBinding, note: SnapshotNote): Promise<NoteSeed> {
+export async function adoptNote(binding: NoteBinding, note: SnapshotNote): Promise<CopyResult> {
 	return copyNote(note, notePath(binding, note.path));
 }
 /** Empty initialized scopes publish their manifest when the first note is created. */
