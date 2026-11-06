@@ -3,9 +3,10 @@ import type {
 	ContextEvent,
 	ExtensionAPI,
 	ExtensionContext,
+	SessionBeforeCompactEvent,
 	TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
-import { budgetFor, CHECKPOINT_GUIDANCE, freshPayloadChars, type Budget } from "./budget.ts";
+import { budgetFor, CHECKPOINT_GUIDANCE, freshPayloadChars } from "./budget.ts";
 import {
 	isRecord,
 	isReminderType,
@@ -29,13 +30,12 @@ type RolloverResources = {
 import {
 	countRetainedMessages,
 	createReminderLookup,
-	hasReminder,
+	reminderDecision,
 	reminderMatches,
 	type ReminderLookup,
 	type StaleReminderPredicate,
 } from "./reminders.ts";
 
-const REMINDER_BUFFER_TOKENS = 32_000;
 function explicitReset(
 	event: TurnEndEvent,
 	ctx: ExtensionContext,
@@ -71,76 +71,6 @@ function explicitReset(
 		],
 		continue: true,
 	};
-}
-function endsRun(
-	event: TurnEndEvent,
-	ctx: { readonly hasPendingMessages?: () => boolean },
-): boolean {
-	return (
-		event.message.role === "assistant" &&
-		!event.message.content.some((part) => part.type === "toolCall") &&
-		!event.continue &&
-		event.context.pendingMessages.length === 0 &&
-		ctx.hasPendingMessages?.() !== true
-	);
-}
-function reminderBudget(host: PolicyContext): Budget | undefined {
-	const usage = host.getContextUsage();
-	if (usage === undefined || usage.tokens === null || usage.contextWindow <= 0) {
-		return undefined;
-	}
-	const budget = budgetFor(host, usage.contextWindow);
-	if (
-		budget === undefined ||
-		!budget.enabled ||
-		!budget.supported ||
-		usage.tokens >= budget.rolloverAt
-	) {
-		return undefined;
-	}
-	const buffer = Math.min(REMINDER_BUFFER_TOKENS, Math.floor(budget.usable * 0.1));
-	return usage.tokens < budget.rolloverAt - buffer ? undefined : budget;
-}
-function sendReminder(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	available: {
-		readonly budget: Budget;
-		readonly pendingMessages: readonly {
-			readonly role: string;
-			readonly customType?: string | undefined;
-			readonly details?: unknown;
-		}[];
-	},
-	reminders: ReminderLookup,
-): void {
-	const { budget } = available;
-	const state = reminders.read(ctx);
-	const fingerprint: ReminderFingerprint = {
-		windowId: state.windowId,
-		contextWindow: budget.contextWindow,
-		reserveTokens: budget.reserveTokens,
-	};
-	if (
-		hasReminder(state.reminders, fingerprint) ||
-		available.pendingMessages.some(
-			(message) =>
-				message.role === "custom" &&
-				isReminderType(message.customType) &&
-				reminderMatches(message.details, fingerprint),
-		)
-	) {
-		return;
-	}
-	pi.sendMessage(
-		{
-			customType: REMINDER_TYPE,
-			content: `[posthorse] Routine task-note update.\n${CHECKPOINT_GUIDANCE}`,
-			display: true,
-			details: fingerprint,
-		},
-		{ deliverAs: "steer" },
-	);
 }
 const NO_STALE_REMINDER: StaleReminderPredicate = () => false;
 function staleReminderPredicate(
@@ -312,6 +242,9 @@ function fallbackTurnEligible(event: TurnEndEvent, ctx: ExtensionContext): boole
 		!event.entries.some((entry) => entry.type === "compaction" || entry.type === "context_edit")
 	);
 }
+type Preparation<Draft> =
+	| { readonly kind: "delegate" }
+	| { readonly kind: "draft"; readonly value: Draft };
 function thresholdFallback(
 	pi: ExtensionAPI,
 	event: TurnEndEvent,
@@ -321,16 +254,16 @@ function thresholdFallback(
 		readonly toolTokens: () => number;
 		readonly notes: RolloverResources["notes"];
 	},
-): BoundaryResult | undefined {
+): Preparation<BoundaryResult> {
 	if (!fallbackTurnEligible(event, ctx)) {
-		return undefined;
+		return { kind: "delegate" };
 	}
 	const { host, toolTokens } = capacity;
 	if (!reachedThreshold(host)) {
-		return undefined;
+		return { kind: "delegate" };
 	}
 	if (!freshWindowWithoutInput(event.context.contextEntries)) {
-		return undefined;
+		return { kind: "delegate" };
 	}
 	const projected = event.context.contextEntries;
 	const ownerQuestionRegistered = pi
@@ -348,21 +281,79 @@ function thresholdFallback(
 		ownerQuestionRegistered,
 	);
 	if (recovery === undefined) {
-		return undefined;
+		return { kind: "delegate" };
 	}
 	// ponytail: turn_end drafts are eager. Later projection editors must replace/remove this draft;
 	// upgrade to a host post-boundary hook if recovery must include later handler edits.
 	return {
-		entries: [
-			...event.entries,
-			{
-				type: "compaction",
-				summary: recovery.handoff,
-				firstKeptEntryId: recovery.firstKeptEntryId ?? null,
-				details: { posthorse: 1, reason: "threshold" },
-			},
-		],
-		continue: event.continue,
+		kind: "draft",
+		value: {
+			entries: [
+				...event.entries,
+				{
+					type: "compaction",
+					summary: recovery.handoff,
+					firstKeptEntryId: recovery.firstKeptEntryId ?? null,
+					details: { posthorse: 1, reason: "threshold" },
+				},
+			],
+			continue: event.continue,
+		},
+	};
+}
+type AutomaticPreparation =
+	| Preparation<Parameters<typeof automaticDraft>[2]>
+	| { readonly kind: "cancel" };
+function compactionCancelled(event: SessionBeforeCompactEvent, ctx: ExtensionContext): boolean {
+	return event.signal.aborted || ctx.signal?.aborted === true;
+}
+function prepareAutomatic(
+	pi: ExtensionAPI,
+	event: SessionBeforeCompactEvent,
+	ctx: ExtensionContext,
+	capacity: {
+		readonly policy: SnapshotReader;
+		readonly toolTokens: () => number;
+		readonly notes: RolloverResources["notes"];
+	},
+): AutomaticPreparation {
+	if (event.reason === "manual") {
+		return { kind: "delegate" };
+	}
+	if (compactionCancelled(event, ctx)) {
+		return { kind: "cancel" };
+	}
+	const host = capacity.policy(ctx, event.preparation.settings);
+	if (budgetFor(host)?.supported !== true) {
+		return { kind: "delegate" };
+	}
+	const ownerQuestionRegistered = pi
+		.getAllTools()
+		.some((tool) => tool.name === "ask_question" && tool.namespace === undefined);
+	const recovery = automaticRecovery(
+		event.branchEntries,
+		ctx.sessionManager.buildSessionProjection().entries,
+		{
+			host,
+			toolTokens: capacity.toolTokens(),
+			firstKeptEntryId: event.preparation.firstKeptEntryId,
+			notes: capacity.notes(ctx),
+		},
+		ownerQuestionRegistered,
+	);
+	if (recovery === undefined) {
+		throw new Error("Too little fresh context capacity for an automatic recovery record.");
+	}
+	if (compactionCancelled(event, ctx)) {
+		return { kind: "cancel" };
+	}
+	return {
+		kind: "draft",
+		value: {
+			...recovery,
+			tokensBefore: event.preparation.tokensBefore,
+			reason: event.reason,
+		},
 	};
 }
 function registerAutomaticRollover(
@@ -372,48 +363,27 @@ function registerAutomaticRollover(
 	notes: RolloverResources["notes"],
 ): void {
 	pi.on("session_before_compact", (event, ctx) => {
-		if (event.reason === "manual") {
-			return;
-		}
-		const cancelled = () => event.signal.aborted || ctx.signal?.aborted === true;
-		if (cancelled()) {
-			return { cancel: true };
-		}
 		try {
-			const host = policy(ctx, event.preparation.settings);
-			if (budgetFor(host)?.supported !== true) {
-				return;
-			}
-			const ownerQuestionRegistered = pi
-				.getAllTools()
-				.some((tool) => tool.name === "ask_question" && tool.namespace === undefined);
-			const recovery = automaticRecovery(
-				event.branchEntries,
-				ctx.sessionManager.buildSessionProjection().entries,
-				{
-					host,
-					toolTokens: activeToolTokens(),
-					firstKeptEntryId: event.preparation.firstKeptEntryId,
-					notes: notes(ctx),
-				},
-				ownerQuestionRegistered,
-			);
-			if (recovery === undefined) {
-				throw new Error(
-					"Too little fresh context capacity for an automatic recovery record.",
-				);
-			}
-			if (cancelled()) {
-				return { cancel: true };
-			}
-			return automaticDraft(pi, ctx, {
-				...recovery,
-				tokensBefore: event.preparation.tokensBefore,
-				reason: event.reason,
+			const preparation = prepareAutomatic(pi, event, ctx, {
+				policy,
+				toolTokens: activeToolTokens,
+				notes,
 			});
+			switch (preparation.kind) {
+				case "delegate":
+					return;
+				case "cancel":
+					return { cancel: true };
+				case "draft":
+					return automaticDraft(pi, ctx, preparation.value);
+				default: {
+					const exhaustive: never = preparation;
+					return exhaustive;
+				}
+			}
 		} catch (error) {
 			// Hook errors are swallowed by Pi, which would run its summarizer; cancel instead.
-			if (!cancelled()) {
+			if (!compactionCancelled(event, ctx)) {
 				reportAutomaticFailure(ctx, error);
 			}
 			return { cancel: true };
@@ -463,19 +433,19 @@ export function registerRollover(
 			toolTokens: activeToolTokens,
 			notes: resources.notes,
 		});
-		if (fallback !== undefined) {
-			return fallback;
+		if (fallback.kind === "draft") {
+			return fallback.value;
 		}
-		if (endsRun(event, ctx)) {
-			return;
-		}
-		const available = reminderBudget(host);
-		if (available !== undefined) {
-			sendReminder(
-				pi,
-				ctx,
-				{ budget: available, pendingMessages: event.context.pendingMessages },
-				reminders,
+		const reminder = reminderDecision(event, ctx, host, reminders);
+		if (reminder.kind === "send") {
+			pi.sendMessage(
+				{
+					customType: REMINDER_TYPE,
+					content: `[posthorse] Routine task-note update.\n${CHECKPOINT_GUIDANCE}`,
+					display: true,
+					details: reminder.fingerprint,
+				},
+				{ deliverAs: "steer" },
 			);
 		}
 		return;
