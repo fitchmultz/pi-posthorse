@@ -26,6 +26,7 @@ import { createEditTool, SessionManager } from "@earendil-works/pi-coding-agent"
 import { fixturePolicy, loadFixture, requireValue, record, stringValue } from "./harness.ts";
 import { createPosthorse } from "../index.ts";
 import { buildAutoHandoff } from "../src/recovery.ts";
+import type { EntryLike } from "../src/contracts.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 import { Type, type TSchema } from "typebox";
 import { Check } from "typebox/value";
@@ -5040,6 +5041,99 @@ await test("automatic recovery tracks session notes across tools, codemode, cont
 		fullRetained,
 		/Your latest full write to pi-durable-pr\.md is already visible above at entry compacted-write-call; do not rewrite it unless new findings after entry retained-partial-res require it\./,
 	);
+
+	const replacement: EntryLike[] = [
+		{
+			type: "message",
+			id: "replacement-call",
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id: "replacement",
+						name: "notes",
+						arguments: { op: "write", path: "pi-durable-pr.md", content: "New state" },
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: "replacement-receipt",
+			message: {
+				role: "toolResult",
+				toolName: "notes",
+				toolCallId: "replacement",
+				isError: false,
+				content: "Wrote /workspace/.pi/notes/pi-durable-pr.md",
+			},
+		},
+	];
+	const renderFollowing = (following: readonly EntryLike[]) => {
+		const branch: EntryLike[] = [...entries, ...following];
+		return buildAutoHandoff(
+			branch,
+			branch.flatMap((sourceEntry) =>
+				sourceEntry.message === undefined
+					? []
+					: [{ sourceEntry, messages: [sourceEntry.message] }],
+			),
+			20_000,
+			{
+				ownerQuestionRegistered: false,
+				retainedEntryIds: new Set([
+					"compacted-write-call",
+					"compacted-write-res",
+					"retained-partial-call",
+					"retained-partial-res",
+					...following.map((entry) => entry.id ?? ""),
+				]),
+			},
+		);
+	};
+	const replaced = renderFollowing(replacement);
+	assert.match(
+		replaced,
+		/latest full write is in the retained tail above at entry replacement-call\]/,
+	);
+	assert.doesNotMatch(replaced, /updated at entry retained-partial-call/);
+	const observed: EntryLike = {
+		type: "message",
+		id: "observed-receipt",
+		message: {
+			role: "toolResult",
+			toolName: "codemode",
+			toolCallId: "observed",
+			isError: false,
+			content: "Saved a newer checkpoint.",
+			nestedCalls: {
+				calls: [
+					{
+						name: "notes",
+						arguments: {
+							op: "write",
+							path: "pi-durable-pr.md",
+							content: "Newer state",
+						},
+						result: "Wrote /workspace/.pi/notes/pi-durable-pr.md",
+					},
+				],
+			},
+		},
+	};
+	const effectOnly = renderFollowing([...replacement, observed]);
+	assert.match(
+		effectOnly,
+		/pi-durable-pr\.md.*verified effect at entry observed-receipt.*read this note now/,
+	);
+	assert.doesNotMatch(effectOnly, /latest full write is in the retained tail/);
+	const restored = renderFollowing([observed, ...replacement]);
+	assert.match(
+		restored,
+		/latest full write is in the retained tail above at entry replacement-call\]/,
+	);
+	assert.doesNotMatch(restored, /verified effect at entry observed-receipt/);
 });
 
 await test("automatic recovery keeps verified paths from a partially failed editing receipt", () => {
