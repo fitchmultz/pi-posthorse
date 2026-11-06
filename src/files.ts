@@ -286,13 +286,20 @@ export function notesDir(cwd: string): string {
 		const target = migrationTarget(moved);
 		try {
 			renameSync(local, target);
+		} catch (error) {
+			if (lstatSync(local, { throwIfNoEntry: false })?.isDirectory() === true) {
+				throw error;
+			}
+			return moved;
+		}
+		try {
 			// Sessions still running an older Posthorse keep reaching the notes until they reload.
 			symlinkSync(moved, local, "junction");
 		} catch (error) {
 			if (lstatSync(local, { throwIfNoEntry: false })?.isDirectory() === true) {
 				throw error;
 			}
-			// Another session moved them first, or only the compatibility link failed.
+			// Notes are already outside the checkout; the compatibility link is optional.
 		}
 	}
 	return moved;

@@ -1,7 +1,8 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
+import { syncBuiltinESMExports } from "node:module";
+import fs, {
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -82,6 +83,43 @@ await test("project package notes migrate outside the checkout and survive Pi's 
 		assert.equal(readFileSync(join(checkout, "tracked.txt"), "utf8"), "package source");
 	} finally {
 		rmSync(project, { recursive: true, force: true });
+	}
+});
+
+await test("a failed compatibility link preserves migrated notes and the conflicting entry", (context) => {
+	const project = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-package-link-")));
+	context.after(() => rmSync(project, { recursive: true, force: true }));
+	const checkout = packageCheckout(project);
+	const legacy = writeLegacy(checkout, "migrated without link");
+	const moved = projectStore(project);
+	const rename = fs.renameSync;
+	const intercepted = context.mock.method(
+		fs,
+		"renameSync",
+		(...args: Parameters<typeof rename>) => {
+			rename(...args);
+			if (args[0] === legacy) {
+				writeFileSync(legacy, "conflicting compatibility entry");
+			}
+		},
+	);
+	syncBuiltinESMExports();
+	try {
+		assert.equal(notesDir(checkout), moved);
+		assert.equal(readFileSync(legacy, "utf8"), "conflicting compatibility entry");
+		assert.equal(
+			readFileSync(join(moved, "task", "state.md"), "utf8"),
+			"migrated without link",
+		);
+		updateCheckout(checkout);
+		assert.equal(notesDir(checkout), moved);
+		assert.equal(
+			readFileSync(join(moved, "task", "state.md"), "utf8"),
+			"migrated without link",
+		);
+	} finally {
+		intercepted.mock.restore();
+		syncBuiltinESMExports();
 	}
 });
 
