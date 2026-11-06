@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+## 0.10.11 - 2026-11-06
+
+<!-- npm-release:unreleased:start -->
+
 - Honor `new_context` requests made through foreground tool composition. Keep native call provenance, reject resets after caught nested tool failures, and consume each request only with its foreground receipt.
+
+<!-- npm-release:unreleased:end -->
+
+- Fix composed context reset settlement (1/6) (#132) ([379fb7e](https://github.com/fitchmultz/pi-posthorse/commit/379fb7e27e4b01b8016bb322476532034646b7bb))
+
+### What's Changed
+
+- Fix composed context reset settlement (1/6) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/132
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.10...v0.10.11
 
 ## 0.10.10 - 2026-11-05
 
