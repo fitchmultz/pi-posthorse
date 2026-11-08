@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+## 0.10.13 - 2026-11-08
+
+<!-- npm-release:unreleased:start -->
+
 - Stop blocking file tools on notes in other scopes and managed metadata. An edit of an inherited note at a fork's private path copies it and applies in the same call. Forks start when a source note is missing or legacy provenance is ambiguous, recovery ignores relative file-tool note paths whose working directory is unknown, and recovery keeps this session's own writes in other scopes as writes and names them by their path.
+
+<!-- npm-release:unreleased:end -->
+
+- fix: stop blocking note file access and fork startup on missing notes (1/2) (#143) ([650012d](https://github.com/fitchmultz/pi-posthorse/commit/650012dbd268095bb0d21043370f5544db13f3d6))
+
+### What's Changed
+
+- fix: stop blocking note file access and fork startup on missing notes (1/2) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/143
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.12...v0.10.13
 
 ## 0.10.12 - 2026-11-06
 
