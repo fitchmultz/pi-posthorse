@@ -5,10 +5,7 @@ import { withFileMutationQueue, type ExtensionAPI } from "@earendil-works/pi-cod
 import {
 	addressOf,
 	canonicalPath,
-	inside,
-	notePath,
 	sameScope,
-	scopeDirectory,
 	type NoteAddress,
 	type NoteTouchRecord,
 } from "./note-scopes.ts";
@@ -68,48 +65,21 @@ function existingEdit(tool: string, operation: NoteOperation): boolean {
 		(tool === "write_files" && (operation.action === "write" || operation.action === "clear"))
 	);
 }
-async function guardForeign(
-	address: NoteAddress,
-	operation: NoteOperation,
-	captured: CapturedCall,
-): Promise<string> {
-	const { session, tool, call } = captured;
+/** An edit of an inherited note in this session's scope applies to its private copy. */
+async function prepareOperation(operation: NoteOperation, captured: CapturedCall): Promise<void> {
 	if (operation.action === "read") {
-		return `This is another notes scope. Use notes read with ${JSON.stringify({ scope: scopeDirectory(address), path: address.path })} for a labeled read-only comparison, or omit scope to read this session’s copy.`;
+		return;
 	}
-	return existingEdit(tool, operation) &&
-		session.scopes.some((scope) => sameScope(scope, address))
-		? session.guardReference(address.path, call)
-		: `The foreign note was not changed. This session writes ${notePath(session.binding, address.path)}. Retry explicitly there; creation semantics were not changed.`;
-}
-async function guardOperation(
-	operation: NoteOperation,
-	captured: CapturedCall,
-): Promise<string | undefined> {
 	const { session, call, tool, cwd } = captured;
 	const path = toolPath(tool, operation.path, cwd);
 	const address = await noteAddress(path, session);
-	if (address === undefined) {
-		return operation.action !== "read" &&
-			session.scopes.some((scope) =>
-				inside(canonicalPath(join(scope.root, ".forks")), canonicalPath(path)),
-			)
-			? `Managed notes metadata is not editable through file tools: ${path}. Use notes for this session’s checkpoint.`
-			: undefined;
-	}
-	if (!sameScope(address, session.binding)) {
-		return guardForeign(address, operation, captured);
+	if (address === undefined || !sameScope(address, session.binding)) {
+		return;
 	}
 	if (existingEdit(tool, operation) && !session.owns(address.path)) {
-		const copied = await withFileMutationQueue(path, () => session.adopt(address.path, call));
-		if (copied === "adopted") {
-			return `Private copy created at ${path}; no requested edit ran. Read this copy, then retry the edit.`;
-		}
+		await withFileMutationQueue(path, () => session.adopt(address.path, call));
 	}
-	if (operation.action !== "read") {
-		await session.prepareWrite();
-	}
-	return;
+	await session.prepareWrite();
 }
 async function recordedFiles(
 	operations: readonly NoteOperation[],
@@ -148,42 +118,22 @@ async function recordedFiles(
 export function registerNoteGuards(pi: ExtensionAPI, store: NotesStore): void {
 	const calls = new Map<string, CapturedCall>();
 	pi.on("tool_call", async (event, ctx) => {
-		const operations = noteOperations(event.toolName, event.input);
-		const session = await store.get(ctx).catch((error: unknown) => {
-			if (
-				event.toolName === "notes" ||
-				operations.some((operation) =>
-					store
-						.roots()
-						.some((root) =>
-							inside(
-								root,
-								canonicalPath(toolPath(event.toolName, operation.path, ctx.cwd)),
-							),
-						),
-				)
-			) {
-				throw error;
-			}
-			return;
-		});
-		if (session === undefined) {
+		let session: SessionNotes;
+		try {
+			session = await store.get(ctx);
+		} catch {
+			// Failed notes initialization skips bookkeeping; the notes tool reports the error itself.
 			return;
 		}
 		const call = session.startCall(event.toolCallId, event.parentToolCallId);
 		const captured = { session, call, cwd: ctx.cwd, tool: event.toolName };
 		calls.set(event.toolCallId, captured);
-		if (event.toolName === "notes" || operations.length === 0) {
+		if (event.toolName === "notes") {
 			return;
 		}
-		for (const operation of operations) {
-			// Preflight never mutates arguments; a copied reference needs a fresh read before retry.
-			const reason = await guardOperation(operation, captured);
-			if (reason !== undefined) {
-				return { block: true, reason };
-			}
+		for (const operation of noteOperations(event.toolName, event.input)) {
+			await prepareOperation(operation, captured);
 		}
-		return;
 	});
 	pi.on("tool_result", async (event) => {
 		const captured = calls.get(event.toolCallId);

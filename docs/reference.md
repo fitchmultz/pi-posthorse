@@ -160,8 +160,9 @@ than silently adopting it.
 The initial copy includes notes used on the selected branch, with inherited copy associations
 that remain visible there. It does not copy the whole project store or abandoned branches.
 The bytes come from the immediate parent's current files, not a historical filesystem version.
-Copies preserve the source modification time. A missing source or ambiguous legacy provenance
-reports an incomplete snapshot instead of making the parent writable.
+Copies preserve the source modification time. A missing source note is not copied; while its
+source scope is known it stays a live reference and appears once restored. Ambiguous legacy
+provenance starts the fork without a source scope, so it copies only notes in recorded scopes.
 
 Resume restores the existing scope without copying again. `/tree` keeps the same scope and does
 not roll files back. A CLI fork can contain other source branches. Notes found after navigating
@@ -192,23 +193,20 @@ A fork created in another project stores its copies in that destination's notes 
 project does not discover those copies through a global index. Recorded source roots still allow
 reads and adoption when an old worktree disappears but its shared notes store remains available.
 
-Native `read`, `edit`, and `write`, plus `replace_text`, `write_files`, and `apply_patch`, respect
-scope ownership when called directly or through native tool composition. Foreign generic reads
-redirect to a labeled `notes read` comparison. An existing-file edit to an unowned source note
-first copies the current source bytes, then blocks the requested edit. Its receipt identifies the
-private copy and requires a fresh read before retrying there. Creation-only operations do not
-pre-create a destination or change creation semantics. `notes append` adopts and appends within
-one same-file queue admission, preserving the inherited prefix.
+Native `read`, `edit`, and `write`, plus `replace_text`, `write_files`, and `apply_patch`, work on
+any notes path, called directly or through native tool composition; Posthorse records the notes
+they touch for recovery. An existing-file edit of an unowned inherited note at the session's
+private path first copies the current source bytes there, then applies the edit to that copy.
+The source is not edited. A path in another scope is edited in place. Creation-only operations do
+not pre-create a destination or change creation semantics. `notes append` adopts and appends
+within one same-file queue admission, preserving the inherited prefix.
 
-If adoption copies a note but cannot verify the copy or save its metadata, the error identifies
-the private destination and asks for a fresh read before retrying. The private copy is recorded
-as owned, so deleting it cannot restore the parent reference. The source is not edited.
-Initial fork snapshots instead discard their unpublished staging directory on verification failure.
-
-These checks apply to original sessions too, so a parent cannot use those tools to edit a child's
-notes or managed metadata. They are not a filesystem sandbox. Shell commands and custom programs
-can still change files outside their scope. Private notes cannot follow aliases outside their
-scope; original project notes retain their existing alias behavior except into managed scopes.
+If adoption copies a note but cannot verify the copy or save its metadata, the requested edit does
+not run and the error identifies the private destination; read it before retrying. The private
+copy is recorded as owned, so deleting it cannot restore the parent reference. The source is not
+edited. Initial fork snapshots instead discard their unpublished staging directory on verification
+failure. Private notes cannot follow aliases outside their scope; original project notes retain
+their existing alias behavior except into managed scopes.
 
 Verified nested note effects have journal records independent of the outer tool's output.
 Automatic recovery associates each effect with its causal call receipt or delivered background

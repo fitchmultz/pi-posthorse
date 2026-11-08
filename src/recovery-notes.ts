@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import type { EntryLike, ProjectedEntry } from "./contracts.ts";
 import { sessionNoteTouches, scopeRecoveryTouches, type NotesRecovery } from "./note-evidence.ts";
+import { scopeDirectory } from "./note-scopes.ts";
 import type { NoteTarget, NoteTouch } from "./recovery-note-touches.ts";
 
 const MAX_WRITTEN_NOTES = 4;
@@ -77,7 +79,7 @@ function applyTouch(
 }
 function formatNoteLabel(note: TrackedNote): string {
 	if (note.referenceScope !== undefined) {
-		return `${note.notePath} (read-only reference; notes read ${JSON.stringify({ scope: note.referenceScope, path: note.notePath })})`;
+		return `${note.notePath} (another notes scope: ${note.absPath ?? `${note.referenceScope}/${note.notePath}`})`;
 	}
 	return note.absPath !== undefined && note.absPath !== note.notePath
 		? `${note.notePath} (${note.absPath})`
@@ -116,14 +118,22 @@ function formatReadNoteLine(note: ReadNote, span: RetainedSpan | undefined): str
 function formatNotesAction(
 	primaryWritten: WrittenNote | undefined,
 	span: RetainedSpan | undefined,
+	notesDirectory: string | undefined,
 ): string {
 	if (primaryWritten === undefined) {
 		return "Read the referenced note again if its context is still needed, and keep one current-state note for this task.";
 	}
+	// notes read resolves a bare name in this session's own scope, so a note elsewhere is named by its path.
+	const elsewhere =
+		primaryWritten.absPath !== undefined &&
+		notesDirectory !== undefined &&
+		primaryWritten.absPath !== join(notesDirectory, primaryWritten.notePath);
+	const target = elsewhere ? primaryWritten.absPath : primaryWritten.notePath;
 	if (span !== undefined && primaryWritten.proof.kind === "full") {
-		return `Your latest full write to ${primaryWritten.notePath} is already visible above at entry ${primaryWritten.proof.entryId}; do not rewrite it unless new findings after entry ${span.lastId} require it.`;
+		return `Your latest full write to ${target} is already visible above at entry ${primaryWritten.proof.entryId}; do not rewrite it unless new findings after entry ${span.lastId} require it.`;
 	}
-	return `Read ${primaryWritten.notePath} (notes read or read on its path) before continuing to restore the saved goal, progress, decisions, and next steps, then keep that note current as work progresses.`;
+	const how = elsewhere ? "read on its path" : "notes read or read on its path";
+	return `Read ${target} (${how}) before continuing to restore the saved goal, progress, decisions, and next steps, then keep that note current as work progresses.`;
 }
 function trackedNotes(
 	touches: readonly NoteTouch[],
@@ -176,7 +186,11 @@ export function renderSessionNotes(
 		...readOnly.map((note) => formatReadNoteLine(note, span)),
 	];
 	const header = "Task notes in this session:";
-	const action = formatNotesAction(written[0], span);
+	const action = formatNotesAction(
+		written[0],
+		span,
+		options.notes === undefined ? defaultDir : scopeDirectory(options.notes.binding),
+	);
 	const selected: string[] = [];
 	for (const line of lines) {
 		if ([header, ...selected, line, action].join("\n").length <= maxChars) {

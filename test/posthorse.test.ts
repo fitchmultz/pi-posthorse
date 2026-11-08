@@ -5306,3 +5306,51 @@ await test("automatic recovery keeps verified paths from a partially failed edit
 		/^- (?:Active|Referenced) note.*(?:source\.md|unattempted\.md|uncertain\.md)/mu,
 	);
 });
+
+await test("automatic recovery ignores relative file-tool note paths whose working directory is unknown", () => {
+	const entries = ["relative", "absolute"].flatMap((name) => [
+		{
+			type: "message",
+			id: `${name}-call`,
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id: name,
+						name: "read",
+						arguments: {
+							path:
+								name === "relative"
+									? ".pi/notes/relative.md"
+									: "/workspace/.pi/notes/absolute.md",
+						},
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: `${name}-receipt`,
+			message: {
+				role: "toolResult",
+				toolName: "read",
+				toolCallId: name,
+				isError: false,
+				content: "note text",
+			},
+		},
+	]);
+	const projected = entries.map((sourceEntry) => ({
+		sourceEntry,
+		messages: [sourceEntry.message],
+	}));
+	const handoff = buildAutoHandoff(entries, projected, 20_000, {
+		ownerQuestionRegistered: false,
+	});
+	assert.match(
+		handoff,
+		/Referenced note \(read\): absolute\.md \(\/workspace\/\.pi\/notes\/absolute\.md\)/u,
+	);
+	assert.doesNotMatch(handoff, /relative\.md/u);
+});

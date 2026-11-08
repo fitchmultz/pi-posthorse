@@ -77,8 +77,11 @@ function matchMarkerPath(slash: string): string | undefined {
 	return /\/\.pi\/(?:agent\/)?notes\/[^/]+\/[^/]+\/[^/]+\/(.+)$/u.exec(slash)?.[1];
 }
 
+function absoluteSlashPath(slash: string): boolean {
+	return slash.startsWith("/") || /^[A-Za-z]:\//u.test(slash);
+}
 function unscopedNoteTarget(trimmed: string, slash: string): NoteTarget | undefined {
-	if (slash.startsWith("/") || /^[A-Za-z]:\//u.test(slash)) {
+	if (absoluteSlashPath(slash)) {
 		const base = normalizeRelPath(slash.slice(slash.lastIndexOf("/") + 1));
 		return base === "" ? undefined : { notePath: base, absPath: trimmed };
 	}
@@ -98,7 +101,14 @@ function resolveNoteTarget(
 	const matched = matchNoteDirectory(slash, [...knownDirs])?.path ?? matchMarkerPath(slash);
 	if (matched !== undefined) {
 		const rel = matched.startsWith(".forks/") ? "" : normalizeRelPath(matched);
-		return rel === "" ? undefined : { notePath: rel, absPath: trimmed };
+		if (rel === "") {
+			return undefined;
+		}
+		if (absoluteSlashPath(slash)) {
+			return { notePath: rel, absPath: trimmed };
+		}
+		// The journal does not record a file tool's working directory, so its relative path has no known base.
+		return fromNotesTool ? { notePath: rel } : undefined;
 	}
 	return fromNotesTool ? unscopedNoteTarget(trimmed, slash) : undefined;
 }
