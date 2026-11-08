@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Stop blocking file tools on notes in other scopes and managed metadata. An edit of an inherited note at a fork's private path copies it and applies in the same call. Forks start when a source note is missing or legacy provenance is ambiguous, recovery ignores relative file-tool note paths whose working directory is unknown, and recovery keeps this session's own writes in other scopes as writes.
+- Stop blocking file tools on notes in other scopes and managed metadata. An edit of an inherited note at a fork's private path copies it and applies in the same call. Forks start when a source note is missing or legacy provenance is ambiguous, recovery ignores relative file-tool note paths whose working directory is unknown, and recovery keeps this session's own writes in other scopes as writes and names them by their path.
 
 ## 0.10.12 - 2026-11-06
 

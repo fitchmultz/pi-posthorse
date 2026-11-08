@@ -706,6 +706,37 @@ await test("fork notes recover metadata-only nested writes through edited receip
 	);
 });
 
+await test("fork recovery names a note it wrote in another scope by its path", async (t) => {
+	const parent = await fixture(t);
+	await notesCall(parent, { op: "write", path: "task.md", content: "parent checkpoint" });
+	const source = requireValue(parent.sessionManager.getSessionFile());
+	const child = await fixture(t, {
+		cwd: parent.cwd,
+		fileTools: true,
+		extension: noteRecoveryTools,
+		contextWindow: 128_000,
+		manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
+	});
+	// The fork owns a private task.md, so notes read task.md would not reach the project's note.
+	assert.match(await notesCall(child, { op: "read", path: "task.md" }), /File: .*\/\.forks\//u);
+	const shared = join(parent.cwd, ".pi", "notes", "task.md");
+	const edited = await nativeCall(
+		child,
+		fauxToolCall("edit", {
+			path: shared,
+			oldText: "parent checkpoint",
+			newText: "fork progress",
+		}),
+	);
+	assert.equal(edited.isError, false, textOf(edited));
+	await nativeCall(child, fauxToolCall("dump", {}));
+	const recovery = requireValue(posthorseBoundaries(child.sessionManager).at(-1)).summary;
+	const named = requireValue(
+		/^Read (\S+) \(read on its path\) before continuing/mu.exec(recovery)?.[1],
+	);
+	assert.equal(realpathSync(named), realpathSync(shared));
+});
+
 await test("fork notes associate late cancelled background effects with their launch branch", async (t) => {
 	const started = Promise.withResolvers<null>();
 	const release = Promise.withResolvers<null>();
