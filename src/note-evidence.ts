@@ -156,9 +156,11 @@ export function scopeRecoveryTouches(
 		if (address !== undefined && sameScope(address, recovery.binding)) {
 			return touch;
 		}
-		const currentOwner =
-			touch.owner !== undefined && sameOwner(touch.owner, recovery.binding.owner);
-		if (owned.has(touch.notePath) && !currentOwner) {
+		// This session's own file-tool effects keep their recorded address and kind in any scope.
+		if (touch.owner !== undefined && sameOwner(touch.owner, recovery.binding.owner)) {
+			return touch;
+		}
+		if (owned.has(touch.notePath)) {
 			return {
 				...touch,
 				absPath: notePath(recovery.binding, touch.notePath),

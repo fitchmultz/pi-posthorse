@@ -141,9 +141,9 @@ restore old file versions.
 
 Project-wide lists and searches include completed fork scopes, with selectors for read-only
 comparisons. Unchanged inherited copies collapse into one row with references to the other
-scopes. A note found on another inherited branch can be read as a live reference. An anchored
-edit adopts it first, then asks for a reread and retry on the private file. Append adopts without
-discarding the inherited text. A deleted child-owned note stays deleted rather than falling back
+scopes. A note found on another inherited branch can be read as a live reference. An edit of
+its private path copies it first and then applies there. Append adopts without discarding the
+inherited text. A deleted child-owned note stays deleted rather than falling back
 to its parent.
 
 Nested note writes remain recoverable even when Pi omits their arguments from a compact script

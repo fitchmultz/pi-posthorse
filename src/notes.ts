@@ -295,7 +295,7 @@ export function registerNotes(
 		label: "Notes",
 		...toolCards("notes"),
 		description:
-			"Durable notes across Git worktrees and context resets. Forks own private copies of selected-branch notes. Ops: list (newest first, size/date; optional folder), read, search (case-insensitive text), write (replace; empty clears), append (one newline-terminated record). list/search discover project-wide notes with scope selectors; use scope for read-only comparisons or a single-scope view. Omit scope for current notes and live references. list/read/search are paged; continue with the returned offset. list shows the current writable directory; current-file reads show an editable path, foreign reads a read-only reference. Edit the returned current path for small changes. A blocked foreign edit may have created a private copy: read that copy before retrying. Append adopts unowned references without losing their text. Keep one concise current-state note and link fuller evidence.",
+			"Durable task notes shared across Git worktrees and context resets; forks get private copies. Ops: list (newest first), read, search (case-insensitive), write (replace; empty clears), append (one record). list/search also cover other sessions' note scopes and show their selectors; pass scope to read, list, or search one of them. list/read/search are paged; continue with the returned offset. A read of a current note returns its file path.",
 		promptSnippet: "save and recall durable state with private notes for forks",
 		parameters: Type.Object({
 			op: Type.Union(

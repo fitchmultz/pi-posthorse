@@ -234,27 +234,27 @@ await test("fork notes canonicalize legacy receipt aliases before resolving thei
 			.isError,
 		false,
 	);
-	await assert.rejects(
-		() =>
-			fixture(t, {
-				cwd: parent.cwd,
-				manager: (cwd, target) =>
-					SessionManager.forkFrom(
-						requireValue(parent.sessionManager.getSessionFile()),
-						cwd,
-						target,
-					),
-			}),
-		/Incomplete notes snapshot: the source notes root is missing or ambiguous/u,
+	const ambiguous = await fixture(t, {
+		cwd: parent.cwd,
+		manager: (cwd, target) =>
+			SessionManager.forkFrom(
+				requireValue(parent.sessionManager.getSessionFile()),
+				cwd,
+				target,
+			),
+	});
+	assert.match(
+		await notesCall(ambiguous, { op: "write", path: "fork.md", content: "fork checkpoint" }),
+		/^Wrote .*\/\.forks\/[^/]+\/notes\/fork\.md$/u,
 	);
+	assert.equal(existsSync(join(directory, "fork.md")), false);
 });
 
-await test("fork notes retry initialization after a missing source is restored", async (t) => {
+await test("fork notes start without a missing source note and reference it once restored", async (t) => {
 	const parent = await fixture(t);
 	await notesCall(parent, { op: "write", path: "task.md", content: "parent checkpoint" });
 	const source = join(parent.cwd, ".pi", "notes", "task.md");
 	unlinkSync(source);
-	const errors: string[] = [];
 	const child = await fixture(t, {
 		cwd: parent.cwd,
 		manager: (cwd, target) =>
@@ -263,21 +263,20 @@ await test("fork notes retry initialization after a missing source is restored",
 				cwd,
 				target,
 			),
-		onError: (error) => {
-			errors.push(error.error);
-		},
 	});
-	assert.equal(errors.length, 1);
-	assert.match(
-		requireValue(errors[0]),
-		/Incomplete notes snapshot: source note task\.md is unavailable/u,
-	);
+	const missing = await nativeCall(child, fauxToolCall("notes", { op: "read", path: "task.md" }));
+	assert.equal(missing.isError, true);
+	assert.match(textOf(missing), /No note at task\.md/u);
 	writeFileSync(source, "restored checkpoint");
 	assert.match(
 		await notesCall(child, { op: "read", path: "task.md" }),
-		/\/\.forks\/[^/]+\/notes\/task\.md\nrestored checkpoint$/u,
+		/^Read-only live reference:.*\nrestored checkpoint$/u,
 	);
 	await notesCall(child, { op: "append", path: "task.md", content: "child progress" });
+	assert.match(
+		await notesCall(child, { op: "read", path: "task.md" }),
+		/\/\.forks\/[^/]+\/notes\/task\.md\nrestored checkpoint\nchild progress\n$/u,
+	);
 	assert.equal(readFileSync(source, "utf8"), "restored checkpoint");
 });
 
@@ -506,24 +505,9 @@ await test("fork notes keep ownership across tree navigation, adoption, deletion
 		content: "current reference",
 	});
 	const shared = join(parent.cwd, ".pi", "notes", "reference.md");
-	const blockedRead = await nativeCall(child, fauxToolCall("read", { path: shared }));
-	assert.equal(blockedRead.isError, true);
-	assert.match(textOf(blockedRead), /labeled read-only comparison/u);
-	const blockedEdit = await nativeCall(
-		child,
-		fauxToolCall("edit", {
-			path: shared,
-			oldText: "original reference",
-			newText: "private edit",
-		}),
-	);
-	assert.equal(blockedEdit.isError, true);
-	assert.match(textOf(blockedEdit), /Private copy created.*source was not edited/u);
-	assert.equal(readFileSync(shared, "utf8"), "current reference");
-	assert.match(
-		await notesCall(child, { op: "read", path: "reference.md" }),
-		/\ncurrent reference$/u,
-	);
+	const foreignRead = await nativeCall(child, fauxToolCall("read", { path: shared }));
+	assert.equal(foreignRead.isError, false, textOf(foreignRead));
+	assert.match(textOf(foreignRead), /current reference/u);
 	const edited = await nativeCall(
 		child,
 		fauxToolCall("edit", {
@@ -552,27 +536,17 @@ await test("fork notes keep ownership across tree navigation, adoption, deletion
 		await notesCall(parent, { op: "read", path: "append.md" }),
 		/\ninherited prefix$/u,
 	);
-	const protectedEdit = await nativeCall(
-		parent,
+	const foreignEdit = await nativeCall(
+		child,
 		fauxToolCall("edit", {
-			path: join(childDirectory, "reference.md"),
-			oldText: "private edit",
-			newText: "parent overwrite",
+			path: shared,
+			oldText: "current reference",
+			newText: "project note updated by the fork",
 		}),
 	);
-	assert.equal(protectedEdit.isError, true);
+	assert.equal(foreignEdit.isError, false, textOf(foreignEdit));
+	assert.equal(readFileSync(shared, "utf8"), "project note updated by the fork");
 	assert.equal(readFileSync(join(childDirectory, "reference.md"), "utf8"), "private edit");
-	const manifest = join(dirname(childDirectory), "manifest.json");
-	const before = readFileSync(manifest, "utf8");
-	for (const path of [manifest, join(parent.cwd, ".pi", "notes", ".forks")]) {
-		const protectedMetadata = await nativeCall(
-			parent,
-			fauxToolCall("write", { path, content: "corrupt" }),
-		);
-		assert.equal(protectedMetadata.isError, true);
-		assert.match(textOf(protectedMetadata), /Managed notes metadata/u);
-	}
-	assert.equal(readFileSync(manifest, "utf8"), before);
 	unlinkSync(join(childDirectory, "reference.md"));
 	const deleted = await nativeCall(
 		child,

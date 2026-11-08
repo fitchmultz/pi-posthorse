@@ -77,7 +77,7 @@ function applyTouch(
 }
 function formatNoteLabel(note: TrackedNote): string {
 	if (note.referenceScope !== undefined) {
-		return `${note.notePath} (read-only reference; notes read ${JSON.stringify({ scope: note.referenceScope, path: note.notePath })})`;
+		return `${note.notePath} (another notes scope: ${note.absPath ?? `${note.referenceScope}/${note.notePath}`})`;
 	}
 	return note.absPath !== undefined && note.absPath !== note.notePath
 		? `${note.notePath} (${note.absPath})`

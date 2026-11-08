@@ -195,11 +195,6 @@ function seedCandidates(
 		retained: new Set(),
 		directories: new Set(scopes.map(scopeDirectory)),
 	});
-	if (scope === undefined && evidence.touches.length > 0) {
-		throw new Error(
-			"Incomplete notes snapshot: the source notes root is missing or ambiguous.",
-		);
-	}
 	const selected = touchedCandidates(evidence, scopes, allEntries);
 	for (const binding of bindings) {
 		for (const seed of seedsOf(binding, allEntries)) {
@@ -232,6 +227,7 @@ async function forkBinding(
 	);
 	for (const [index, candidate] of candidates.entries()) {
 		// Resolve against the immediate parent's files, not a historical ancestor's version.
+		// A missing source note is not copied; a known source scope still resolves it later.
 		const address = addresses[index];
 		if (address !== undefined) {
 			files.push({
@@ -242,10 +238,6 @@ async function forkBinding(
 			});
 		} else if (candidate.cleared) {
 			absent.push(candidate.path);
-		} else {
-			throw new Error(
-				`Incomplete notes snapshot: source note ${candidate.path} is unavailable.`,
-			);
 		}
 	}
 	return snapshot(

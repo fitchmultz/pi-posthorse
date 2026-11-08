@@ -1,10 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import {
-	withFileMutationQueue,
-	type ExtensionAPI,
-	type ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { EntryLike, ProjectedEntry } from "./contracts.ts";
 import { notesDir } from "./files.ts";
 import { adoptNote, ensureManifest, readManifest, saveAdoption } from "./note-snapshots.ts";
@@ -219,13 +215,6 @@ export class SessionNotes {
 	async prepareWrite(): Promise<void> {
 		await ensureManifest(this.binding);
 	}
-	async guardReference(path: string, call: NoteCall): Promise<string> {
-		const destination = notePath(this.binding, path);
-		const copied = await withFileMutationQueue(destination, () => this.adopt(path, call));
-		return copied === "adopted"
-			? `Private copy created at ${destination}; the source was not edited. Read the private copy, then retry the edit on that path.`
-			: `This session writes only ${this.directory}. Read ${destination}, then retry there; the foreign path was not edited.`;
-	}
 }
 function sessionKey(ctx: ExtensionContext): string {
 	const header = ctx.sessionManager.getHeader();
@@ -236,7 +225,6 @@ function sessionKey(ctx: ExtensionContext): string {
 }
 export type NotesStore = {
 	readonly get: (ctx: ExtensionContext) => Promise<SessionNotes>;
-	readonly roots: () => readonly string[];
 	readonly recovery: (ctx: ExtensionContext) => NotesRecovery | undefined;
 };
 type SessionState =
@@ -244,7 +232,6 @@ type SessionState =
 	| { readonly kind: "ready"; readonly value: SessionNotes };
 export function createNotesStore(pi: ExtensionAPI): NotesStore {
 	const sessions = new Map<string, SessionState>();
-	const roots = new Set<string>();
 	const get = (ctx: ExtensionContext): Promise<SessionNotes> => {
 		const key = sessionKey(ctx);
 		const existing = sessions.get(key);
@@ -258,19 +245,12 @@ export function createNotesStore(pi: ExtensionAPI): NotesStore {
 		const root =
 			bindings.findLast((binding) => header !== null && sameOwner(binding.owner, header))
 				?.root ?? canonicalPath(notesDir(ctx.cwd));
-		roots.add(root);
-		for (const binding of bindings) {
-			roots.add(binding.root);
-		}
 		const initialized = loadNotesBinding(ctx.sessionManager, root)
 			.then(({ binding, source, created }) => {
 				if (created) {
 					pi.appendEntry(NOTES_BINDING, binding);
 				}
 				const session = new SessionNotes(pi, binding, ctx.sessionManager, source);
-				for (const scope of session.scopes) {
-					roots.add(scope.root);
-				}
 				sessions.set(key, { kind: "ready", value: session });
 				return session;
 			})
@@ -283,7 +263,6 @@ export function createNotesStore(pi: ExtensionAPI): NotesStore {
 	};
 	return {
 		get,
-		roots: () => [...roots],
 		recovery: (ctx: ExtensionContext) => {
 			const state = sessions.get(sessionKey(ctx));
 			return state?.kind === "ready" ? state.value.recovery : undefined;
