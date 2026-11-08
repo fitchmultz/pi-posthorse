@@ -84,13 +84,13 @@ export function searchPage(
 	host: PolicyContext,
 	pages: PageAccess,
 ): TextResult {
-	const chars = pages.size(host, { offset: 0, cursor: params.cursor });
+	const chars = pages.size(host);
 	const reserve = Math.max(
 		0,
 		...matches.hits.map((hit) => searchFooter(cursorFor(matches, hit, hit.text.length)).length),
 	);
 	if (reserve >= chars) {
-		pages.error(host, "History entry id is too large for pagination.", params.cursor);
+		pages.error(host, "History entry id is too large for pagination.");
 	}
 	const skippedNote =
 		matches.skipped > 0 && (params.cursor === undefined || params.cursor === "")
@@ -146,11 +146,7 @@ export function historyReadPage(
 	const shownId = shownEntryId(item, params.id, source);
 	const { offset, imageOffset } = readOffsets(item, params);
 	const firstImage = imageOffset < item.images.length ? 1 : 0;
-	const chars = access.pages.size(access.host, {
-		offset,
-		imageCount: firstImage,
-		imageOffset: item.images.length > 0 ? imageOffset : undefined,
-	});
+	const chars = access.pages.size(access.host, { imageCount: firstImage });
 	const imageEnd = Math.min(
 		item.images.length,
 		imageOffset + firstImage + Math.floor((chars - MIN_PAGE_CHARS) / ESTIMATED_IMAGE_CHARS),

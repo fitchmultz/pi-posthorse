@@ -130,8 +130,7 @@ export function registerHistory(
 		async execute(...[, params, signal, , ctx]) {
 			const source = historySource(ctx);
 			if (params.op === "search") {
-				const fail = (message: string): never =>
-					pages.error(policy(ctx), message, params.cursor);
+				const fail = (message: string): never => pages.error(policy(ctx), message);
 				const matches = await historyMatches(source, params, signal, fail);
 				return searchPage(matches, params, policy(ctx), pages);
 			}

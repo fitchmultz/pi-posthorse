@@ -11,11 +11,10 @@ import {
 	type TextResult,
 } from "./contracts.ts";
 
+/** What else the page carries: images share the budget, and the header comes out of the body. */
 export type PageRequest = {
-	readonly offset: number;
 	readonly imageCount?: number;
-	readonly cursor?: string | undefined;
-	readonly imageOffset?: number | undefined;
+	readonly headerChars?: number;
 };
 export type NotesPage = {
 	readonly rows: readonly string[];
@@ -27,13 +26,13 @@ export type NotesPage = {
 	readonly more?: boolean;
 };
 export type PageAccess = {
-	readonly size: (ctx: PolicyContext, request: PageRequest) => number;
+	readonly size: (ctx: PolicyContext, request?: PageRequest) => number;
 	readonly result: (
 		text: string,
 		images: readonly ImageLike[],
 		display: PosthorseDisplay,
 	) => TextResult;
-	readonly error: (ctx: PolicyContext, message: string, cursor?: string) => never;
+	readonly error: (ctx: PolicyContext, message: string) => never;
 	readonly notes: (ctx: PolicyContext, page: NotesPage) => TextResult;
 };
 type PageAccounting = {
@@ -58,18 +57,22 @@ export class PageReservations {
 	reset(): void {
 		this.accounting = { pendingTokens: 0, usage: undefined };
 	}
-	size(ctx: PolicyContext, request: PageRequest): number {
-		this.accounting = reconcile(this.accounting, ctx.getContextUsage()?.tokens);
+	/**
+	 * Body characters for the next page. Near the rollover line pages shrink to MIN_PAGE_CHARS
+	 * instead of refusing, so reading keeps making progress; Pi's rollover handles the overshoot.
+	 */
+	size(ctx: PolicyContext, request: PageRequest = {}): number {
+		this.settle(ctx);
 		const remaining = pageCapacity(ctx, this.toolTokens) - this.accounting.pendingTokens;
-		const chars = Math.min(
+		const budget = Math.min(
 			MAX_PAGE_CHARS,
 			Math.max(0, remaining - PAGE_MARGIN_TOKENS) * 4 -
 				(request.imageCount ?? 0) * ESTIMATED_IMAGE_CHARS,
 		);
-		if (chars < MIN_PAGE_CHARS) {
-			this.refuse(remaining, request);
-		}
-		return chars;
+		return Math.max(MIN_PAGE_CHARS, budget - (request.headerChars ?? 0));
+	}
+	private settle(ctx: PolicyContext): void {
+		this.accounting = reconcile(this.accounting, ctx.getContextUsage()?.tokens);
 	}
 	private reserve(text: string, imageCount = 0): void {
 		this.accounting = {
@@ -80,38 +83,21 @@ export class PageReservations {
 				imageCount * (ESTIMATED_IMAGE_CHARS / 4),
 		};
 	}
-	private refuse(remaining: number, request: PageRequest): never {
-		const position =
-			request.cursor !== undefined && request.cursor !== ""
-				? "with the same cursor"
-				: `with offset ${request.offset}${request.imageOffset === undefined ? "" : ` and imageOffset ${request.imageOffset}`}`;
-		const message = `Too little context remains to read a page safely. Call new_context first, then retry ${position}.`;
-		// Even refusals consume context; omit repeated guidance when it no longer fits.
-		const text = Math.ceil(message.length / 4) <= remaining ? message : "";
-		this.reserve(text);
-		throw new Error(text);
-	}
 	result(text: string, images: readonly ImageLike[], display: PosthorseDisplay): TextResult {
 		this.reserve(text, images.length);
 		return textResult(text, images, display);
 	}
-	error(ctx: PolicyContext, message: string, cursor?: string): never {
-		this.size(ctx, { offset: 0, cursor });
+	error(ctx: PolicyContext, message: string): never {
+		this.settle(ctx);
 		this.reserve(message);
 		throw new Error(message);
 	}
 	notes(ctx: PolicyContext, page: NotesPage): TextResult {
 		const { rows, offset, kind, empty, header = "", more } = page;
 		const text = rows.length > 0 ? rows.join("\n") : empty;
-		const chars = this.size(ctx, { offset }) - header.length;
+		const chars = this.size(ctx, { headerChars: header.length });
 		const footer = (end: number) =>
 			`\n[chars ${offset}-${end}${more === true ? "; more matches follow" : ` of ${text.length}`}; continue with offset ${end}]`;
-		if (chars <= footer(text.length).length) {
-			this.error(
-				ctx,
-				`Too little context remains to include the notes path. Call new_context first, then retry with offset ${offset}.`,
-			);
-		}
 		if (offset > 0 && offset >= text.length) {
 			this.error(ctx, "Offset is past the end; restart with offset 0.");
 		}

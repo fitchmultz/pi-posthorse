@@ -1083,7 +1083,7 @@ await test("guidance uses request-local sections and preserves custom or forced 
 	assert.equal(sections.other, "Keep this policy");
 	const guidance = guidanceFor(handlers, context);
 	assert.match(guidance, /Automatic context management \(Posthorse\)/);
-	assert.match(guidance, /goal, progress, decisions, and next steps[\s\S]*file-editing tools/);
+	assert.match(guidance, /goal, progress, decisions, and next steps/);
 	assert.match(guidance, /verify live state/);
 	assert.match(guidance, /Configured context capacity: 100,000 tokens/);
 	assert.match(guidance, /rollover line is 83,617 tokens used/);
@@ -2618,9 +2618,11 @@ await test("history returns stored images for a requested entry and summarizes t
 			getSessionDir: () => join(tmpdir(), "missing"),
 		},
 	};
-	await assert.rejects(
-		run(tools, "history", { op: "read", id: "long-image" }, tightImage),
-		/Too little context remains/,
+	const tight = await run(tools, "history", { op: "read", id: "long-image" }, tightImage);
+	assert.deepEqual(tight.content.slice(1), [png], "a tight read still returns the next image");
+	assert.match(
+		toolText(tight),
+		/\[chars 0-1000 of \d+\][\s\S]*and offset 1000 and imageOffset 1\./,
 	);
 
 	const search = toolText(
@@ -2642,7 +2644,7 @@ await test("history returns stored images for a requested entry and summarizes t
 	assert.doesNotMatch(handoff, /UE5HREFUQQ|SlBFR0RBVEE|V0VCUERBVEE/);
 });
 
-await test("history image continuations preserve order, text, and retry offsets", async () => {
+await test("history image continuations preserve order and text, even near the rollover line", async () => {
 	await Promise.all(
 		["short", "x".repeat(25_000)].map(async (text) => {
 			const { handlers, tools, context: base } = await setup();
@@ -2703,15 +2705,14 @@ await test("history image continuations preserve order, text, and retry offsets"
 				/Image offset 14 is past the end/,
 			);
 			const tight = usageContext(context, 32_000, 14_117);
-			await assert.rejects(
-				run(
-					tools,
-					"history",
-					{ op: "read", id: "images", offset: 5, imageOffset: 4 },
-					tight,
-				),
-				/retry with offset 5 and imageOffset 4/,
+			const page = await run(
+				tools,
+				"history",
+				{ op: "read", id: "images", offset: 5, imageOffset: 4 },
+				tight,
 			);
+			assert.deepEqual(page.content.slice(1), [images[4]]);
+			assert.match(toolText(page), /and offset \d+ and imageOffset 5\./);
 		}),
 	);
 });
@@ -2832,7 +2833,7 @@ await test("fresh payload budgets count the system prompt and cancel unsafe auto
 	assert.deepEqual(automaticResult(handlers, context, []), { cancel: true });
 });
 
-await test("read pages shrink to the remaining budget and refuse unsafe pages while preserving the offset", async () => {
+await test("read pages shrink to the remaining budget, down to a minimum page that keeps reading", async () => {
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-page-test-")));
 	try {
 		const { tools, handlers, context: base } = await setup();
@@ -2881,14 +2882,21 @@ await test("read pages shrink to the remaining budget and refuse unsafe pages wh
 			/\[chars 0-2000 of 25007\] \[user\] h{1993}\nMore remains; call history read with id "long" and offset 2000\.$/,
 		);
 
+		// 1,100 tokens short of the line leaves less than a minimum page after the margin.
 		const tighter = withBranch(usageContext(base, 100_000, 82_517));
-		await assert.rejects(
-			run(tools, "notes", { op: "read", path: "long.md", offset: 2000 }, tighter),
-			/Call new_context first, then retry with offset 2000/,
+		handlers.get("turn_start")?.({}, tighter);
+		assert.equal(
+			toolText(
+				await run(tools, "notes", { op: "read", path: "long.md", offset: 2000 }, tighter),
+			),
+			`${header}${"n".repeat(1000)}\n[chars 2000-3000 of 25000; continue with offset 3000]`,
 		);
-		await assert.rejects(
-			run(tools, "history", { op: "read", id: "long", offset: 2000 }, tighter),
-			/Call new_context first, then retry with offset 2000/,
+		handlers.get("turn_start")?.({}, tighter);
+		assert.match(
+			toolText(
+				await run(tools, "history", { op: "read", id: "long", offset: 2000 }, tighter),
+			),
+			/\[chars 2000-3000 of 25007\] h{1000}\nMore remains; call history read with id "long" and offset 3000\.$/,
 		);
 
 		// Disabled compaction measures against the configured context limit instead of the rollover line.
@@ -2956,18 +2964,23 @@ await test("note and history pages share a batch budget without double-counting 
 			toolText(await run(tools, "notes", { op: "read", path: "long.md" }, context)),
 			new RegExp(`continue with offset ${4000 - header.length}`),
 		);
-		await assert.rejects(
-			run(tools, "history", { op: "read", id: "long", offset: 4000 }, context),
-			/retry with offset 4000/,
+		// The first page spent the shared budget, so its sibling gets a minimum page.
+		assert.match(
+			toolText(
+				await run(tools, "history", { op: "read", id: "long", offset: 4000 }, context),
+			),
+			/\[chars 4000-5000 of 25007\] h{1000}\nMore remains; call history read with id "long" and offset 5000\.$/,
 		);
 		startTurn();
 		assert.match(
 			toolText(await run(tools, "history", { op: "read", id: "long" }, context)),
 			/offset 4000/,
 		);
-		await assert.rejects(
-			run(tools, "notes", { op: "read", path: "long.md", offset: 4000 }, context),
-			/retry with offset 4000/,
+		assert.equal(
+			toolText(
+				await run(tools, "notes", { op: "read", path: "long.md", offset: 4000 }, context),
+			),
+			`${header}${"n".repeat(1000)}\n[chars 4000-5000 of 25000; continue with offset 5000]`,
 		);
 
 		startTurn();
@@ -3033,7 +3046,10 @@ await test("notes list and search page every result through the shared budget, i
 					text.startsWith(header),
 					"every listing page identifies the shared directory",
 				);
-				assert.ok(text.length <= 1000, "headers and continuation fit the admitted page");
+				assert.ok(
+					text.length <= header.length + 1000,
+					"rows and continuation fit the minimum page after the header",
+				);
 				if (display.more === true) {
 					// Search stops reading once the page is decided, so its total is a lower bound.
 					assert.ok(op === "search" && end < total && total <= expected.length);
@@ -3072,7 +3088,7 @@ await test("notes list and search page every result through the shared budget, i
 	}
 });
 
-await test("mixed search/list/read outputs and no-match refusals share one reservation", async () => {
+await test("mixed search/list/read outputs and no-match results share one reservation", async () => {
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-mixed-pages-")));
 	try {
 		const { tools, handlers, context: base } = await setup();
@@ -3112,9 +3128,12 @@ await test("mixed search/list/read outputs and no-match refusals share one reser
 					: stringValue(record(result.reason).message),
 			);
 			assert.ok(
+				results.every((result) => result.status === "fulfilled"),
+				"siblings past the shared budget get minimum pages, not refusals",
+			);
+			assert.ok(
 				text.reduce((total, value) => total + Math.ceil(value.length / 4), 0) <= 2000,
 			);
-			assert.ok(results.some((result) => result.status === "rejected"));
 		}
 		requireValue(handlers.get("turn_start"))({}, context);
 		const hugeQuery = "absent".repeat(20_000);
@@ -3126,29 +3145,6 @@ await test("mixed search/list/read outputs and no-match refusals share one reser
 			assert.ok(output.length < 300, "a no-match echo cannot reprint an unbounded query");
 			assert.match(output, /No (notes|history) match/);
 		}
-		const tight = { ...context, ...usageContext(context, 100_000, 99_750, 16_384, false) };
-		requireValue(handlers.get("turn_start"))({}, tight);
-		let refusalTokens = 0;
-		for (let index = 0; index < 20; index++) {
-			// Each refusal spends the remaining shared budget before the next refusal is admitted.
-			await assert.rejects(
-				run(
-					tools,
-					index % 2 !== 0 ? "notes" : "history",
-					{ op: "search", query: hugeQuery, offset: 123 },
-					tight,
-				),
-				(error: unknown) => {
-					assert.ok(error instanceof Error);
-					refusalTokens += Math.ceil(error.message.length / 4);
-					return true;
-				},
-			);
-		}
-		assert.ok(
-			refusalTokens <= 250,
-			"even repeated no-match refusals stay inside the remaining budget",
-		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

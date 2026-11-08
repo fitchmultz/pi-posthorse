@@ -297,7 +297,6 @@ await test("official explicit reset preserves system/tools and raw transcript; n
 	for (const prompt of [initial, getCurrentSystemPrompt(fresh)]) {
 		assert.match(prompt, /Configured context capacity: 100,000 tokens/);
 		assert.match(prompt, /rollover line is 83,617 tokens used/);
-		assert.match(prompt, /Fresh windows use the active configuration/);
 		assert.match(
 			prompt,
 			/Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining/,
@@ -1377,7 +1376,7 @@ await test("a retained old notes reminder neither leaks nor suppresses the new w
 	assert.doesNotMatch(JSON.stringify(requests), /OLD_NOTES_NUDGE/);
 	assert.match(
 		JSON.stringify(requests[1]),
-		/Routine task-note update\.[\s\S]*Then immediately execute the next prescribed task step in this run/,
+		/Routine task-note update\.[\s\S]*then continue with the next step in this run/,
 	);
 	assert.equal(h.faux.state.callCount, 2);
 });

@@ -115,15 +115,10 @@ async function readNote(
 	const header = target.writable
 		? `File: ${path}\n`
 		: `Read-only live reference: notes read ${JSON.stringify({ scope: scopeDirectory(target.address), path: target.address.path })}\n`;
-	const host = access.host();
-	const chars = pages.size(host, { offset }) - header.length;
-	if (chars <= 0) {
-		pages.error(
-			host,
-			`Too little context remains to include the note path. Call new_context first, then retry with offset ${offset}.`,
-		);
-	}
-	const end = Math.min(text.length, offset + chars);
+	const end = Math.min(
+		text.length,
+		offset + pages.size(access.host(), { headerChars: header.length }),
+	);
 	const more =
 		end < text.length
 			? `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]`

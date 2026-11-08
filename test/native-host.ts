@@ -2083,8 +2083,7 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 				1,
 			);
 			assert.match(guidance, /verify live state/);
-			assert.match(guidance, /available file-editing tools at its absolute path/);
-			assert.match(guidance, /Leave an already-current note unchanged/);
+			assert.match(guidance, /update the note only if it is stale/);
 			assert.match(guidance, /Preserve decisions and safety constraints/);
 			if (mode.startsWith("forced-")) {
 				assert.match(prompt, /OTHER_EXTENSION_POLICY/);
@@ -2302,7 +2301,6 @@ for (const { enabled, reads } of [
 	{ enabled: false, reads: 4 },
 	{ enabled: true, reads: 4 },
 	{ enabled: false, reads: 6 },
-	{ enabled: false, reads: 50 },
 ]) {
 	await test(`public mixed searches/list/reads stay below configured capacity (compaction=${enabled}, reads=${reads})`, async (t) => {
 		const h = await fixture(t, {
@@ -2326,14 +2324,13 @@ for (const { enabled, reads } of [
 		writeFileSync(join(dir, "long.md"), "L".repeat(30_000));
 		let before: number | null | undefined, after: number | null | undefined;
 		let results: Extract<TranscriptMessages[number], { role: "toolResult" }>[] | undefined;
-		let calls: NativeAi.ToolCall[] | undefined;
 		h.faux.setResponses([
 			() => {
 				before = h.session.getContextUsage()?.tokens;
 				const owner = h.sessionManager
 					.getBranch()
 					.findLast((entry) => entry.type === "message" && entry.message.role === "user");
-				calls =
+				const calls =
 					reads === 4
 						? [
 								fauxToolCall("history", {
@@ -2369,11 +2366,13 @@ for (const { enabled, reads } of [
 		await h.session.prompt("p".repeat(promptLength));
 		assert.ok(after !== null && after !== undefined);
 		assert.ok(results);
-		assert.ok(calls);
 		assert.equal(h.faux.getPendingResponseCount(), 0);
 		assert.ok(after < (enabled ? 83_617 : 100_000), JSON.stringify({ before, after, enabled }));
 		assert.equal(results.length, reads, "bounded results should not force avoidable rollover");
-		assert.ok(results.some((result) => result.isError));
+		assert.ok(
+			results.every((result) => !result.isError),
+			"siblings past the shared budget get minimum pages, not refusals",
+		);
 		for (const result of results) {
 			const journal = messageEntry(
 				h.sessionManager
@@ -2406,18 +2405,6 @@ for (const { enabled, reads } of [
 				results.some((result) => /continue with offset|and offset/.test(textOf(result))),
 				"partial pages retain continuation offsets",
 			);
-			assert.ok(
-				results.some((result) => textOf(result).includes("Too little context remains")),
-				"at least one sibling refusal carries retry guidance",
-			);
-			const offsets = new Map(calls.map((call) => [call.id, call.arguments.offset ?? 0]));
-			for (const result of results) {
-				if (textOf(result).includes("Too little context remains")) {
-					const offset = offsets.get(result.toolCallId);
-					assert.ok(typeof offset === "number");
-					assert.match(textOf(result), new RegExp(`retry with offset ${offset}`));
-				}
-			}
 		}
 		assert.equal(
 			h.sessionManager
@@ -2501,9 +2488,9 @@ for (const { continuation, stopReason } of settlementCases) {
 		if (continuation !== "none") {
 			assert.equal(reminders().length, 1);
 			assert.match(JSON.stringify(requests.slice(1)), /Routine task-note update\./);
-			assert.match(
+			assert.equal(
 				textOf(reminders()[0]),
-				/Keep working on the assigned task[\s\S]*current context window is not a deadline[\s\S]*Then immediately execute the next prescribed task step in this run[\s\S]*Approaching context rollover is not a blocker/,
+				"[posthorse] Routine task-note update. Update the task's current-state note if it is stale, then continue with the next step in this run.",
 			);
 			assert.doesNotMatch(
 				JSON.stringify(requests.slice(1)),

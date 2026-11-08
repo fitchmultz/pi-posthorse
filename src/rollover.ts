@@ -6,7 +6,7 @@ import type {
 	SessionBeforeCompactEvent,
 	TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
-import { budgetFor, CHECKPOINT_GUIDANCE, freshPayloadChars } from "./budget.ts";
+import { budgetFor, freshPayloadChars } from "./budget.ts";
 import {
 	isRecord,
 	isReminderType,
@@ -457,7 +457,8 @@ export function registerRollover(
 			pi.sendMessage(
 				{
 					customType: REMINDER_TYPE,
-					content: `[posthorse] Routine task-note update.\n${CHECKPOINT_GUIDANCE}`,
+					content:
+						"[posthorse] Routine task-note update. Update the task's current-state note if it is stale, then continue with the next step in this run.",
 					display: true,
 					details: reminder.fingerprint,
 				},
