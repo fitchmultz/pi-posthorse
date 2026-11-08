@@ -63,8 +63,9 @@ instructions are not an enforcement mechanism for every downstream action.
   saved working directory matches, plus their nested subagent sessions. It is not a search of every
   project, every worktree or every session directory on the machine.
 - Follow the returned search cursor, text offset and image offset. A page or excerpt is not the
-  complete result. Pages share the remaining context budget and may require a fresh context before
-  they can be read safely. All-session hits have file-qualified IDs; keep the complete ID for reads.
+  complete result. Pages share the remaining context budget; near the rollover line they shrink to a
+  1,000-character minimum body and Pi's rollover handles the overshoot, so keep paging with the
+  returned cursor or offset. All-session hits have file-qualified IDs; keep the complete ID for reads.
 - Notes search skips binary files and files larger than 1 MiB. Search results are live, not an
   immutable snapshot; external edits or session-file reordering can change later pages.
 
