@@ -13,13 +13,6 @@ import {
 import { imagesOf, textOf } from "./message-text.ts";
 
 const MIN_USABLE_TOKENS = Math.ceil(MAX_HANDOFF_CHARS / 4) * 2;
-export const CHECKPOINT_GUIDANCE = `Keep working on the assigned task; Pi handles context rollover automatically.
-
-The current context window is not a deadline for finishing your task. Do not reduce scope, skip prescribed steps or verification, or issue a final progress summary because rollover is approaching.
-
-Update the task's current-state note if needed: goal, progress, decisions, and next steps. Use available file-editing tools at its absolute path; use notes write only for creation, substantial restructuring, or when editing tools are unavailable. Leave an already-current note unchanged. Then immediately execute the next prescribed task step in this run. No new_context call, waiting for rollover, or user "continue" is needed.
-
-Finish when the requested work and required verification are complete, or report a genuine blocker. Approaching context rollover is not a blocker.`;
 export type Budget = {
 	readonly contextWindow: number;
 	readonly reserveTokens: number;
@@ -84,8 +77,9 @@ function automaticGuidance(budget: Budget | undefined, enabled: boolean): string
 	const line =
 		budget === undefined
 			? ""
-			: ` The rollover line is ${budget.rolloverAt.toLocaleString("en-US")} tokens used under the available Pi settings.`;
-	return `${CHECKPOINT_GUIDANCE}\nAutomatic rollover follows Pi's compaction setting and retains a safe recent-message tail using compaction.keepRecentTokens, without model summarization.${line} At most one routine task-note reminder may arrive at the end of a working turn, never on a turn that ends the run. new_context is an optional deliberate clean reset, not a checkpoint requirement.`;
+			: `The rollover line is ${budget.rolloverAt.toLocaleString("en-US")} tokens used. `;
+	return `Pi rolls context over automatically, so the context window is not a deadline. Do not reduce scope, skip steps or verification, or write a final summary because rollover is near, and do not wait for the user to say "continue". Finish when the requested work and its verification are complete, or report a genuine blocker.
+${line}Rollover keeps a recent-message tail without summarizing. One task-note reminder may arrive at the end of a working turn near the line: update the note only if it is stale, then continue with the next step in the same run. new_context is an optional clean reset.`;
 }
 export function buildGuidance(ctx: PolicyContext): string {
 	const budget = budgetFor(ctx);
@@ -93,14 +87,12 @@ export function buildGuidance(ctx: PolicyContext): string {
 	const capacity =
 		budget === undefined
 			? "Configured context capacity is unknown."
-			: `Configured context capacity: ${budget.contextWindow.toLocaleString("en-US")} tokens. This is Pi's best available native limit, not remaining space or a measured provider boundary. Fresh windows use the active configuration; system instructions, tools, the handoff, retained recent messages, and new messages consume part of it.`;
+			: `Configured context capacity: ${budget.contextWindow.toLocaleString("en-US")} tokens (not remaining space).`;
 	return `## Automatic context management (Posthorse)
 ${automaticGuidance(budget, enabled)}
-${capacity}
-Do not guess context capacity or remaining space from response-token limits or reasoning budgets. Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining. If usage is unknown, report it as unknown. No routine budget checks are needed.
+${capacity} Do not guess capacity or remaining space from response-token or reasoning limits. Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining. If usage is unknown, report it as unknown. No routine budget checks are needed.
 After a rollover, earlier conversation stays in history. Restore notes and todos, then verify live state before stateful or external work; automatic handoffs record inputs, not progress.
-Keep one concise current-state note per task. Preserve decisions and safety constraints; link fuller evidence and history instead of copying them. Edit changed sections rather than resending unchanged content.
-Write handoffs and notes as normal readable prose; notes and history search match literal text.`;
+Keep one concise current-state note per task: goal, progress, decisions, and next steps. Preserve decisions and safety constraints, link fuller evidence instead of copying it, and edit only changed sections.`;
 }
 /** ponytail: native estimates omit request-local guidance; reserve it until post-transform usage is exposed. */
 export function guidanceTokens(ctx: PolicyContext): number {

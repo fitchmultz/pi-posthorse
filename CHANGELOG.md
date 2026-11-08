@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Return a minimum notes or history page near the rollover line instead of refusing it, so reading keeps making progress. Shorten the system guidance and send the task-note reminder as one line instead of repeating that guidance.
+
 ## 0.10.13 - 2026-11-08
 
 <!-- npm-release:unreleased:start -->
