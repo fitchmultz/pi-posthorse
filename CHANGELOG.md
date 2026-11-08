@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+## 0.10.14 - 2026-11-08
+
+<!-- npm-release:unreleased:start -->
+
 - Return a minimum notes or history page near the rollover line instead of refusing it, so reading keeps making progress. Shorten the system guidance and send the task-note reminder as one line instead of repeating that guidance.
+
+<!-- npm-release:unreleased:end -->
+
+- fix: return minimum pages instead of refusing and shorten Posthorse guidance (2/2) (#145) ([1a7f350](https://github.com/fitchmultz/pi-posthorse/commit/1a7f35038250864a049d5f9bfea31514eabf3e63))
+
+### What's Changed
+
+- fix: return minimum pages instead of refusing and shorten Posthorse guidance (2/2) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/145
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.13...v0.10.14
 
 ## 0.10.13 - 2026-11-08
 
