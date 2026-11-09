@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+## 0.10.15 - 2026-11-09
+
+<!-- npm-release:unreleased:start -->
+
 - Keep the recovery record directly after the retained tail when an earlier extension presents a retained message as a system patch, such as a `pi-change-working-dir` directory snapshot. Previously the record could land between the next tool call and its results, and Anthropic rejected every later request in that session.
+
+<!-- npm-release:unreleased:end -->
+
+- fix: keep rollover recovery after a retained system patch (#147) ([9a0cc33](https://github.com/fitchmultz/pi-posthorse/commit/9a0cc332b5cafb993de23c6e3529a31858eb2de6))
+
+### What's Changed
+
+- fix: keep rollover recovery after a retained system patch by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/147
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.14...v0.10.15
 
 ## 0.10.14 - 2026-11-08
 
