@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the recovery record directly after the retained tail when an earlier extension presents a retained message as a system patch, such as a `pi-change-working-dir` directory snapshot. Previously the record could land between the next tool call and its results, and Anthropic rejected every later request in that session.
+
 ## 0.10.14 - 2026-11-08
 
 <!-- npm-release:unreleased:start -->
