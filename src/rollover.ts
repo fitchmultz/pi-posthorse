@@ -113,22 +113,6 @@ function staleReminderPredicate(
 		isReminderType(message.customType) &&
 		(!enabled || !reminderMatches(message.details, fingerprint));
 }
-function retainedTailEnd(
-	messages: ContextWithSystemEvent["messages"],
-	start: number,
-	count: number,
-): number | undefined {
-	let remaining = count;
-	for (let index = start; index < messages.length; index += 1) {
-		if (messages[index]?.role !== "system") {
-			remaining -= 1;
-		}
-		if (remaining === 0) {
-			return index + 1;
-		}
-	}
-	return undefined;
-}
 function chronologicalRetainedTail(
 	messages: ContextWithSystemEvent["messages"],
 	ctx: ExtensionContext,
@@ -137,9 +121,12 @@ function chronologicalRetainedTail(
 	const summaryIndex = messages.findIndex((message) => message.role !== "system");
 	const first = messages[summaryIndex];
 	if (first?.role === "compactionSummary" && hasRetainedRolloverMarker(first.summary)) {
+		// Pi projects no system messages into the retained tail, but an earlier handler can
+		// present a retained message as one (pi-change-working-dir's directory snapshots).
+		// Count positions, not roles, so the record never lands inside the next tool batch.
 		const count = countRetainedMessages(ctx, stale);
-		const end = count > 0 ? retainedTailEnd(messages, summaryIndex + 1, count) : undefined;
-		if (end !== undefined) {
+		const end = summaryIndex + 1 + count;
+		if (count > 0 && end <= messages.length) {
 			const prefix = messages.slice(0, summaryIndex);
 			const retainedSlice = messages.slice(summaryIndex + 1, end);
 			const afterSlice = messages.slice(end);

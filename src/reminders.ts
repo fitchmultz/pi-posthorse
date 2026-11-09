@@ -231,10 +231,8 @@ function countRetainedFromProjected(
 			continue;
 		}
 		for (const msg of item.messages) {
-			const role = msg.role ?? "";
 			if (
-				role !== "system" &&
-				!stale({ role, customType: msg.customType, details: msg.details })
+				!stale({ role: msg.role ?? "", customType: msg.customType, details: msg.details })
 			) {
 				count += 1;
 			}

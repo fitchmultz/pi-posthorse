@@ -910,6 +910,94 @@ for (const forced of [false, true]) {
 	});
 }
 
+function unpairedToolResults(messages: TranscriptMessages): string[] {
+	let open = new Set<string>();
+	const unpaired: string[] = [];
+	for (const message of messages) {
+		if (message.role === "system") {
+			continue;
+		}
+		if (message.role === "toolResult") {
+			if (!open.delete(message.toolCallId)) {
+				unpaired.push(message.toolCallId);
+			}
+			continue;
+		}
+		open = new Set(
+			message.role === "assistant"
+				? message.content.flatMap((block) => (block.type === "toolCall" ? [block.id] : []))
+				: [],
+		);
+	}
+	return unpaired;
+}
+
+await test("retained-tail order survives an earlier handler presenting a retained message as a system patch", async (t) => {
+	const h = await fixture(t, {
+		seed(manager) {
+			manager.appendMessage({
+				role: "user",
+				content: `DISCARDED_OWNER ${"o".repeat(280_000)}`,
+				timestamp: 1,
+			});
+			manager.appendMessage(fauxAssistantMessage(`RETAINED_ASSISTANT ${"a".repeat(24_000)}`));
+			manager.appendCustomMessageEntry("retained-patch", "", false, { patch: "PATCH" });
+		},
+		extension(pi) {
+			registerDump(pi, false, 60_000);
+			// Loaded before Posthorse, like pi-change-working-dir's cwd snapshots.
+			pi.on("context_with_system", (event) => ({
+				messages: event.messages.map((message) =>
+					message.role === "custom" && message.customType === "retained-patch"
+						? {
+								role: "system" as const,
+								content: "",
+								sections: { patch: "<patch>PATCH</patch>" },
+								timestamp: message.timestamp,
+							}
+						: message,
+				),
+			}));
+		},
+	});
+	const requests: TranscriptMessages[] = [];
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("dump", {})),
+		(ctx) => {
+			requests.push(structuredClone(ctx.messages));
+			return toolTurn(fauxToolCall("get_context_remaining", {}));
+		},
+		(ctx) => {
+			requests.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Done.");
+		},
+	]);
+	await h.session.prompt("RETAINED_OWNER: keep working.");
+	assert.equal(boundaries(h).length, 1);
+	assert.equal(record(requireValue(boundaries(h)[0]).details).reason, "threshold");
+	assert.equal(requests.length, 2);
+	for (const request of requests) {
+		assert.deepEqual(unpairedToolResults(request), [], "tool results follow their calls");
+		const patch = request.findIndex(
+			(message) => message.role === "system" && message.sections?.patch !== undefined,
+		);
+		const dumped = request.findIndex((message) => textOf(message).includes("DUMP_TAIL"));
+		const recovery = request.findIndex((message) =>
+			textOf(message).includes("Automatic context rollover recovery record."),
+		);
+		const nextCall = request.findIndex(
+			(message) =>
+				message.role === "assistant" &&
+				message.content.some(
+					(block) => block.type === "toolCall" && block.name === "get_context_remaining",
+				),
+		);
+		assert.ok(patch >= 0 && dumped > patch, "the system patch keeps its retained position");
+		assert.equal(recovery, dumped + 1, "recovery follows the retained tail");
+		assert.ok(nextCall === -1 || nextCall > recovery, "new work follows recovery");
+	}
+});
+
 for (const { reason, asynchronous } of [
 	{ reason: "threshold", asynchronous: false },
 	{ reason: "threshold", asynchronous: true },
