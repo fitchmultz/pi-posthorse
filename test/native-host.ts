@@ -735,6 +735,17 @@ await test("fork recovery names a note it wrote in another scope by its path", a
 		/^Read (\S+) \(read on its path\) before continuing/mu.exec(recovery)?.[1],
 	);
 	assert.equal(realpathSync(named), realpathSync(shared));
+	// Only the newest written note gets the closing instruction, so each line must name a readable target.
+	await notesCall(child, { op: "write", path: "own.md", content: "fork checkpoint" });
+	await nativeCall(child, fauxToolCall("dump", {}));
+	const boundaries = posthorseBoundaries(child.sessionManager);
+	assert.equal(boundaries.length, 2);
+	const listed = requireValue(
+		/^- Active note \(written\): (\S+) \[[^\]]* — read this note on its path now\]$/mu.exec(
+			requireValue(boundaries.at(-1)).summary,
+		)?.[1],
+	);
+	assert.equal(realpathSync(listed), realpathSync(shared));
 });
 
 await test("fork notes associate late cancelled background effects with their launch branch", async (t) => {
