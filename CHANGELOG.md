@@ -4,7 +4,21 @@
 
 - Treat an empty `scope` in a `notes` call as omitted. Models that fill every optional argument were refused with `Unknown notes scope` on reads and with a scope error on writes (#150). The unknown-scope error now quotes the value and says to omit `scope` for the session's own notes.
 
+## 0.10.16 - 2026-11-10
+
+<!-- npm-release:unreleased:start -->
+
 - Add a [field study](docs/field-study.md) of how agents used notes, history and the recovery record around 24,940 context boundaries, with wait time, repeated work and note upkeep cost. The study is observational.
+
+<!-- npm-release:unreleased:end -->
+
+- docs: add field study of rollover behavior in daily use (#152) ([9f769e6](https://github.com/fitchmultz/pi-posthorse/commit/9f769e6ab2ad26609ddf66e2ccd8ca8860902912))
+
+### What's Changed
+
+- docs: add field study of rollover behavior in daily use by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/152
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.15...v0.10.16
 
 ## 0.10.15 - 2026-11-09
 
