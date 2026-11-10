@@ -77,22 +77,39 @@ function applyTouch(
 		order,
 	};
 }
-function formatNoteLabel(note: TrackedNote): string {
+/** `notes read` resolves a bare name in this session's own notes, so a note elsewhere is named by its path. */
+function pathElsewhere(note: TrackedNote, notesDirectory: string | undefined): string | undefined {
 	if (note.referenceScope !== undefined) {
-		return `${note.notePath} (another notes scope: ${note.absPath ?? `${note.referenceScope}/${note.notePath}`})`;
+		return note.absPath ?? `${note.referenceScope}/${note.notePath}`;
+	}
+	return note.absPath !== undefined &&
+		notesDirectory !== undefined &&
+		note.absPath !== join(notesDirectory, note.notePath)
+		? note.absPath
+		: undefined;
+}
+function formatNoteLabel(note: TrackedNote, elsewhere: string | undefined): string {
+	if (elsewhere !== undefined) {
+		return note.referenceScope === undefined ? elsewhere : `${elsewhere} (another notes scope)`;
 	}
 	return note.absPath !== undefined && note.absPath !== note.notePath
 		? `${note.notePath} (${note.absPath})`
 		: note.notePath;
 }
-function formatWrittenNoteLine(note: WrittenNote, span: RetainedSpan | undefined): string {
-	const label = formatNoteLabel(note);
+function formatWrittenNoteLine(
+	note: WrittenNote,
+	span: RetainedSpan | undefined,
+	notesDirectory: string | undefined,
+): string {
+	const elsewhere = pathElsewhere(note, notesDirectory);
+	const label = formatNoteLabel(note, elsewhere);
+	const how = elsewhere === undefined ? "" : " on its path";
 	const { proof } = note;
 	if (proof.kind === "effect-only") {
-		return `- Active note (written): ${label} [verified effect at entry ${note.entryId}; full content is not retained — read this note now]`;
+		return `- Active note (written): ${label} [verified effect at entry ${note.entryId}; full content is not retained — read this note${how} now]`;
 	}
 	if (span === undefined) {
-		return `- Active note (written): ${label} [compacted at entry ${note.entryId} — read this note now]`;
+		return `- Active note (written): ${label} [compacted at entry ${note.entryId} — read this note${how} now]`;
 	}
 	switch (proof.kind) {
 		case "full": {
@@ -101,13 +118,17 @@ function formatWrittenNoteLine(note: WrittenNote, span: RetainedSpan | undefined
 			return `- Active note (written): ${label} [latest full write is in the retained tail above at entry ${proof.entryId}${updated}]`;
 		}
 		case "partial":
-			return `- Active note (written): ${label} [only partial edits are in the retained tail above at entry ${proof.entryId} — read full note now]`;
+			return `- Active note (written): ${label} [only partial edits are in the retained tail above at entry ${proof.entryId} — read full note${how} now]`;
 		case "compacted":
-			return `- Active note (written): ${label} [compacted before entry ${span.firstId} — read this note now]`;
+			return `- Active note (written): ${label} [compacted before entry ${span.firstId} — read this note${how} now]`;
 	}
 }
-function formatReadNoteLine(note: ReadNote, span: RetainedSpan | undefined): string {
-	const label = formatNoteLabel(note);
+function formatReadNoteLine(
+	note: ReadNote,
+	span: RetainedSpan | undefined,
+	notesDirectory: string | undefined,
+): string {
+	const label = formatNoteLabel(note, pathElsewhere(note, notesDirectory));
 	if (span !== undefined && note.inRetained) {
 		return `- Referenced note (read): ${label} [read in the retained tail above at entry ${note.entryId}]`;
 	}
@@ -123,16 +144,12 @@ function formatNotesAction(
 	if (primaryWritten === undefined) {
 		return "Read the referenced note again if its context is still needed, and keep one current-state note for this task.";
 	}
-	// notes read resolves a bare name in this session's own scope, so a note elsewhere is named by its path.
-	const elsewhere =
-		primaryWritten.absPath !== undefined &&
-		notesDirectory !== undefined &&
-		primaryWritten.absPath !== join(notesDirectory, primaryWritten.notePath);
-	const target = elsewhere ? primaryWritten.absPath : primaryWritten.notePath;
+	const elsewhere = pathElsewhere(primaryWritten, notesDirectory);
+	const target = elsewhere ?? primaryWritten.notePath;
 	if (span !== undefined && primaryWritten.proof.kind === "full") {
 		return `Your latest full write to ${target} is already visible above at entry ${primaryWritten.proof.entryId}; do not rewrite it unless new findings after entry ${span.lastId} require it.`;
 	}
-	const how = elsewhere ? "read on its path" : "notes read or read on its path";
+	const how = elsewhere === undefined ? "notes read or read on its path" : "read on its path";
 	return `Read ${target} (${how}) before continuing to restore the saved goal, progress, decisions, and next steps, then keep that note current as work progresses.`;
 }
 function trackedNotes(
@@ -181,16 +198,14 @@ export function renderSessionNotes(
 	}
 	const written = all.filter((note) => note.kind === "written").slice(0, MAX_WRITTEN_NOTES);
 	const readOnly = all.filter((note) => note.kind === "read").slice(0, MAX_READ_NOTES);
+	const notesDirectory =
+		options.notes === undefined ? defaultDir : scopeDirectory(options.notes.binding);
 	const lines = [
-		...written.map((note) => formatWrittenNoteLine(note, span)),
-		...readOnly.map((note) => formatReadNoteLine(note, span)),
+		...written.map((note) => formatWrittenNoteLine(note, span, notesDirectory)),
+		...readOnly.map((note) => formatReadNoteLine(note, span, notesDirectory)),
 	];
 	const header = "Task notes in this session:";
-	const action = formatNotesAction(
-		written[0],
-		span,
-		options.notes === undefined ? defaultDir : scopeDirectory(options.notes.binding),
-	);
+	const action = formatNotesAction(written[0], span, notesDirectory);
 	const selected: string[] = [];
 	for (const line of lines) {
 		if ([header, ...selected, line, action].join("\n").length <= maxChars) {
