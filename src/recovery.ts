@@ -8,7 +8,7 @@ import {
 	type RecoveryRecord,
 } from "./recovery-records.ts";
 import type { NotesRecovery } from "./note-evidence.ts";
-import { renderSessionNotes, type RetainedSpan } from "./recovery-notes.ts";
+import { primaryNotePath, renderSessionNotes, type RetainedSpan } from "./recovery-notes.ts";
 import {
 	recoverableToolResults,
 	type RecoveryBatch,
@@ -404,6 +404,20 @@ function rolloverPreambleWithNotes(
 		},
 	);
 	return joined([basePreamble, notesSection]);
+}
+/** The note the automatic record tells the agent to read, for text that names it outside the record. */
+export function recoveryNotePath(
+	entries: readonly EntryLike[],
+	projected: readonly ProjectedEntry[],
+	options: {
+		readonly retainedEntryIds: ReadonlySet<string>;
+		readonly notes?: NotesRecovery | undefined;
+	},
+): string | undefined {
+	return primaryNotePath(entries.slice(automaticChainStart(entries)), entries, projected, {
+		retained: options.retainedEntryIds,
+		notes: options.notes,
+	});
 }
 /** Raw owner anchors and projected tool evidence have distinct provenance and share one bounded payload. */
 export function buildAutoHandoff(
