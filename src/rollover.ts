@@ -445,7 +445,7 @@ export function registerRollover(
 				{
 					customType: REMINDER_TYPE,
 					content:
-						"[posthorse] Routine task-note update. Update the task's current-state note if it is stale, then continue with the next step in this run.",
+						"[posthorse] Routine task-note update. Update the task's current-state note if it is stale, or write one if the task has none, then continue with the next step in this run.",
 					display: true,
 					details: reminder.fingerprint,
 				},
