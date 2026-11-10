@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Treat an empty `scope` in a `notes` call as omitted. Models that fill every optional argument were refused with `Unknown notes scope` on reads and with a scope error on writes (#150). The unknown-scope error now quotes the value and says to omit `scope` for the session's own notes.
+
 ## 0.10.15 - 2026-11-09
 
 <!-- npm-release:unreleased:start -->

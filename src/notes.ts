@@ -278,6 +278,11 @@ async function searchNotes(
 		header: hits.skipped > 0 ? `[Not searched: ${skipped} over 1 MiB.]\n` : "",
 	});
 }
+/** Some models send every optional argument; an empty scope means no scope. */
+function withoutEmptyScope(params: NotesParams): NotesParams {
+	const { scope, ...unscoped } = params;
+	return scope === "" ? unscoped : params;
+}
 export function registerNotes(
 	pi: ExtensionAPI,
 	policy: (ctx: ExtensionContext) => PolicyContext,
@@ -325,7 +330,8 @@ export function registerNotes(
 				}),
 			),
 		}),
-		async execute(...[_id, params, signal, , ctx]) {
+		async execute(...[_id, received, signal, , ctx]) {
+			const params = withoutEmptyScope(received);
 			// Migrate newly returned legacy package notes without changing this session’s binding.
 			notesDir(ctx.cwd);
 			const session = await store.get(ctx);
