@@ -5303,6 +5303,48 @@ await test("automatic recovery keeps verified paths from a partially failed edit
 	);
 });
 
+await test("automatic recovery resolves a notes folder read that sent an empty scope", () => {
+	const entries: EntryLike[] = [
+		{
+			type: "message",
+			id: "folder-call",
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id: "folder",
+						name: "notes",
+						arguments: { op: "read", path: "subdir", scope: "" },
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: "folder-receipt",
+			message: {
+				role: "toolResult",
+				toolName: "notes",
+				toolCallId: "folder",
+				isError: false,
+				content: "Notes directory: /workspace/.pi/notes\nsubdir/state.md  16B  2026-11-10",
+			},
+		},
+	];
+	const projected = entries.map((sourceEntry) => ({
+		sourceEntry,
+		messages: sourceEntry.message === undefined ? [] : [sourceEntry.message],
+	}));
+	const handoff = buildAutoHandoff(entries, projected, 20_000, {
+		ownerQuestionRegistered: false,
+	});
+	assert.match(
+		handoff,
+		/^- Referenced note \(read\): subdir \(\/workspace\/\.pi\/notes\/subdir\)/mu,
+	);
+});
+
 await test("automatic recovery ignores relative file-tool note paths whose working directory is unknown", () => {
 	const entries = ["relative", "absolute"].flatMap((name) => [
 		{
