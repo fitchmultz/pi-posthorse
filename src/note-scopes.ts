@@ -83,6 +83,13 @@ export function forkScope(owner: NoteOwner): string {
 export function scopeDirectory(scope: NoteScope): string {
 	return join(scope.root, scope.scope);
 }
+/**
+ * An address is stored in the journal, and a scope value is often a whole binding. Build an
+ * address here, never by spreading a scope, so it holds the two location fields and nothing else.
+ */
+export function addressIn(scope: NoteScope, path: string): NoteAddress {
+	return { root: scope.root, scope: scope.scope, path };
+}
 export function sameScope(left: NoteScope, right: NoteScope): boolean {
 	return left.root === right.root && left.scope === right.scope;
 }
@@ -278,7 +285,7 @@ export function addressOf(path: string, scopes: readonly NoteScope[]): NoteAddre
 				? undefined
 				: candidates.find((item) => item.directory === match.directory);
 		if (match !== undefined && candidate !== undefined) {
-			return { ...candidate.scope, path: match.path };
+			return addressIn(candidate.scope, match.path);
 		}
 		if (
 			scopes.some(

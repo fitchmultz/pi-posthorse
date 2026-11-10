@@ -199,6 +199,51 @@ async function notesCall(
 	assert.equal(result.isError, false, textOf(result));
 	return textOf(result);
 }
+/**
+ * Reads what a session stored on disk. Every note record it wrote names a notes location by
+ * root, scope and path, and never holds the binding that owns that location.
+ */
+function assertStoredNoteLocations(
+	manager: NativeSdk.SessionManager,
+	notesDirectory?: string,
+): { readonly files: number; readonly seeds: number } {
+	const own = readFileSync(requireValue(manager.getSessionFile()), "utf8")
+		.split("\n")
+		.filter((line) => line !== "")
+		.map((line) => record(JSON.parse(line)))
+		.filter(
+			(entry) =>
+				entry.type === "custom" &&
+				isRecord(entry.data) &&
+				isRecord(entry.data.owner) &&
+				entry.data.owner.id === manager.getSessionId(),
+		);
+	const stored = (type: string) =>
+		own.filter((entry) => entry.customType === type).map((entry) => record(entry.data));
+	const list = (value: unknown) => (Array.isArray(value) ? value.map(record) : []);
+	const files = stored("posthorse-note-touch").flatMap((touch) => list(touch.files));
+	const bindings = stored("posthorse-notes-scope");
+	if (notesDirectory !== undefined) {
+		bindings.push(
+			record(
+				JSON.parse(readFileSync(join(dirname(notesDirectory), "manifest.json"), "utf8")),
+			),
+		);
+	}
+	const seeds = [
+		...bindings.flatMap((binding) => list(binding.seeds)),
+		...files.flatMap((file) => (file.seed === undefined ? [] : [record(file.seed)])),
+	];
+	for (const file of files) {
+		const { seed: _seed, ...location } = file;
+		assert.deepEqual(Object.keys(location).sort(), ["kind", "path", "root", "scope"]);
+	}
+	for (const seed of seeds) {
+		assert.deepEqual(Object.keys(record(seed.source)).sort(), ["path", "root", "scope"]);
+		assert.deepEqual(Object.keys(record(seed.lineage)).sort(), ["path", "root", "scope"]);
+	}
+	return { files: files.length, seeds: seeds.length };
+}
 
 await test("fork notes canonicalize legacy receipt aliases before resolving their source", async (t) => {
 	const parent = await fixture(t, { posthorse: false, fileTools: true });
@@ -410,6 +455,11 @@ await test("fork notes retain deleted-worktree source roots across projects and 
 		await notesCall(grandchild, { op: "search", query: "cross-project private result" }),
 		/descendant-only/u,
 	);
+	const grandchildPath = requireValue(/^File: ([^\n]+)/u.exec(privateRead)?.[1]);
+	assert.ok(assertStoredNoteLocations(child.sessionManager, dirname(childPath)).seeds > 0);
+	assert.ok(
+		assertStoredNoteLocations(grandchild.sessionManager, dirname(grandchildPath)).seeds > 0,
+	);
 });
 
 await test("fork notes snapshot the selected branch without sharing its writable checkpoint", async (t) => {
@@ -457,6 +507,64 @@ await test("fork notes snapshot the selected branch without sharing its writable
 	assert.match(
 		await notesCall(resumed, { op: "read", path: "task.md" }),
 		/parent checkpoint\nchild progress\n$/,
+	);
+});
+
+await test("fork notes keep only locations from the oversized addresses of releases 0.10.4 through 0.10.17", async (t) => {
+	const parent = await fixture(t);
+	await notesCall(parent, { op: "write", path: "task.md", content: "shared checkpoint" });
+	const child = await fixture(t, {
+		cwd: parent.cwd,
+		manager: (cwd, directory) =>
+			SessionManager.forkFrom(
+				requireValue(parent.sessionManager.getSessionFile()),
+				cwd,
+				directory,
+			),
+	});
+	const inherited = await notesCall(child, { op: "read", path: "task.md" });
+	const childPath = requireValue(/^File: ([^\n]+)/u.exec(inherited)?.[1]);
+	// Those releases stored the binding that owns a note inside each address of a seed.
+	const childFile = requireValue(child.sessionManager.getSessionFile());
+	const entries = readFileSync(childFile, "utf8")
+		.split("\n")
+		.filter((line) => line !== "")
+		.map((line) => record(JSON.parse(line)));
+	const bindingKind = (entry: Record<string, unknown>) =>
+		entry.customType === "posthorse-notes-scope" ? record(entry.data).kind : undefined;
+	const project = record(
+		requireValue(entries.find((entry) => bindingKind(entry) === "project")).data,
+	);
+	const oversize = (binding: Record<string, unknown>) => {
+		for (const seed of Array.isArray(binding.seeds) ? binding.seeds.map(record) : []) {
+			seed.source = { ...project, path: seed.path };
+			seed.lineage = { ...project, path: seed.path };
+		}
+		return binding;
+	};
+	for (const entry of entries) {
+		if (bindingKind(entry) === "fork") {
+			oversize(record(entry.data));
+		}
+	}
+	writeFileSync(childFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+	const manifest = join(dirname(dirname(childPath)), "manifest.json");
+	writeFileSync(
+		manifest,
+		JSON.stringify(oversize(record(JSON.parse(readFileSync(manifest, "utf8"))))),
+	);
+	const grandchild = await fixture(t, {
+		cwd: parent.cwd,
+		manager: (cwd, directory) => SessionManager.forkFrom(childFile, cwd, directory),
+	});
+	const copied = await notesCall(grandchild, { op: "read", path: "task.md" });
+	const grandchildPath = requireValue(/^File: ([^\n]+)/u.exec(copied)?.[1]);
+	assert.notEqual(grandchildPath, childPath);
+	assert.ok(copied.endsWith("shared checkpoint"));
+	assert.equal(
+		assertStoredNoteLocations(grandchild.sessionManager, dirname(grandchildPath)).seeds,
+		2,
+		"the journal binding and the manifest each hold the inherited note's seed",
 	);
 });
 
@@ -554,6 +662,9 @@ await test("fork notes keep ownership across tree navigation, adoption, deletion
 	);
 	assert.equal(deleted.isError, true);
 	assert.match(textOf(deleted), /No note/u);
+	const stored = assertStoredNoteLocations(child.sessionManager, childDirectory);
+	assert.ok(stored.files >= 5, `file-tool and notes-tool touches: ${stored.files}`);
+	assert.ok(stored.seeds >= 3, `fork and adoption seeds: ${stored.seeds}`);
 	const resumed = await fixture(t, {
 		cwd: parent.cwd,
 		manager: (_cwd, directory) =>
