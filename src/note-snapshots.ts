@@ -18,6 +18,7 @@ import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "./contracts.ts";
 import { publishFile } from "./files.ts";
 import {
+	addressIn,
 	notePath,
 	parseBinding,
 	sameOwner,
@@ -127,7 +128,19 @@ async function copyNote(note: SnapshotNote, destination: string): Promise<CopyRe
 		}
 		await utimes(destination, before.atimeMs / 1000, before.mtimeMs / 1000);
 		const [digest, destInfo] = await Promise.all([fileDigest(destination), stat(destination)]);
-		return { kind: "verified", seed: { ...note, digest, identity: fileIdentity(destInfo) } };
+		return {
+			kind: "verified",
+			// Journals written by 0.10.4 through 0.10.17 hold whole bindings in seed addresses.
+			// A new seed keeps each location only, so that data is not copied into this fork.
+			seed: {
+				path: note.path,
+				source: addressIn(note.source, note.source.path),
+				lineage: addressIn(note.lineage, note.lineage.path),
+				digest,
+				identity: fileIdentity(destInfo),
+				anchors: note.anchors,
+			},
+		};
 	} catch (error) {
 		return {
 			kind: "unverified",

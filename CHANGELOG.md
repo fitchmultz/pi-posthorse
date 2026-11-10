@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Store a note address as its root, scope and path. In a forked session each note record and each inherited note also held a full copy of the fork's notes binding, and that copy multiplied with every fork of a fork: single journal records reached 57 MB and one session journal 1.5 GB. The data was never sent to the model; it cost disk, and time and memory whenever the session was opened, resumed or forked (#159). New records are about 800 bytes. Journals written by 0.10.4 through 0.10.17 load as before and keep their size; a new fork of one no longer copies the oversized addresses into its own records.
+
 ## 0.10.17 - 2026-11-10
 
 <!-- npm-release:unreleased:start -->

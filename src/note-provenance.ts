@@ -7,6 +7,7 @@ import { parseSessionLine } from "./session-files.ts";
 import { sessionNoteTouches } from "./note-evidence.ts";
 import { mapBatch, readManifest, snapshot, type SnapshotNote } from "./note-snapshots.ts";
 import {
+	addressIn,
 	addressOf,
 	bindingsOf,
 	canonicalPath,
@@ -130,7 +131,7 @@ export async function resolveReference(
 		}
 		visited.add(directory);
 		if (existsSync(notePath(current, path))) {
-			return { ...current, path };
+			return addressIn(current, path);
 		}
 		// A manifest includes later adoptions; the journal includes later writes and deletions.
 		const binding: NoteBinding | undefined =
@@ -204,7 +205,7 @@ function seedCandidates(
 			) {
 				selected.set(seed.path, {
 					...seed,
-					source: { root: binding.root, scope: binding.scope, path: seed.path },
+					source: addressIn(binding, seed.path),
 					cleared: false,
 				});
 			}

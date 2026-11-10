@@ -13,6 +13,7 @@ import {
 import {
 	NOTES_BINDING,
 	NOTES_TOUCH,
+	addressIn,
 	bindingsOf,
 	canonicalPath,
 	inside,
@@ -154,7 +155,7 @@ export class SessionNotes {
 		if (options.scope !== undefined) {
 			const scope = await this.selectScope(options.scope);
 			return {
-				address: { ...scope, path: relative },
+				address: addressIn(scope, relative),
 				path: notePath(scope, relative),
 				writable: sameScope(scope, this.binding),
 			};
@@ -162,11 +163,7 @@ export class SessionNotes {
 		const reference = this.owns(relative)
 			? undefined
 			: await this.#reference(relative, options.signal);
-		const address = reference ?? {
-			root: this.binding.root,
-			scope: this.binding.scope,
-			path: relative,
-		};
+		const address = reference ?? addressIn(this.binding, relative);
 		return { address, path: notePath(address, relative), writable: reference === undefined };
 	}
 	async adopt(path: string, call: NoteCall): Promise<Adoption> {
