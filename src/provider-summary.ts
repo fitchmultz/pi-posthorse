@@ -21,12 +21,13 @@ export function hostMakesProviderSummary(model: unknown): boolean {
 export const PROVIDER_SUMMARY_TOKENS = 100;
 /**
  * The model answers a request for a one-line summary. It refuses a request to reply with a fixed
- * line or with the path only, so the wording asks for a summary that points to the note.
+ * line or with the path only, and one that tells the summary to speak about "the recent messages",
+ * so the wording asks for a summary that points to the note, or to the record when there is none.
  */
 export function providerSummaryInstructions(notePath: string | undefined): string {
 	const pointer =
 		notePath === undefined
-			? "say that the recovery record after the recent messages has the details"
+			? "state that the details are in the recovery record below"
 			: `point to the task note \`${notePath}\` and say to read that note and proceed from there`;
 	return `Write a summary of one line, at most 20 words: name the task in a few words, then ${pointer}. Do not mention progress, a pending step or a next step. Do not call any tools; respond with the summary text only.`;
 }
