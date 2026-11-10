@@ -30,7 +30,8 @@ The practical additions are project-wide `notes` with private fork scopes, model
 and a best-effort checkpoint nudge. The automatic record is assembled from selected inputs, tool
 evidence and history pointers; it is **not an automatic narrative summary of completed work**.
 The model still needs to read notes or history and check live state. There is no universal claim
-that this policy is better than stock compaction for every task.
+that this policy is better than stock compaction for every task. The [field study](field-study.md)
+reports how agents used the notes, the history tool and the record in one user's sessions.
 
 See the [reference](reference.md#how-it-works) for record selection, provenance and budget details,
 and Pi's [compaction reference](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/compaction.md)
@@ -179,7 +180,9 @@ nor warms provider caches; the host and other extensions may have their own beha
 Compare the same workload with Posthorse loaded and unloaded, with automatic compaction enabled in
 both. Measure request counts, input/cache/output tokens, billed cost, latency and completion quality.
 Disabling compaction is not a stock-compaction comparison. The [cost investigation](../ARTIFACTS/investigation-report.md)
-provides a measurement plan, not a demonstrated saving or diagnosis of a production bill.
+provides a measurement plan, not a demonstrated saving or diagnosis of a production bill. The
+[field study](field-study.md#what-a-rollover-costs) reports what note upkeep cost in one user's
+sessions. It does not compare total spend with stock compaction.
 
 For everyday work:
 
