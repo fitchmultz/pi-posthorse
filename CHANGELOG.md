@@ -2,9 +2,23 @@
 
 ## Unreleased
 
+## 0.10.17 - 2026-11-10
+
+<!-- npm-release:unreleased:start -->
+
 - Ask for a task note when the task has none. The reminder said only to update a stale note, so a session that had never written one saved nothing before rollover (#151).
 - Treat an empty `scope` in a `notes` call as omitted. Models that fill every optional argument were refused with `Unknown notes scope` on reads and with a scope error on writes (#150). The unknown-scope error now quotes the value and says to omit `scope` for the session's own notes.
 - Name every task note that lives outside the session's own notes by its file path in the recovery record, and tell the agent to read it on that path. Previously only the closing instruction did. A fork that listed a note from its parent project by bare name got `No note at ...` from `notes read`, or read its private copy instead (#149).
+
+<!-- npm-release:unreleased:end -->
+
+- fix: name out-of-scope notes by path on every recovery record line (#153) ([6fc04d9](https://github.com/fitchmultz/pi-posthorse/commit/6fc04d9b8c865c9b4d3026cbf25dccfacf9ffc48))
+
+### What's Changed
+
+- fix: name out-of-scope notes by path on every recovery record line by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/153
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.16...v0.10.17
 
 ## 0.10.16 - 2026-11-10
 
