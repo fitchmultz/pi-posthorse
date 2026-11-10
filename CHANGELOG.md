@@ -4,6 +4,8 @@
 
 - Name every task note that lives outside the session's own notes by its file path in the recovery record, and tell the agent to read it on that path. Previously only the closing instruction did. A fork that listed a note from its parent project by bare name got `No note at ...` from `notes read`, or read its private copy instead (#149).
 
+- Add a [field study](docs/field-study.md) of how agents used notes, history and the recovery record around 24,940 context boundaries, with wait time, repeated work and note upkeep cost. The study is observational.
+
 ## 0.10.15 - 2026-11-09
 
 <!-- npm-release:unreleased:start -->
