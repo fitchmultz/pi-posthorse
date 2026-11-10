@@ -35,6 +35,8 @@ See the [changelog](https://github.com/fitchmultz/pi-posthorse/blob/main/CHANGEL
 
 Recoverable history is not guaranteed model recall. See the [practical guarantees and limits](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/context-recovery.md) for the stock-Pi comparison, search scope, checkpoints, privacy, concurrency and cost, or the [rollover reference](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#how-it-works) for implementation details.
 
+The [field study](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/field-study.md) measures what agents did around 24,940 context boundaries in daily use: note and history use, repeated work, stops, wait time, and cost. It is observational, not a controlled comparison with stock compaction.
+
 ## Tools
 
 These tools are available to the model:

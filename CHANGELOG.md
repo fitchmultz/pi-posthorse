@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a [field study](docs/field-study.md) of how agents used notes, history and the recovery record around 24,940 context boundaries, with wait time, repeated work and note upkeep cost. The study is observational.
+
 ## 0.10.15 - 2026-11-09
 
 <!-- npm-release:unreleased:start -->
