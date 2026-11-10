@@ -6,6 +6,7 @@
 
 <!-- npm-release:unreleased:start -->
 
+- Ask for a task note when the task has none. The reminder said only to update a stale note, so a session that had never written one saved nothing before rollover (#151).
 - Treat an empty `scope` in a `notes` call as omitted. Models that fill every optional argument were refused with `Unknown notes scope` on reads and with a scope error on writes (#150). The unknown-scope error now quotes the value and says to omit `scope` for the session's own notes.
 - Name every task note that lives outside the session's own notes by its file path in the recovery record, and tell the agent to read it on that path. Previously only the closing instruction did. A fork that listed a note from its parent project by bare name got `No note at ...` from `notes read`, or read its private copy instead (#149).
 

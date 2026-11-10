@@ -79,7 +79,7 @@ function automaticGuidance(budget: Budget | undefined, enabled: boolean): string
 			? ""
 			: `The rollover line is ${budget.rolloverAt.toLocaleString("en-US")} tokens used. `;
 	return `Pi rolls context over automatically, so the context window is not a deadline. Do not reduce scope, skip steps or verification, or write a final summary because rollover is near, and do not wait for the user to say "continue". Finish when the requested work and its verification are complete, or report a genuine blocker.
-${line}Rollover keeps a recent-message tail without summarizing. One task-note reminder may arrive at the end of a working turn near the line: update the note only if it is stale, then continue with the next step in the same run. new_context is an optional clean reset.`;
+${line}Rollover keeps a recent-message tail without summarizing. One task-note reminder may arrive at the end of a working turn near the line: update the note only if it is stale, or write one if the task has none, then continue with the next step in the same run. new_context is an optional clean reset.`;
 }
 export function buildGuidance(ctx: PolicyContext): string {
 	const budget = budgetFor(ctx);
