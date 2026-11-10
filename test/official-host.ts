@@ -267,10 +267,13 @@ await test("official explicit reset preserves system/tools and raw transcript; n
 		(ctx) => {
 			initial = getCurrentSystemPrompt(ctx.messages);
 			return toolTurn(
+				// Some models fill every optional argument instead of omitting it.
 				fauxToolCall("notes", {
 					op: "write",
 					path: "task.md",
 					content: "DURABLE_NEXT_STEP",
+					scope: "",
+					query: "",
 				}),
 				fauxToolCall("new_context", { handoff: "CONTINUE_HERE" }),
 			);
@@ -278,7 +281,13 @@ await test("official explicit reset preserves system/tools and raw transcript; n
 		(ctx) => {
 			fresh = structuredClone(ctx.messages);
 			return toolTurn(
-				fauxToolCall("notes", { op: "read", path: "task.md" }),
+				fauxToolCall("notes", {
+					op: "read",
+					path: "task.md",
+					scope: "",
+					query: "",
+					content: "",
+				}),
 				fauxToolCall("history", { op: "search", query: "RAW_ORIGINAL_OWNER" }),
 			);
 		},

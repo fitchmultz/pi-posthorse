@@ -129,7 +129,7 @@ export class SessionNotes {
 			return manifest;
 		}
 		throw new Error(
-			`Unknown notes scope ${selector}. Copy a scope selector from notes list/search.`,
+			`Unknown notes scope ${JSON.stringify(selector)}. Omit scope for this session's notes, or copy a scope selector from notes list/search.`,
 		);
 	}
 	async #reference(path: string, signal?: AbortSignal): Promise<NoteAddress | undefined> {
