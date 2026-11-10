@@ -2490,7 +2490,7 @@ for (const { continuation, stopReason } of settlementCases) {
 			assert.match(JSON.stringify(requests.slice(1)), /Routine task-note update\./);
 			assert.equal(
 				textOf(reminders()[0]),
-				"[posthorse] Routine task-note update. Update the task's current-state note if it is stale, then continue with the next step in this run.",
+				"[posthorse] Routine task-note update. Update the task's current-state note if it is stale, or write one if the task has none, then continue with the next step in this run.",
 			);
 			assert.doesNotMatch(
 				JSON.stringify(requests.slice(1)),
