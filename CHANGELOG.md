@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+## 0.10.18 - 2026-11-10
+
+<!-- npm-release:unreleased:start -->
+
 - Store a note address as its root, scope and path. In a forked session each note record and each inherited note also held a full copy of the fork's notes binding, and that copy multiplied with every fork of a fork: single journal records reached 57 MB and one session journal 1.5 GB. The data was never sent to the model; it cost disk, and time and memory whenever the session was opened, resumed or forked (#159). New records are about 800 bytes. Journals written by 0.10.4 through 0.10.17 load as before and keep their size; a new fork of one no longer copies the oversized addresses into its own records.
+
+<!-- npm-release:unreleased:end -->
+
+- fix: store note addresses as root, scope and path (#160) ([33e98d3](https://github.com/fitchmultz/pi-posthorse/commit/33e98d3618c33646f6dd808046fc09d9b6a19145))
+
+### What's Changed
+
+- fix: store note addresses as root, scope and path by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/160
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.17...v0.10.18
 
 ## 0.10.17 - 2026-11-10
 
