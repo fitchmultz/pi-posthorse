@@ -262,8 +262,9 @@ function notesToolTouches(
 	const parsed = resultText === undefined ? undefined : extractNotesResultTarget(resultText);
 	const kind = notesCallKind(args) ?? parsed?.kind;
 	const path = optionalString(args.path);
-	const scopedPath =
-		typeof args.scope === "string" && path !== undefined ? `${args.scope}/${path}` : path;
+	// An empty scope counts as omitted, as it does when the tool runs.
+	const scope = args.scope === "" ? undefined : optionalString(args.scope);
+	const scopedPath = scope !== undefined && path !== undefined ? `${scope}/${path}` : path;
 	const callTarget = resolveNoteTarget(scopedPath, context.knownDirs, true);
 	const resTarget = resolveNoteTarget(parsed?.rawPath, context.knownDirs, true);
 	const merged = mergeNoteTargets(callTarget, resTarget);

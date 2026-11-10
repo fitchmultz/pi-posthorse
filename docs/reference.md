@@ -182,7 +182,7 @@ notes({
 });
 ```
 
-`scope` is valid only for `read`, `list`, and `search`. Default discovery includes the current
+`scope` is valid only for `read`, `list`, and `search`. An empty `scope` counts as omitted. Default discovery includes the current
 project's original notes and completed fork scopes. It collapses byte-identical copies of the
 same inherited note before paging and retains selectors for every copy. Changed or uncertain
 copies remain separate. An explicit scope shows all files in that scope without collapsing them.

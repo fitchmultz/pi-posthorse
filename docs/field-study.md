@@ -144,9 +144,13 @@ The first request after a current-design rollover carried a median of 55,000 tok
 82,000 after a stock compaction. The recovery record had a median length of 4,519 characters. The
 stock summary had a median of 18,853.
 
-A stock compaction makes one more model request, which reads the context being summarized: a
-median of 271,000 tokens here. The journal does not record the usage of that request, so this
-study does not compare the two designs in dollars.
+A stock compaction makes one more model request, to write the summary. Pi has recorded the usage
+of that request since July 2026, for 3,868 of the 6,894 stock compactions here. The request read a
+median of 81,000 tokens and wrote a median of 5,800. By Pi's estimate it cost a median of $0.27
+and a mean of $0.44.
+
+The note cost and the summary cost come from different periods and models, so this study does not
+subtract one from the other.
 
 ### Agents mostly use the tools as described
 
