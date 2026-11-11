@@ -11,6 +11,7 @@ export type LineMatcher = {
 export type SessionLine = {
 	readonly head: string;
 	readonly matches: boolean;
+	/** Read while the owning iterator is open; advancing alone does not close its handle. */
 	readonly text: () => Promise<string>;
 };
 type LineRange = {
