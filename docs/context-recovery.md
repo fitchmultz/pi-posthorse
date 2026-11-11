@@ -47,8 +47,8 @@ Pi can prevent that drop with a provider summary block. The Anthropic API writes
 it, and the block then stands where the older messages stood. Posthorse asks Pi for a block at an
 automatic rollover that retains recent messages, when both of these conditions are true:
 
-- The host can make the block. [fitchmultz/pi](https://github.com/fitchmultz/pi) can, from commit
-  `PENDING-FORK-COMMIT`. Official Pi cannot.
+- The host can make the block. [fitchmultz/pi](https://github.com/fitchmultz/pi) can, in builds
+  that include [fitchmultz/pi#443](https://github.com/fitchmultz/pi/pull/443). Official Pi cannot.
 - The session's model is a Claude model of the `anthropic` or `cloudflare-ai-gateway` provider.
 
 With any other host or model, a rollover sends no request and works as the rest of this guide
@@ -82,6 +82,10 @@ reasoning as before:
 Pi writes the block, or the reason for its absence, to `providerSummary` on the compaction entry in
 the session file. Only the model that wrote a block can read it. After a switch to another model, Pi
 sends the line as text, and the retained reasoning is dropped.
+
+Another extension can undo the effect. Claude drops the retained reasoning again when an extension
+changes, removes or inserts a message before the recovery record. `pi-change-working-dir` 0.6.0
+does that: it inserts its directory update after the leading system messages.
 
 PENDING-REAL-CHECK-SENTENCE No test has measured whether the retained reasoning changes the
 quality of the work.
