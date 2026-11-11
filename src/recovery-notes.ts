@@ -196,7 +196,10 @@ function sessionNotes(
 			sources.notes === undefined ? defaultDir : scopeDirectory(sources.notes.binding),
 	};
 }
-/** The path that reads the note the record names first, when this session wrote one. */
+/**
+ * The file path of the note that the record names first, when this session wrote one. The path is
+ * absolute whenever the notes directory is known, so the `read` tool opens it from any directory.
+ */
 export function primaryNotePath(
 	chainEntries: readonly EntryLike[],
 	allEntries: readonly EntryLike[],

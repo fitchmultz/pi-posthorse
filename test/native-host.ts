@@ -2187,7 +2187,14 @@ await test("automatic rollover gets a provider summary block and leaves the mess
 	assert.deepEqual(stored.block, h.block);
 	assert.equal(stored.reason, undefined);
 	assert.equal(h.instructions.length, 1);
-	assert.match(requireValue(h.instructions[0]), /point to the task note `[^`]*task\.md`/);
+	const [, named] = requireValue(
+		/point to the task note `([^`]*)`/.exec(requireValue(h.instructions[0])),
+	);
+	assert.equal(
+		readFileSync(requireValue(named), "utf8"),
+		"Goal: pad.",
+		"the instructions name a path that opens the note",
+	);
 	const branch = h.sessionManager.getBranch();
 	const cut = branch.findIndex((entry) => entry.id === piCut);
 	assert.equal(branch[cut]?.type, "custom_message", "Pi's own cut is not a reply");
