@@ -57,9 +57,10 @@ export function retainedSpan(
 
 /**
  * Where the retained tail ends in a provider message list: the position after the last message
- * that is the journal's next retained message, in order. A message another handler interleaves
- * inside the tail is skipped, so the record still lands after the whole retained tail. Returns
- * undefined when the whole tail cannot be certified, so callers fall back to counting positions.
+ * that is the journal's next retained message, in order — by identity, or as an opaque system
+ * presentation of a retained custom message. A message another handler interleaves inside the
+ * tail is skipped, so the record still lands after the whole retained tail. Returns undefined
+ * when the whole tail cannot be certified, so callers fall back to counting positions.
  */
 export function retainedTailEnd(
 	messages: readonly MessageLike[],
@@ -78,16 +79,25 @@ export function retainedTailEnd(
 	) {
 		const message = messages.at(index);
 		const journal = retained.at(expected);
-		if (
-			message !== undefined &&
-			journal !== undefined &&
-			sameRetainedMessage(journal, message)
-		) {
+		if (message === undefined || journal === undefined) {
+			break;
+		}
+		if (sameRetainedMessage(journal, message) || isOpaquePresentation(journal, message)) {
 			expected += 1;
 			end = index + 1;
 		}
 	}
 	return expected === retained.length ? end : undefined;
+}
+
+/**
+ * A presenter may replace a retained custom message with an opaque system patch that keeps none
+ * of its identity — `pi-change-working-dir`'s directory snapshot carries only `sections`.
+ * Presentations stay in journal order, so the next system message while a retained custom
+ * message is expected is that presentation, consumed positionally.
+ */
+function isOpaquePresentation(journal: MessageLike, event: MessageLike): boolean {
+	return event.role === "system" && journal.role === "custom";
 }
 
 /**

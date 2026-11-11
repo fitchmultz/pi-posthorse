@@ -101,6 +101,35 @@ await test("an interleaved message does not move the record inside the retained 
 	assert.equal(retainedTailEnd(remapped, 0, [first, second]), 3);
 });
 
+await test("an opaque system patch of a retained custom message is paired in journal order", () => {
+	const record = { role: "compactionSummary", summary: "record" };
+	const snapshot = {
+		role: "custom",
+		customType: "change-working-dir:context",
+		content: "notice",
+		details: { cwd: "/w", notice: "notice" },
+	};
+	const user = { role: "user", content: [{ type: "text", text: "Continue." }] };
+	// The presenter keeps none of the snapshot's identity: no custom type, details, or content.
+	const patch = {
+		role: "system",
+		content: "",
+		sections: { cwd: "/w", "change-working-dir": "x" },
+	};
+	assert.ok(!sameRetainedMessage(snapshot, patch));
+	// The retained tail is [snapshot, user]; a foreign system message is interleaved between
+	// their presentations. The patch is consumed positionally, the foreign message is skipped,
+	// and the record lands after the whole tail.
+	const messages = [
+		record,
+		patch,
+		{ role: "system", content: "foreign" },
+		user,
+		{ role: "user", content: "Newer." },
+	];
+	assert.equal(retainedTailEnd(messages, 0, [snapshot, user]), 4);
+});
+
 await test("a tail that cannot be certified by identity reports no end", () => {
 	const record = { role: "compactionSummary", summary: "record" };
 	const first = { role: "user", content: [{ type: "text", text: "First." }] };
