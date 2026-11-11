@@ -86,8 +86,10 @@ the session file. Only the model that wrote a block can read it. After a switch 
 sends the line as text, and the retained reasoning is dropped.
 
 Another extension can undo the effect. Claude drops the retained reasoning again when an extension
-changes, removes or inserts a message before the recovery record. `pi-change-working-dir` 0.6.0
-does that: it inserts its directory update after the leading system messages.
+changes, removes or inserts a message before the recovery record. A `pi-change-working-dir`
+checkout older than its commit `6e034f8` does that in a session that changed directory: it inserts
+its directory update after the leading system messages. `pi update --extensions` installs the
+corrected package.
 
 A 20-minute session on `claude-fable-5-2` made two rollovers with a block. The first request after
 each rollover sent 4 and 3 retained reasoning blocks, and Claude dropped none. In two sessions on
