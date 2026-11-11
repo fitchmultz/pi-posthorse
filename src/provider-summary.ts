@@ -1,7 +1,7 @@
 import * as host from "@earendil-works/pi-ai";
 
 /**
- * EXPERIMENT: a short summary block written by the provider at an automatic rollover.
+ * A one-line summary block written by the provider at an automatic rollover.
  *
  * A host that implements `providerSummary` on a compaction asks the session's model for the block
  * and sends it ahead of the retained tail, which keeps the reasoning of the tail's replies valid.
