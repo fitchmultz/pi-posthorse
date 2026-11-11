@@ -38,8 +38,9 @@ You need a Linux machine with Docker, `bwrap`, Node.js, Python 3.12, and a Pi lo
 model provider. The runs used Docker 29.9, bubblewrap 0.13.1, and a 32-core machine with 32 GB of
 memory. A session can use up to 4 GB of memory for its tests.
 
-1. Create a working directory, and copy `harness/` and `arms/` into it. The harness treats the
-   directory above `harness/` as its root.
+1. Create a working directory, and copy `harness/`, `arms/`, `lists-main.txt`, and `lists-g.txt`
+   into it. The harness treats the directory above `harness/` as its root, and a batch reads its
+   list file from there.
 2. Create a Python 3.12 environment at `commit0/.venv`, and install `commit0` 0.1.8 in it. The
    harness uses Commit0's task list, image names, test script, and test lists.
 3. Install official Pi and the test-timeout plugin that the grading uses:
