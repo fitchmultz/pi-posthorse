@@ -1,4 +1,5 @@
-import { isRecord } from "./text.ts";
+import { Type } from "typebox";
+import { Check } from "typebox/value";
 
 export interface PageRange {
 	readonly offset: number;
@@ -48,102 +49,73 @@ export type PosthorseDisplay =
 			readonly imageTotal?: number;
 	  } & PageRange);
 
-function optionalNumbers(
-	value: Readonly<Record<string, unknown>>,
-	keys: readonly string[],
-): boolean {
-	return keys.every((key) => value[key] === undefined || typeof value[key] === "number");
-}
-
-function isPage(value: unknown): value is PageRange {
-	return (
-		isRecord(value) &&
-		typeof value.offset === "number" &&
-		typeof value.end === "number" &&
-		typeof value.total === "number"
-	);
-}
-
-function isSpan(value: unknown): value is HistorySpan {
-	return (
-		isRecord(value) &&
-		typeof value.headerLength === "number" &&
-		typeof value.length === "number"
-	);
-}
-
-function isContextDisplay(value: Readonly<Record<string, unknown>>): boolean {
-	const usage = value.usage;
-	const validUsage = usage === undefined || isUsage(usage);
-	return (
-		validUsage &&
-		optionalNumbers(value, ["rolloverAt"]) &&
-		(value.rollover === undefined ||
-			value.rollover === "enabled" ||
-			value.rollover === "disabled" ||
-			value.rollover === "unsupported")
-	);
-}
-
-function isUsage(value: unknown): boolean {
-	return (
-		isRecord(value) &&
-		(value.tokens === null || typeof value.tokens === "number") &&
-		typeof value.contextWindow === "number" &&
-		(value.percent === null || typeof value.percent === "number")
-	);
-}
-
-function isSearchDisplay(value: Readonly<Record<string, unknown>>): boolean {
-	return (
-		Array.isArray(value.entries) &&
-		value.entries.every(isSpan) &&
-		optionalNumbers(value, ["footerLength", "skipped"]) &&
-		(value.more === undefined || typeof value.more === "boolean")
-	);
-}
-
-function isNotesDisplay(value: Readonly<Record<string, unknown>>): boolean {
-	return (
-		typeof value.count === "number" &&
-		optionalNumbers(value, ["headerLength"]) &&
-		(value.page === undefined || isPage(value.page)) &&
-		(value.more === undefined || typeof value.more === "boolean")
-	);
-}
-
-function isDisplay(value: unknown): value is PosthorseDisplay {
-	if (!isRecord(value)) {
-		return false;
-	}
-	switch (value.kind) {
-		case "context":
-			return isContextDisplay(value);
-		case "notes-list":
-		case "notes-search":
-			return isNotesDisplay(value);
-		case "note-read":
-			return isPage(value) && optionalNumbers(value, ["headerLength"]);
-		case "history-read":
-			return (
-				isPage(value) &&
-				typeof value.headerLength === "number" &&
-				optionalNumbers(value, ["imageOffset", "imageEnd", "imageTotal"])
-			);
-		case "history-search":
-			return isSearchDisplay(value);
-		case "note-write":
-		case "note-append":
-		case "new-context":
-			return true;
-		default:
-			return false;
-	}
-}
+const pageRangeSchema = Type.Object({
+	offset: Type.Number(),
+	end: Type.Number(),
+	total: Type.Number(),
+});
+const historySpanSchema = Type.Object({
+	headerLength: Type.Number(),
+	length: Type.Number(),
+});
+const usageSchema = Type.Object({
+	tokens: Type.Union([Type.Number(), Type.Null()]),
+	contextWindow: Type.Number(),
+	percent: Type.Union([Type.Number(), Type.Null()]),
+});
+/** The saved-result contract: one schema decides which display facts a renderer may trust. */
+const displaySchema = Type.Union([
+	Type.Object({
+		kind: Type.Literal("context"),
+		usage: Type.Optional(usageSchema),
+		rollover: Type.Optional(
+			Type.Union([
+				Type.Literal("enabled"),
+				Type.Literal("disabled"),
+				Type.Literal("unsupported"),
+			]),
+		),
+		rolloverAt: Type.Optional(Type.Number()),
+	}),
+	Type.Object({
+		kind: Type.Union([Type.Literal("notes-list"), Type.Literal("notes-search")]),
+		count: Type.Number(),
+		headerLength: Type.Optional(Type.Number()),
+		page: Type.Optional(pageRangeSchema),
+		more: Type.Optional(Type.Boolean()),
+	}),
+	Type.Object({
+		...pageRangeSchema.properties,
+		kind: Type.Literal("note-read"),
+		headerLength: Type.Optional(Type.Number()),
+	}),
+	Type.Object({
+		kind: Type.Union([
+			Type.Literal("note-write"),
+			Type.Literal("note-append"),
+			Type.Literal("new-context"),
+		]),
+	}),
+	Type.Object({
+		kind: Type.Literal("history-search"),
+		entries: Type.Array(historySpanSchema),
+		footerLength: Type.Optional(Type.Number()),
+		more: Type.Optional(Type.Boolean()),
+		skipped: Type.Optional(Type.Number()),
+	}),
+	Type.Object({
+		...pageRangeSchema.properties,
+		kind: Type.Literal("history-read"),
+		headerLength: Type.Number(),
+		imageOffset: Type.Optional(Type.Number()),
+		imageEnd: Type.Optional(Type.Number()),
+		imageTotal: Type.Optional(Type.Number()),
+	}),
+]);
 
 /** Saved sessions and streamed tool results can predate the display contract. */
 export function displayOf(value: unknown): PosthorseDisplay | undefined {
-	return isDisplay(value) ? value : undefined;
+	return Check(displaySchema, value) ? value : undefined;
 }
 
 export interface HistorySection {
