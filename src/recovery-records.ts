@@ -1,6 +1,7 @@
 import { isReminderType, type EntryLike } from "./contracts.ts";
 import { boundedBlock, imageSummary, imagesOf, textOf } from "./message-text.ts";
 
+export const MAX_RECOVERY_RECORD_CHARS = 4_000;
 export type RecoveryRecord = {
 	readonly id: string;
 	readonly timestamp: string;

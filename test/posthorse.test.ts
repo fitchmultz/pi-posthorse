@@ -507,6 +507,54 @@ await test("automatic ancestry stops at the nearest owner window without resurre
 	assert.doesNotMatch(handoff, /SUPERSEDED_OWNER_INTENT|SECRET_NESTED_TOOL_EVIDENCE|auto-1/);
 });
 
+await test("a short owner follow-up keeps the earlier task in later recovery records", async () => {
+	const { handlers, context } = await setup();
+	const automatic = (id: string) => ({
+		type: "compaction",
+		id,
+		firstKeptEntryId: null,
+		details: { posthorse: 1, reason: "threshold" },
+		summary: "Automatic context rollover recovery record.",
+	});
+	const task = {
+		type: "message",
+		id: "task",
+		timestamp: "2026-11-10T21:14:15Z",
+		message: { role: "user", content: `TASK_START ${"x".repeat(1_200)} TASK_RULES` },
+	};
+	const followUp = {
+		type: "message",
+		id: "follow-up",
+		timestamp: "2026-11-10T22:00:50Z",
+		message: { role: "user", content: "Continue." },
+	};
+	const carried = (id: string) =>
+		new RegExp(
+			`owner input; carried from an earlier window, possibly already handled; not current progress \\| [^|]+ \\| entry ${id}\\]`,
+		);
+	const inItsWindow = automaticHandoff(handlers, context, [task, automatic("auto-1"), followUp]);
+	assert.match(inItsWindow, carried("task"));
+	assert.match(inItsWindow, /TASK_START x+ TASK_RULES/);
+	assert.match(
+		inItsWindow,
+		/\[owner input \| 2026-11-10T22:00:50Z \| entry follow-up\]\nContinue\./,
+	);
+
+	const later = automaticHandoff(handlers, context, [
+		task,
+		automatic("auto-1"),
+		followUp,
+		automatic("auto-2"),
+		automatic("auto-3"),
+	]);
+	assert.match(later, carried("task"));
+	assert.match(later, /TASK_START x+ TASK_RULES/);
+	assert.match(later, carried("follow-up"));
+	assert.ok(later.indexOf("entry task]") < later.indexOf("entry follow-up]"), "oldest first");
+	assert.match(later, /auto-3, auto-2/);
+	assert.doesNotMatch(later, /auto-1/);
+});
+
 await test("automatic recovery keeps owner anchors and visible coordination without stale transcript guesses", async () => {
 	const { handlers, context, toolDefinitions } = await setup();
 	toolDefinitions.push({ name: "ask_question" });

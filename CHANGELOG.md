@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the task in the recovery record after a short owner follow-up. A record took inputs from earlier windows only when its own window had no owner input, and only from the nearest earlier window that had one. After one "Continue." every later record held that word, or no owner input, and the task with its rules was gone from the model's context (#163). A record now carries the owner's most recent inputs from earlier windows, newest first, until they fill the room of one input (4,000 characters); owner text of the current window counts against that room, so a long new request still stands alone. Short inputs also leave their unused room in the record to long ones.
+
 ## 0.10.18 - 2026-11-10
 
 <!-- npm-release:unreleased:start -->
