@@ -132,27 +132,37 @@ async function setup() {
 	const handlers = new Map<string, Handler>();
 	for (const [name, callbacks] of loaded.extension.handlers) {
 		const callback = requireValue(callbacks[0], name);
-		handlers.set(
-			name,
-			name === "context_with_system"
-				? (event, context) => {
-						const current = { ...event };
-						let transformed: Record<string, unknown> | undefined;
-						for (const handler of callbacks) {
-							const result: unknown = handler(current, context);
-							assert.ok(
-								!(result instanceof Promise),
-								"Fixture context handlers are synchronous",
-							);
-							if (result !== undefined) {
-								transformed = record(result);
-								Object.assign(current, transformed);
-							}
-						}
-						return transformed;
+		let wrapped: Handler = callback;
+		if (name === "context_with_system") {
+			wrapped = (event, context) => {
+				const current = { ...event };
+				let transformed: Record<string, unknown> | undefined;
+				for (const handler of callbacks) {
+					const result: unknown = handler(current, context);
+					assert.ok(
+						!(result instanceof Promise),
+						"Fixture context handlers are synchronous",
+					);
+					if (result !== undefined) {
+						transformed = record(result);
+						Object.assign(current, transformed);
 					}
-				: callback,
-		);
+				}
+				return transformed;
+			};
+		} else if (name === "turn_start") {
+			// Multiple registrations own turn-start resets; Pi fires them all.
+			wrapped = (event, context) => {
+				for (const handler of callbacks) {
+					const result: unknown = handler(event, context);
+					assert.ok(
+						!(result instanceof Promise),
+						"Fixture turn_start handlers are synchronous",
+					);
+				}
+			};
+		}
+		handlers.set(name, wrapped);
 	}
 	const tools = new Map<string, Tool>();
 	for (const [name, registration] of loaded.extension.tools) {
@@ -1166,6 +1176,32 @@ await test("guidance uses request-local sections and preserves custom or forced 
 		compacted.messages.map((message) => message.role),
 		["system", "system", "custom", "compactionSummary"],
 		"the hidden guidance follows every leading system message",
+	);
+
+	// The run settles: a later idle evaluation edits the leading system section instead of
+	// splicing a request-local message, and a turn boundary clears the options even when the
+	// host never fires the settle.
+	requireValue(handlers.get("agent_settled"))({}, context);
+	const settled = [
+		{ role: "system", content: "Forced instructions", sections: record({}), timestamp: 0 },
+	];
+	requireValue(handlers.get("context_with_system"))({ messages: settled }, context);
+	assert.equal(settled.length, 1, "a settled run clears the forced-prompt options");
+	assert.match(
+		stringValue(requireValue(settled[0]).sections.posthorse),
+		/Configured context capacity: 100,000 tokens/,
+	);
+
+	handler({ systemPromptOptions: forcedOptions }, context);
+	requireValue(handlers.get("turn_start"))({}, context);
+	const nextTurn = [
+		{ role: "system", content: "Forced instructions", sections: record({}), timestamp: 0 },
+	];
+	requireValue(handlers.get("context_with_system"))({ messages: nextTurn }, context);
+	assert.equal(nextTurn.length, 1, "a turn boundary clears the forced-prompt options");
+	assert.match(
+		stringValue(requireValue(nextTurn[0]).sections.posthorse),
+		/Configured context capacity: 100,000 tokens/,
 	);
 });
 

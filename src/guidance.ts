@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 import {
@@ -9,8 +9,14 @@ import {
 } from "./budget.ts";
 import type { EntryLike, PolicyContext, SnapshotReader } from "./contracts.ts";
 import { startsFreshGuidanceEpoch } from "./boundary.ts";
-import { createEpochCache, type EpochValue } from "./epoch-cache.ts";
-import { sessionEntry, toolFacts, type SessionHost, type SessionIdentity } from "./host.ts";
+import { createEpochCache, type EpochValue, type SessionContext } from "./epoch-cache.ts";
+import {
+	sessionEntry,
+	toolFacts,
+	type SessionHost,
+	type SessionIdentity,
+	type ToolRegistry,
+} from "./host.ts";
 
 export const WINDOW_GUIDANCE_TYPE = "posthorse-window-guidance";
 const guidanceRecordSchema = Type.Object({
@@ -33,12 +39,13 @@ type GuidanceEpoch = {
 	readonly tools: GuidanceTools | undefined;
 };
 export type WindowGuidance = {
-	readonly resolve: (ctx: ExtensionContext, host: PolicyContext) => string;
-	readonly deliver: (ctx: ExtensionContext, host: PolicyContext) => string;
+	/** Only the session manager is read; the same context the epoch cache accepts. */
+	readonly resolve: (ctx: SessionContext, host: PolicyContext) => string;
+	readonly deliver: (ctx: SessionContext, host: PolicyContext) => string;
 	readonly reset: () => void;
 };
 
-export function activeGuidanceTools(pi: ExtensionAPI): GuidanceTools {
+export function activeGuidanceTools(pi: ToolRegistry): GuidanceTools {
 	const { activeUnnamespaced } = toolFacts(pi);
 	return {
 		newContext: activeUnnamespaced.has("new_context"),
@@ -122,7 +129,10 @@ function scanGuidanceEpoch(
 		...withMemoryEpoch(collected, memoryByEpoch?.get(anchorKey)),
 	};
 }
-export function createWindowGuidance(pi: ExtensionAPI): WindowGuidance {
+/** The journal and tool-registry members guidance borrows; the host's full API satisfies these. */
+export type GuidanceRegistry = ToolRegistry & Pick<ExtensionAPI, "appendEntry">;
+
+export function createWindowGuidance(pi: GuidanceRegistry): WindowGuidance {
 	let memoryByManager = new WeakMap<object, Map<string, MemoryEpoch>>();
 	const epochs = createEpochCache<GuidanceEpoch>((ctx, identity, previous) =>
 		scanGuidanceEpoch(
@@ -132,6 +142,21 @@ export function createWindowGuidance(pi: ExtensionAPI): WindowGuidance {
 			memoryByManager.get(ctx.sessionManager),
 		),
 	);
+	/**
+	 * A fresh anchor retires every earlier one on this branch: nothing reads an old epoch again
+	 * without /tree, which resets all memory. Keep only the current anchor's delivered text.
+	 */
+	const pruneRetiredEpochs = (manager: object, anchorKey: string): void => {
+		const byEpoch = memoryByManager.get(manager);
+		if (byEpoch === undefined) {
+			return;
+		}
+		for (const key of byEpoch.keys()) {
+			if (key !== anchorKey) {
+				byEpoch.delete(key);
+			}
+		}
+	};
 	return {
 		resolve(ctx, host) {
 			const epoch = epochs.read(ctx);
@@ -140,8 +165,19 @@ export function createWindowGuidance(pi: ExtensionAPI): WindowGuidance {
 				epoch.byBudget.get(key) ?? buildGuidance(host, epoch.tools ?? ALL_GUIDANCE_TOOLS)
 			);
 		},
+		/**
+		 * Delivering guidance from inside the request hook must persist before the request: a
+		 * restart after a rollover with a provider summary block has to reuse these exact bytes —
+		 * the leading system message is sent unchanged, and in-memory delivery state does not
+		 * survive. On the fork, the provider-summary request runs this hook mid-compaction. That
+		 * is safe twice over: the request that reached the rollover threshold already delivered
+		 * this budget's text, so the summary request reuses it and writes nothing; and a
+		 * compaction with a summary block keeps the previous guidance anchor, so even a budget
+		 * change mid-compaction appends inside the epoch the next window still reads.
+		 */
 		deliver(ctx, host) {
 			const epoch = epochs.read(ctx);
+			pruneRetiredEpochs(ctx.sessionManager, epoch.anchorKey);
 			const key = budgetGuidanceKey(host);
 			const existing = epoch.byBudget.get(key);
 			if (existing !== undefined) {
@@ -177,13 +213,18 @@ export function createWindowGuidance(pi: ExtensionAPI): WindowGuidance {
 	};
 }
 export function registerGuidance(
-	pi: ExtensionAPI,
+	pi: Pick<ExtensionAPI, "on">,
 	policy: SnapshotReader,
 	windowGuidance: WindowGuidance,
 ): void {
 	let promptOptions: { readonly forceSystemPrompt?: string } | undefined;
 	pi.on("before_agent_start", (event) => {
 		promptOptions = event.systemPromptOptions;
+	});
+	pi.on("turn_start", () => {
+		// Prompt options belong to one run. A settle the host never fires must not leak them
+		// into a later turn's idle evaluation; every turn starts with a clean slate.
+		promptOptions = undefined;
 	});
 	pi.on("agent_settled", () => {
 		// Prompt options belong to one run, never to later idle context evaluation.
