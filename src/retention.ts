@@ -22,6 +22,7 @@ import {
 	type ProviderSummaryRequest,
 } from "./provider-summary.ts";
 import { buildAutoHandoff, recoveryNotePath } from "./recovery.ts";
+import type { RetainedTail } from "./retained-tail.ts";
 
 type RecoveryCapacity = {
 	readonly host: PolicyContext;
@@ -31,10 +32,6 @@ type RecoveryCapacity = {
 	readonly notes?: NotesRecovery | undefined;
 	/** The host will ask the provider for a summary block, which needs an assistant message first in the tail. */
 	readonly providerSummary?: boolean | undefined;
-};
-type RetainedTail = {
-	readonly firstKeptEntryId?: string | undefined;
-	readonly ids: ReadonlySet<string>;
 };
 type Immutable<T> = T extends string | number | boolean | null | undefined
 	? T
@@ -150,8 +147,9 @@ function boundedTail(
 	entries: readonly ProjectionEntry[],
 	start: number,
 	maxTokens: number,
-	startsTail: (entry: ProjectionEntry) => boolean,
+	requiresAssistantStart: boolean,
 ): RetainedTail {
+	const startsTail = requiresAssistantStart ? assistantStart : safeStart;
 	const costs = entries.slice(start).map((entry) => ({
 		entry,
 		cost:
@@ -171,41 +169,41 @@ function boundedTail(
 				return {
 					firstKeptEntryId: entry.sourceEntry.id,
 					ids: new Set(tail.map((retained) => retained.sourceEntry.id)),
+					requiresAssistantStart,
 				};
 			}
 		}
 		tokens -= cost;
 	}
-	return { ids: new Set() };
+	return { firstKeptEntryId: undefined, ids: new Set(), requiresAssistantStart };
 }
 function retainedTail(
 	projected: readonly ProjectionEntry[],
 	capacity: RecoveryCapacity,
 	maxTokens: number,
 ): RetainedTail {
+	const requiresAssistantStart = capacity.providerSummary === true;
+	const empty: RetainedTail = {
+		firstKeptEntryId: undefined,
+		ids: new Set(),
+		requiresAssistantStart,
+	};
 	const keep =
 		capacity.host.getCompactionSettings().keepRecentTokens ??
 		DEFAULT_COMPACTION_SETTINGS.keepRecentTokens;
 	if (!Number.isFinite(keep) || keep <= 0 || maxTokens <= 0) {
-		return { ids: new Set() };
+		return empty;
 	}
 	const boundary = activeBoundaryIndex(projected);
 	const entries = projected.slice(boundary + 1);
 	if (entries.length === 0) {
-		return { ids: new Set() };
+		return empty;
 	}
 	const prepared = entries.findIndex(
 		(entry) => entry.sourceEntry.id === capacity.firstKeptEntryId,
 	);
 	const start = prepared >= 0 ? prepared : projectedCut(entries, keep);
-	return start < 0
-		? { ids: new Set() }
-		: boundedTail(
-				entries,
-				start,
-				maxTokens,
-				capacity.providerSummary === true ? assistantStart : safeStart,
-			);
+	return start < 0 ? empty : boundedTail(entries, start, maxTokens, requiresAssistantStart);
 }
 /** Recent messages and recovery share half the fresh operational budget, leaving work headroom. */
 export function automaticRecovery(
@@ -230,6 +228,7 @@ export function automaticRecovery(
 	if (limit < MIN_PAGE_CHARS) {
 		return undefined;
 	}
+	// A summary block is counted against the tail budget before any tail is chosen.
 	const asksProvider = capacity.providerSummary === true;
 	const retained = retainedTail(
 		projected,

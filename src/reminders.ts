@@ -12,6 +12,7 @@ import { contextStart, isWindow } from "./boundary.ts";
 import { contextEdits } from "./history-entries.ts";
 import { createEpochCache, type EpochValue } from "./epoch-cache.ts";
 import { sessionBranch, sessionEntry, sessionProjection, type SessionHost } from "./host.ts";
+import { journalRetainedIds } from "./retained-tail.ts";
 
 type ReminderFacts = {
 	readonly windowId: string;
@@ -180,25 +181,6 @@ export function createReminderLookup(): ReminderLookup {
 	return { reset: cache.reset, read: cache.read };
 }
 
-function retainedEntryIdSet(branch: readonly EntryLike[]): ReadonlySet<string> | undefined {
-	const compactionIdx = branch.findLastIndex((entry) => entry.type === "compaction");
-	const firstKeptId = compactionIdx > 0 ? branch[compactionIdx]?.firstKeptEntryId : undefined;
-	if (typeof firstKeptId !== "string" || firstKeptId === "") {
-		return undefined;
-	}
-	const firstKeptIdx = branch.findIndex((entry) => entry.id === firstKeptId);
-	if (firstKeptIdx < 0 || firstKeptIdx >= compactionIdx) {
-		return undefined;
-	}
-	return new Set(
-		branch
-			.slice(firstKeptIdx, compactionIdx)
-			.flatMap((entry) =>
-				typeof entry.id === "string" && entry.id !== "" ? [entry.id] : [],
-			),
-	);
-}
-
 function countRetainedFromProjected(
 	projected: readonly ProjectedEntry[],
 	retainedIds: ReadonlySet<string>,
@@ -242,7 +224,7 @@ export function countRetainedMessages(
 	stale: StaleReminderPredicate,
 ): number {
 	const branch = sessionBranch(ctx.sessionManager) ?? [];
-	const retainedIds = retainedEntryIdSet(branch);
+	const retainedIds = journalRetainedIds(branch);
 	if (retainedIds === undefined || retainedIds.size === 0) {
 		return 0;
 	}
