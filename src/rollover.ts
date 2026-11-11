@@ -25,7 +25,7 @@ import {
 } from "./provider-summary.ts";
 import { hasRetainedRolloverMarker } from "./recovery.ts";
 import { automaticRecovery } from "./retention.ts";
-import { ResetRequests } from "./reset-requests.ts";
+import { ResetRequests, type ResetOutcome } from "./reset-requests.ts";
 import type { NotesRecovery } from "./note-evidence.ts";
 type RolloverResources = {
 	readonly resetPages: () => void;
@@ -47,9 +47,6 @@ function explicitReset(
 	summary: string,
 	limit: () => number,
 ): BoundaryResult | undefined {
-	if (event.outcome === "aborted" || ctx.signal?.aborted === true) {
-		return undefined;
-	}
 	if (summary.length > limit()) {
 		return {
 			entries: [
@@ -364,6 +361,14 @@ function registerAutomaticRollover(
 		}
 	});
 }
+/** A turn that ended in error, abort, or with an aborted request keeps its context and sends nothing. */
+function keepsContext(event: TurnEndEvent, reset: ResetOutcome): boolean {
+	return (
+		(event.message.role === "assistant" &&
+			(event.message.stopReason === "error" || event.message.stopReason === "aborted")) ||
+		(reset.kind === "no-reset" && reset.reason === "aborted")
+	);
+}
 /** Owns per-turn reset requests and leaf-certified reminder state. Pi owns persistence and scheduling. */
 export function registerRollover(
 	pi: ExtensionAPI,
@@ -391,16 +396,15 @@ export function registerRollover(
 	registerGuidance(pi, policy, resources.guidance);
 	registerAutomaticRollover(pi, policy, activeToolTokens, resources.notes);
 	pi.on("turn_end", (event, ctx) => {
-		const summary = resetRequests.take(event.toolResults);
+		const reset = resetRequests.settle(event.toolResults, {
+			aborted: event.outcome === "aborted" || ctx.signal?.aborted === true,
+		});
 		const host = policy(ctx);
-		if (
-			event.message.role === "assistant" &&
-			(event.message.stopReason === "error" || event.message.stopReason === "aborted")
-		) {
+		if (keepsContext(event, reset)) {
 			return;
 		}
-		if (summary !== undefined) {
-			return explicitReset(event, ctx, summary, () =>
+		if (reset.kind === "reset") {
+			return explicitReset(event, ctx, reset.handoff, () =>
 				freshPayloadChars(host, activeToolTokens(), event.context.pendingMessages),
 			);
 		}
