@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the `<posthorse>` guidance section byte-identical for the life of a context window across package updates, restarts, and mid-window deferred-tool loads (#162, #172). Posthorse now records each window's rendered guidance once per model/compaction budget (`posthorse-window-guidance`), omits the `new_context` and `get_context_remaining` sentences when those tools are not active at the start of the window, and carries the saved guidance across rollovers that use a provider summary block until a new prompt prefix begins.
+
 ## 0.10.22 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->

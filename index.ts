@@ -12,6 +12,7 @@ import {
 import { registerPosthorseMessages } from "./ui.ts";
 import { policySnapshot } from "./src/budget.ts";
 import type { CompactionPolicy, PolicyReader } from "./src/contracts.ts";
+import { createWindowGuidance } from "./src/guidance.ts";
 import { registerHistory } from "./src/history.ts";
 import { safeJsonStringify } from "./src/message-text.ts";
 import { registerNotes } from "./src/notes.ts";
@@ -44,8 +45,11 @@ export function createPosthorse(getPolicy?: PolicyReader): (pi: ExtensionAPI) =>
 		const readPolicy: PolicyReader =
 			getPolicy ??
 			((ctx) => SettingsManager.inMemory(pi.getSettings()).getCompactionSettings(ctx.model));
+		const guidance = createWindowGuidance(pi);
 		const policy = (ctx: ExtensionContext, livePolicy?: CompactionPolicy) =>
-			policySnapshot(ctx, readPolicy, livePolicy);
+			policySnapshot(ctx, readPolicy, livePolicy, (target, host) =>
+				guidance.resolve(target, host),
+			);
 		const toolTokens = () => activeToolTokens(pi);
 		const pages = new PageReservations(toolTokens);
 		registerPosthorseMessages(pi);
@@ -55,6 +59,7 @@ export function createPosthorse(getPolicy?: PolicyReader): (pi: ExtensionAPI) =>
 				pages.reset();
 			},
 			notes: (ctx) => notes.recovery(ctx),
+			guidance,
 		});
 		pi.on("session_start", async (_event, ctx) => {
 			await notes.get(ctx);

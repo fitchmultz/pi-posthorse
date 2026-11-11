@@ -66,7 +66,8 @@ A rollover with a block differs in these ways:
    and the recovery record follows the retained messages.
 3. Posthorse changes no message before the record. The retained messages start at a completed
    reply. A task-note reminder among them stays in model input, because Claude drops the reasoning
-   that follows a removed message.
+   that follows a removed message. The leading system guidance also stays locked to the text the
+   block was signed under.
 
 The request adds time and cost to the rollover. With `claude-fable-5-2` and windows of 112,000 to
 326,000 tokens, the request took 3 to 9 seconds and cost 2 to 7 US cents. The provider's prompt

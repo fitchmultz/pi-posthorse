@@ -17,7 +17,7 @@ import {
 	type SnapshotReader,
 } from "./contracts.ts";
 import { registerContextTools } from "./context-tools.ts";
-import { registerGuidance } from "./guidance.ts";
+import { registerGuidance, type WindowGuidance } from "./guidance.ts";
 import { safeJsonStringify } from "./message-text.ts";
 import {
 	hostMakesProviderSummary,
@@ -31,6 +31,7 @@ import type { NotesRecovery } from "./note-evidence.ts";
 type RolloverResources = {
 	readonly resetPages: () => void;
 	readonly notes: (ctx: ExtensionContext) => NotesRecovery | undefined;
+	readonly guidance: WindowGuidance;
 };
 import {
 	countRetainedMessages,
@@ -428,12 +429,14 @@ export function registerRollover(
 	pi.on("session_start", () => {
 		resetTurn();
 		reminders.reset();
+		resources.guidance.reset();
 	});
 	pi.on("session_tree", () => {
 		reminders.reset();
+		resources.guidance.reset();
 	});
 	registerReminderFilter(pi, policy, reminders);
-	registerGuidance(pi, policy);
+	registerGuidance(pi, policy, resources.guidance);
 	registerAutomaticRollover(pi, policy, activeToolTokens, resources.notes);
 	pi.on("turn_end", (event, ctx) => {
 		const summary = resetRequests.take(event.toolResults);
