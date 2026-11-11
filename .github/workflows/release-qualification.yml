@@ -27,6 +27,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Verify candidate source
         env:
@@ -41,6 +42,13 @@ jobs:
           package-manager-cache: false
       - name: Use the repository npm version
         run: npm install --global "$(node -p 'require("./package.json").packageManager')"
+      - name: Scope release quality controls
+        id: controls-scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+          PULL_REQUEST_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/release-quality-scope.ts --event "$EVENT_NAME" --base "$PULL_REQUEST_BASE" --head "$PULL_REQUEST_HEAD"
       - run: npm ci --ignore-scripts --no-audit
       - name: Configure backup DNS resolvers
         run: |
@@ -63,6 +71,7 @@ jobs:
           sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends fd-find ripgrep attr
       - run: npm run verify
       - name: Prove release quality controls
+        if: steps.controls-scope.outputs.controls-required == 'true'
         run: bash scripts/release-quality-controls.sh
       - name: Hash retained native fixtures
         if: always()

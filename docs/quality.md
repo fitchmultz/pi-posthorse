@@ -34,7 +34,11 @@ The public lint commands include policy and configuration checks too.
 CI's strict quality job runs `npm run verify` against the locked minimum-version SDK graph.
 The official and fork lanes separately qualify the exact latest host identities. Release
 qualification runs the same acceptance command and disposable negative controls against the
-candidate source. `prepublishOnly` also requires acceptance.
+candidate source. `prepublishOnly` also requires acceptance. Pull requests run the disposable
+controls only for quality-machinery changes: package inputs, gate configuration, the `scripts/`
+harness, or workflow wiring. `scripts/release-quality-scope.ts` decides from the merge-base
+diff and fails closed; pushes to `main`, schedules, manual dispatches, and release qualification
+run the controls unconditionally.
 
 ## Coverage
 
@@ -104,6 +108,8 @@ Node runner and strict assertions supply runtime failure propagation.
 `scripts/release-quality-controls.sh` uses a clean candidate and disposable worktree. Independent
 native-lint, semantic, compiler, formatter, test, and policy faults must fail the real aggregate without
 hiding later gates. Safe lint fixes and formatting run twice and their diffs must converge.
+Pull requests execute it only when `scripts/release-quality-scope.ts` finds a quality-machinery
+change; every other CI event executes it unconditionally.
 
 Required CI retains `strict-quality-fixtures` and `host-qualification-official` or
 `host-qualification-fork` artifacts. Release controls record the exact source commit and tree in
