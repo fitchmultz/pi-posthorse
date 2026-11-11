@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.10.25 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: derive one budget state for rollover gates (#183) ([95cdf54](https://github.com/fitchmultz/pi-posthorse/commit/95cdf54a13c9928994a79f38c3b640e3b95f187b))
+
+### What's Changed
+
+- refactor: derive one budget state for rollover gates (1/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/183
+- refactor: probe host capabilities once per member (2/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/184
+- refactor: share one leaf-certified epoch cache (3/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/188
+- refactor: classify a context boundary in one place (4/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/186
+- refactor: thread one retained-tail fact through a rollover (5/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/187
+- refactor: own the reminder lifecycle in one module (6/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/190
+- refactor: settle a turn's reset batch through one outcome (7/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/191
+- refactor: name the page accounting phase (8/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/192
+- refactor: own the search cursor and per-file feed (9/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/193
+- refactor: classify note access in one place (10/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/194
+- refactor: validate display facts with one schema (11/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/195
+- refactor: name the measurement mode and the empty-argument convention (12/12) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/196
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.24...v0.10.25
+
 ## 0.10.24 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->
