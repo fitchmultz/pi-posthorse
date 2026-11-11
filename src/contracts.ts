@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { PosthorseDisplay } from "../ui.ts";
+import type { PosthorseDisplay } from "./ui/display.ts";
 
 export { isRecord } from "./records.ts";
 
@@ -111,6 +111,48 @@ export const ESTIMATED_IMAGE_CHARS = 4_800;
 export const REMINDER_TYPE = "posthorse-reminder";
 export const AUTO_HANDOFF_PREFIX = "Automatic context rollover recovery record.";
 export const EMPTY_HANDOFF = "Fresh context. Restore relevant notes and history before continuing.";
+
+/**
+ * Journal wording is a storage format: recovery reads sessions back, across releases, by
+ * matching this exact text. Producers and parsers share one vocabulary, so a wording change
+ * is a migration and must keep reading the previous release's journals.
+ */
+export const BOUNDARY_TYPE = "posthorse-boundary";
+export const RESET_DEFERRED_TYPE = "posthorse-reset-deferred";
+export const RETAINED_TAIL_TYPE = "posthorse-retained-tail";
+export const RETAINED_MARKER_PREFIX = "Context rolled over after entry ";
+/** Display marker the legacy fork's context-window extension projects into messages. */
+export const LEGACY_WINDOW_TYPE = "context-window";
+/** The details marker every compaction Posthorse drafts carries; readers reject other values. */
+export const POSTHORSE_COMPACTION = 1;
+
+export function posthorseDetails(reason: string): {
+	readonly posthorse: typeof POSTHORSE_COMPACTION;
+	readonly reason: string;
+} {
+	return { posthorse: POSTHORSE_COMPACTION, reason };
+}
+
+/** Receipt lines the notes tool returns; recovery matches them to record note touches. */
+export const NOTE_RECEIPT = {
+	wrote: "Wrote ",
+	appended: "Appended to ",
+	file: "File: ",
+	directory: "Notes directory: ",
+} as const;
+
+export function noteWriteReceipt(path: string): string {
+	return `${NOTE_RECEIPT.wrote}${path}`;
+}
+export function noteAppendReceipt(path: string): string {
+	return `${NOTE_RECEIPT.appended}${path}`;
+}
+export function noteReadHeader(path: string): string {
+	return `${NOTE_RECEIPT.file}${path}\n`;
+}
+export function notesDirectoryHeader(directory: string): string {
+	return `${NOTE_RECEIPT.directory}${directory}\n`;
+}
 
 export function unknownArray(value: unknown): readonly unknown[] | undefined {
 	return Array.isArray(value) ? value : undefined;

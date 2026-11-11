@@ -9,7 +9,11 @@ import type {
 import { activeBoundaryIndex } from "./boundary.ts";
 import { budgetFor, freshPayloadChars } from "./budget.ts";
 import {
+	BOUNDARY_TYPE,
 	REMINDER_TYPE,
+	RESET_DEFERRED_TYPE,
+	RETAINED_TAIL_TYPE,
+	posthorseDetails,
 	type PolicyContext,
 	type ProjectedEntry,
 	type SnapshotReader,
@@ -53,7 +57,7 @@ function explicitReset(
 				...event.entries,
 				{
 					type: "custom_message",
-					customType: "posthorse-reset-deferred",
+					customType: RESET_DEFERRED_TYPE,
 					display: true,
 					content:
 						"Posthorse reset deferred: queued messages leave too little room for the requested handoff. The current context is unchanged; process those messages, then request a shorter handoff.",
@@ -68,7 +72,7 @@ function explicitReset(
 				type: "compaction",
 				summary,
 				firstKeptEntryId: null,
-				details: { posthorse: 1, reason: "explicit" },
+				details: posthorseDetails("explicit"),
 			},
 		],
 		continue: true,
@@ -98,7 +102,7 @@ function chronologicalRetainedTail(
 				...prefix,
 				{
 					role: "custom",
-					customType: "posthorse-retained-tail",
+					customType: RETAINED_TAIL_TYPE,
 					content: "[Retained pre-rollover tail]",
 					display: false,
 					timestamp: first.timestamp,
@@ -149,7 +153,9 @@ function automaticDraft(
 	let firstKeptEntryId = recovery.firstKeptEntryId;
 	if (firstKeptEntryId === undefined) {
 		// Public compaction requires an entry id even when no prior conversation safely fits.
-		pi.appendEntry("posthorse-boundary", {});
+		// A compaction cancelled after this append leaves an inert marker: no reader matches
+		// BOUNDARY_TYPE; the compaction entry itself is the boundary recovery classifies.
+		pi.appendEntry(BOUNDARY_TYPE, {});
 		firstKeptEntryId = ctx.sessionManager.getLeafId() ?? undefined;
 	}
 	if (firstKeptEntryId === undefined || firstKeptEntryId === "") {
@@ -160,7 +166,7 @@ function automaticDraft(
 			summary: recovery.handoff,
 			firstKeptEntryId,
 			tokensBefore: recovery.tokensBefore,
-			details: { posthorse: 1, reason: recovery.reason },
+			details: posthorseDetails(recovery.reason),
 			...providerSummaryField(recovery.providerSummary),
 		},
 	};
@@ -263,7 +269,7 @@ function thresholdFallback(
 					type: "compaction",
 					summary: recovery.handoff,
 					firstKeptEntryId: recovery.firstKeptEntryId ?? null,
-					details: { posthorse: 1, reason: "threshold" },
+					details: posthorseDetails("threshold"),
 					...providerSummaryField(recovery.providerSummary),
 				},
 			],

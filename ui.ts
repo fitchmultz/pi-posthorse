@@ -7,6 +7,7 @@ import {
 	type Text,
 } from "@earendil-works/pi-tui";
 import { clean, hint, leadingRows, textBlock, textOf } from "./src/ui/text.ts";
+import { LEGACY_WINDOW_TYPE, REMINDER_TYPE } from "./src/contracts.ts";
 
 export type { PosthorseDisplay } from "./src/ui/display.ts";
 export { toolCards } from "./src/ui/cards.ts";
@@ -26,7 +27,7 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 			states.set(message, state);
 		}
 		const view = state;
-		const window = message.customType === "context-window";
+		const window = message.customType === LEGACY_WINDOW_TYPE;
 		const raw = textOf(message.content);
 		const handoffLabel = "\n\nHandoff from the previous window:\n";
 		const handoffAt = raw.indexOf(handoffLabel);
@@ -79,7 +80,7 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 			return { handled: true };
 		});
 	};
-	for (const type of ["context-window", "posthorse-reminder"]) {
+	for (const type of [LEGACY_WINDOW_TYPE, REMINDER_TYPE]) {
 		pi.registerMessageRenderer(type, renderer);
 	}
 }

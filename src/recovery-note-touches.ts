@@ -1,4 +1,5 @@
 import {
+	NOTE_RECEIPT,
 	isRecord,
 	optionalString,
 	presentText,
@@ -15,7 +16,7 @@ export type ScannedNoteEntry = {
 	readonly entryId: string;
 	readonly inRetained: boolean;
 };
-type ContentTouchKind = "full-write" | "partial-write" | "read" | "clear";
+export type ContentTouchKind = "full-write" | "partial-write" | "read" | "clear";
 export type NoteTarget = {
 	readonly notePath: string;
 	readonly absPath?: string | undefined;
@@ -81,6 +82,21 @@ function matchMarkerPath(slash: string): string | undefined {
 function absoluteSlashPath(slash: string): boolean {
 	return slash.startsWith("/") || /^[A-Za-z]:\//u.test(slash);
 }
+
+/** Receipt lines are a storage format: parse exactly what the notes tool emits. */
+function receiptPattern(prefix: string): RegExp {
+	return new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}([^\\r\\n]+)$`, "mu");
+}
+const receiptPatterns: readonly (readonly [RegExp, ContentTouchKind])[] = [
+	[receiptPattern(NOTE_RECEIPT.wrote), "full-write"],
+	[receiptPattern(NOTE_RECEIPT.appended), "partial-write"],
+	[receiptPattern(NOTE_RECEIPT.file), "read"],
+];
+
+export function notesDirectoryOf(text: string): string | undefined {
+	return receiptPattern(NOTE_RECEIPT.directory).exec(text)?.[1];
+}
+
 function unscopedNoteTarget(trimmed: string, slash: string): NoteTarget | undefined {
 	if (absoluteSlashPath(slash)) {
 		const base = normalizeRelPath(slash.slice(slash.lastIndexOf("/") + 1));
@@ -114,15 +130,10 @@ function resolveNoteTarget(
 	return fromNotesTool ? unscopedNoteTarget(trimmed, slash) : undefined;
 }
 
-function extractNotesResultTarget(
+export function extractNotesResultTarget(
 	text: string,
 ): { readonly kind: ContentTouchKind; readonly rawPath: string } | undefined {
-	const patterns: readonly (readonly [RegExp, ContentTouchKind])[] = [
-		[/^Wrote ([^\r\n]+)$/mu, "full-write"],
-		[/^Appended to ([^\r\n]+)$/mu, "partial-write"],
-		[/^File: ([^\r\n]+)$/mu, "read"],
-	];
-	for (const [pattern, kind] of patterns) {
+	for (const [pattern, kind] of receiptPatterns) {
 		const rawPath = pattern.exec(text)?.[1];
 		if (rawPath !== undefined) {
 			return { kind, rawPath };
@@ -193,9 +204,7 @@ function learnNotesDirs(
 	const dirs = new Set<string>();
 	for (const info of results.values()) {
 		const match =
-			!info.isError && info.toolName === "notes"
-				? /^Notes directory: ([^\r\n]+)$/mu.exec(info.text)?.[1]
-				: undefined;
+			!info.isError && info.toolName === "notes" ? notesDirectoryOf(info.text) : undefined;
 		if (match !== undefined) {
 			dirs.add(match.trim().replaceAll("\\", "/").replace(/\/+$/u, ""));
 		}

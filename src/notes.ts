@@ -11,6 +11,10 @@ import { Type } from "typebox";
 import { toolCards } from "../ui.ts";
 import {
 	MAX_PAGE_CHARS,
+	noteAppendReceipt,
+	noteReadHeader,
+	noteWriteReceipt,
+	notesDirectoryHeader,
 	presentText,
 	requireValue,
 	textResult,
@@ -84,7 +88,7 @@ async function listNotes(
 		offset: params.offset ?? 0,
 		kind: "notes-list",
 		empty: folder === undefined ? "(no notes yet)" : `(no notes in ${folder})`,
-		header: `Notes directory: ${dir}\n`,
+		header: notesDirectoryHeader(dir),
 	});
 }
 async function readNote(
@@ -124,7 +128,7 @@ async function readNote(
 	}
 	const header =
 		target.kind === "own"
-			? `File: ${path}\n`
+			? noteReadHeader(path)
 			: `Read-only live reference: notes read ${JSON.stringify({ scope: scopeDirectory(target.address), path: target.address.path })}\n`;
 	const end = Math.min(
 		text.length,
@@ -170,7 +174,7 @@ async function writeNote(
 			access.call,
 		);
 	});
-	return textResult(`Wrote ${path}`, [], { kind: "note-write" });
+	return textResult(noteWriteReceipt(path), [], { kind: "note-write" });
 }
 async function appendNote(
 	session: SessionNotes,
@@ -203,7 +207,7 @@ async function appendNote(
 			access.call,
 		);
 	});
-	return textResult(`Appended to ${path}`, [], { kind: "note-append" });
+	return textResult(noteAppendReceipt(path), [], { kind: "note-append" });
 }
 /** One note's matching lines as `path:line: excerpt` rows. */
 function matchingLines(name: string, text: string, query: string): string[] {
