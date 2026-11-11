@@ -18,6 +18,7 @@ import {
 } from "./contracts.ts";
 import { registerContextTools } from "./context-tools.ts";
 import { registerGuidance, type WindowGuidance } from "./guidance.ts";
+import { ownerQuestionRegistered as ownerQuestionTool } from "./host.ts";
 import { safeJsonStringify } from "./message-text.ts";
 import {
 	hostMakesProviderSummary,
@@ -283,9 +284,7 @@ function thresholdFallback(
 		return { kind: "delegate" };
 	}
 	const projected = event.context.contextEntries;
-	const ownerQuestionRegistered = pi
-		.getAllTools()
-		.some((tool) => tool.name === "ask_question" && tool.namespace === undefined);
+	const ownerQuestionRegistered = ownerQuestionTool(pi);
 	const recovery = automaticRecovery(
 		ctx.sessionManager.getBranch(),
 		projected,
@@ -347,9 +346,7 @@ function prepareAutomatic(
 	if (budget === undefined || budget.state === "unsupported") {
 		return { kind: "delegate" };
 	}
-	const ownerQuestionRegistered = pi
-		.getAllTools()
-		.some((tool) => tool.name === "ask_question" && tool.namespace === undefined);
+	const ownerQuestionRegistered = ownerQuestionTool(pi);
 	const recovery = automaticRecovery(
 		event.branchEntries,
 		ctx.sessionManager.buildSessionProjection().entries,
