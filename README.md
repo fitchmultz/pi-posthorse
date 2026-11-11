@@ -1,6 +1,6 @@
 # Posthorse
 
-Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks without an automatic model-generated summary. Stock Pi already preserves the session journal and retains a recent tail during compaction; Posthorse adds explicit notes and history retrieval, with a handoff or bounded recovery record instead of the automatic summary.
+Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks without an automatic model-generated summary of the work. Stock Pi already preserves the session journal and retains a recent tail during compaction; Posthorse adds explicit notes and history retrieval, with a handoff or bounded recovery record instead of the automatic summary.
 
 ![A Pi conversation rolls into a fresh context window. Task notes and the complete session transcript remain available.](https://raw.githubusercontent.com/fitchmultz/pi-posthorse/main/.github/readme/context-rollover.png)
 
@@ -25,7 +25,7 @@ Give Pi your task. For example:
 
 Posthorse can send a routine task-note reminder before rollover. The reminder tells the model to save current task state if needed, then immediately continue the prescribed work. The context window is not a task deadline. The reminder does not require `new_context` or wake an agent after its final answer. Large turns can reach rollover before the reminder. See [Reminder timing](docs/reminder-timing.md) for the trigger and its relationship to Pi's reserve and retention settings.
 
-Automatic rollover retains a safe recent-message tail using Pi's `compaction.keepRecentTokens`, alongside a bounded recovery record for discarded inputs and tool evidence. It never calls a summarization model. The model must restore notes and check live state before it continues. Optional `new_context` deliberately retains no prior messages; manual `/compact` uses Pi's normal summarization.
+Automatic rollover retains a safe recent-message tail using Pi's `compaction.keepRecentTokens`, alongside a bounded recovery record for discarded inputs and tool evidence. No model summarizes the work. The model must restore notes and check live state before it continues. On [fitchmultz/pi](https://github.com/fitchmultz/pi), a Claude model also writes one line that points to the task note, so that Claude keeps [the reasoning of the retained replies](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/context-recovery.md#claude-reasoning-in-the-retained-tail). Optional `new_context` deliberately retains no prior messages; manual `/compact` uses Pi's normal summarization.
 
 Posthorse does not schedule rollover when a provider cache expires. An idle session below the
 rollover threshold keeps its context; use an explicit `new_context` when a deliberate clean reset

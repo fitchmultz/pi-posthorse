@@ -15,7 +15,12 @@ import {
 	type PolicyContext,
 } from "./contracts.ts";
 import type { NotesRecovery } from "./note-evidence.ts";
-import { buildAutoHandoff } from "./recovery.ts";
+import {
+	PROVIDER_SUMMARY_TOKENS,
+	providerSummaryInstructions,
+	type ProviderSummaryRequest,
+} from "./provider-summary.ts";
+import { buildAutoHandoff, recoveryNotePath } from "./recovery.ts";
 
 type RecoveryCapacity = {
 	readonly host: PolicyContext;
@@ -23,6 +28,8 @@ type RecoveryCapacity = {
 	readonly pendingMessages?: readonly MessageLike[];
 	readonly firstKeptEntryId?: string | undefined;
 	readonly notes?: NotesRecovery | undefined;
+	/** The host will ask the provider for a summary block, which needs an assistant message first in the tail. */
+	readonly providerSummary?: boolean | undefined;
 };
 type RetainedTail = {
 	readonly firstKeptEntryId?: string | undefined;
@@ -51,6 +58,19 @@ function safeStart(entry: ProjectionEntry): boolean {
 	return (
 		entry.sourceEntry.type !== "compaction" &&
 		visibleMessages(entry).some((message) => CUT_ROLES.has(message.role))
+	);
+}
+/**
+ * A provider summary block stands for the request that produced the tail's first message, so
+ * that message must be a reply the provider completed.
+ */
+function assistantStart(entry: ProjectionEntry): boolean {
+	const [first] = visibleMessages(entry);
+	return (
+		entry.sourceEntry.type !== "compaction" &&
+		first?.role === "assistant" &&
+		first.stopReason !== "error" &&
+		first.stopReason !== "aborted"
 	);
 }
 function nativeMessage(
@@ -129,6 +149,7 @@ function boundedTail(
 	entries: readonly ProjectionEntry[],
 	start: number,
 	maxTokens: number,
+	startsTail: (entry: ProjectionEntry) => boolean,
 ): RetainedTail {
 	const costs = entries.slice(start).map((entry) => ({
 		entry,
@@ -143,7 +164,7 @@ function boundedTail(
 	let tokens = costs.reduce((sum, { cost }) => sum + cost, 0);
 	for (const [offset, { entry, cost }] of costs.entries()) {
 		const index = start + offset;
-		if (tokens > 0 && tokens <= maxTokens && safeStart(entry)) {
+		if (tokens > 0 && tokens <= maxTokens && startsTail(entry)) {
 			const tail = entries.slice(index);
 			if (pairedTail(tail)) {
 				return {
@@ -178,7 +199,14 @@ function retainedTail(
 		(entry) => entry.sourceEntry.id === capacity.firstKeptEntryId,
 	);
 	const start = prepared >= 0 ? prepared : projectedCut(entries, keep);
-	return start < 0 ? { ids: new Set() } : boundedTail(entries, start, maxTokens);
+	return start < 0
+		? { ids: new Set() }
+		: boundedTail(
+				entries,
+				start,
+				maxTokens,
+				capacity.providerSummary === true ? assistantStart : safeStart,
+			);
 }
 /** Recent messages and recovery share half the fresh operational budget, leaving work headroom. */
 export function automaticRecovery(
@@ -186,7 +214,13 @@ export function automaticRecovery(
 	projected: readonly ProjectionEntry[],
 	capacity: RecoveryCapacity,
 	ownerQuestionRegistered: boolean,
-): { readonly handoff: string; readonly firstKeptEntryId?: string | undefined } | undefined {
+):
+	| {
+			readonly handoff: string;
+			readonly firstKeptEntryId?: string | undefined;
+			readonly providerSummary?: ProviderSummaryRequest | undefined;
+	  }
+	| undefined {
 	const payload = freshPayloadChars(
 		capacity.host,
 		capacity.toolTokens,
@@ -197,13 +231,34 @@ export function automaticRecovery(
 	if (limit < MIN_PAGE_CHARS) {
 		return undefined;
 	}
-	const retained = retainedTail(projected, capacity, Math.floor((payload - limit) / 4));
+	const asksProvider = capacity.providerSummary === true;
+	const retained = retainedTail(
+		projected,
+		capacity,
+		Math.floor((payload - limit) / 4) - (asksProvider ? PROVIDER_SUMMARY_TOKENS : 0),
+	);
 	const handoff = buildAutoHandoff(entries, projected, limit, {
 		ownerQuestionRegistered,
 		retainedEntryIds: retained.ids,
 		notes: capacity.notes,
 	});
-	return handoff.length > limit
-		? undefined
-		: { handoff, firstKeptEntryId: retained.firstKeptEntryId };
+	if (handoff.length > limit) {
+		return undefined;
+	}
+	return {
+		handoff,
+		firstKeptEntryId: retained.firstKeptEntryId,
+		// Without a tail there is no reasoning to keep, so the host is not asked for a block.
+		providerSummary:
+			!asksProvider || retained.firstKeptEntryId === undefined
+				? undefined
+				: {
+						instructions: providerSummaryInstructions(
+							recoveryNotePath(entries, projected, {
+								retainedEntryIds: retained.ids,
+								notes: capacity.notes,
+							}),
+						),
+					},
+	};
 }

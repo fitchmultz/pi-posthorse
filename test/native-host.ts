@@ -2070,6 +2070,202 @@ await test("automatic rollover respects context edits in its recovery handoff", 
 	}
 });
 
+const RECOVERY_RECORD = "Automatic context rollover recovery record.";
+/**
+ * A session whose model gets provider summary blocks from the host, or undefined on a host that
+ * makes none. The host makes blocks for Anthropic Messages models only, so the session's model
+ * claims that API and the faux provider answers its requests.
+ */
+async function providerSummaryHost(t: TestContext, extension: NativeSdk.ExtensionFactory) {
+	if (!("supportsProviderSummary" in NativeAi)) {
+		assert.notEqual(
+			process.env.PI_COMPAT_HOST,
+			"fork",
+			"The maintained fork must make provider summary blocks.",
+		);
+		t.skip("This host makes no provider summary blocks.");
+		return;
+	}
+	const h = await fixture(t, { extension });
+	const faux = h.faux.getModel();
+	h.session.agent.state.model = Object.assign(structuredClone(faux), {
+		api: "anthropic-messages",
+		compat: {
+			supportsMidConvoEffort: true,
+			supportsMidConvoSystemMessages: true,
+			supportsMidConvoToolChanges: true,
+		},
+	});
+	const requests: TranscriptMessages[] = [];
+	h.session.agent.streamFunction = (_model, context, options) => {
+		requests.push(structuredClone(context.messages));
+		return h.modelRuntime.streamSimple(faux, context, options);
+	};
+	const block = { type: "compaction", content: "Read the task note.", signature: "EuYBCkQY" };
+	const instructions: string[] = [];
+	const isRecordMessage = (message: TranscriptMessages[number]) =>
+		textOf(message).includes(RECOVERY_RECORD);
+	return {
+		...h,
+		block,
+		instructions,
+		/** The block answers the host's summary request and "done" the window after the rollover. */
+		respond(work: () => NativeAi.ToolCall, steps: number): void {
+			const step: NativeAi.FauxResponseStep = (ctx, options) => {
+				const request = record(options ?? {}).providerSummary;
+				if (request !== undefined) {
+					instructions.push(stringValue(record(request).instructions));
+					return Object.assign(fauxAssistantMessage([]), {
+						rawStopReason: "compaction",
+						providerSummary: {
+							provider: faux.provider,
+							api: faux.api,
+							model: faux.id,
+							block,
+						},
+					});
+				}
+				return ctx.messages.some(isRecordMessage)
+					? fauxAssistantMessage("done")
+					: fauxAssistantMessage(work(), { stopReason: "toolUse" });
+			};
+			h.faux.setResponses(Array.from({ length: steps }, () => step));
+		},
+		/** The messages that the first request after the rollover sent ahead of the record. */
+		heldAfterRollover(): TranscriptMessages {
+			const sent = requireValue(requests.find((messages) => messages.some(isRecordMessage)));
+			assert.deepEqual(record(record(sent[0]).providerSummary).block, block);
+			const held = sent.slice(0, sent.findLastIndex(isRecordMessage));
+			assert.equal(
+				requireValue(held.find((message) => message.role !== "system")).role,
+				"assistant",
+				"nothing stands between the block and the reply it was written for",
+			);
+			return held;
+		},
+	};
+}
+
+await test("automatic rollover gets a provider summary block and leaves the messages below it unchanged", async (t) => {
+	let piCut: string | undefined;
+	const h = await providerSummaryHost(t, (pi) => {
+		pi.registerTool({
+			name: "pad",
+			label: "pad",
+			description: "Small local result",
+			parameters: { type: "object", properties: {} },
+			async execute() {
+				// A message after every result puts Pi's own cut on a message that is not a reply.
+				pi.sendMessage(
+					{ customType: "progress", content: "progress", display: false },
+					{ deliverAs: "steer" },
+				);
+				return { content: [{ type: "text", text: "pad ".repeat(2_000) }], details: {} };
+			},
+		});
+		pi.on("session_before_compact", (event) => {
+			piCut = event.preparation.firstKeptEntryId;
+		});
+	});
+	if (h === undefined) {
+		return;
+	}
+	// After the note, small tool turns carry the window into the reminder band and then over the
+	// line, so the reminder lands among the recent messages that the rollover keeps.
+	let turns = 0;
+	h.respond(
+		() =>
+			turns++ === 0
+				? fauxToolCall("notes", { op: "write", path: "task.md", content: "Goal: pad." })
+				: fauxToolCall("pad", {}),
+		18,
+	);
+	await h.session.prompt("p".repeat(240_000));
+	const [boundary, ...later] = posthorseBoundaries(h.sessionManager);
+	assert.ok(boundary !== undefined && later.length === 0, "one rollover");
+	const stored = record(record(boundary).providerSummary);
+	assert.deepEqual(stored.block, h.block);
+	assert.equal(stored.reason, undefined);
+	assert.equal(h.instructions.length, 1);
+	const [, named] = requireValue(
+		/point to the task note `([^`]*)`/.exec(requireValue(h.instructions[0])),
+	);
+	assert.equal(
+		readFileSync(requireValue(named), "utf8"),
+		"Goal: pad.",
+		"the instructions name a path that opens the note",
+	);
+	const branch = h.sessionManager.getBranch();
+	const cut = branch.findIndex((entry) => entry.id === piCut);
+	assert.equal(branch[cut]?.type, "custom_message", "Pi's own cut is not a reply");
+	const firstKept = branch.findIndex((entry) => entry.id === boundary.firstKeptEntryId);
+	assert.equal(
+		firstKept,
+		branch.findIndex(
+			(entry, index) =>
+				index > cut && entry.type === "message" && entry.message.role === "assistant",
+		),
+		"the kept entries start at the first reply after Pi's cut",
+	);
+	assert.ok(
+		branch
+			.slice(firstKept, branch.indexOf(boundary))
+			.some(
+				(entry) =>
+					entry.type === "custom_message" && entry.customType === "posthorse-reminder",
+			),
+		"the kept entries hold the reminder of the window that ended",
+	);
+	assert.ok(
+		h
+			.heldAfterRollover()
+			.some((message) => textOf(message).includes("Routine task-note update.")),
+		"the reminder of the ended window stays where the provider saw it",
+	);
+});
+
+await test("a rollover drafted at the end of a turn gets a provider summary block", async (t) => {
+	let piCompactions = 0;
+	const h = await providerSummaryHost(t, (pi) => {
+		pi.on("session_before_compact", () => {
+			piCompactions++;
+		});
+		pi.registerTool({
+			name: "receipt",
+			label: "Receipt",
+			description: "Read a sizable receipt",
+			parameters: { type: "object", properties: {} },
+			async execute() {
+				return { content: [{ type: "text", text: "r".repeat(68_000) }], details: {} };
+			},
+		});
+	});
+	if (h === undefined) {
+		return;
+	}
+	// The window starts at a reset and each receipt is wider than the reminder band, so the
+	// window crosses the line with no input in it and Posthorse drafts the rollover itself.
+	let turns = 0;
+	h.respond(
+		() =>
+			turns++ === 0
+				? fauxToolCall("new_context", { handoff: "Keep inspecting receipts." })
+				: fauxToolCall("receipt", {}),
+		10,
+	);
+	await h.session.prompt("Inspect receipts.");
+	const [, boundary, ...later] = posthorseBoundaries(h.sessionManager);
+	assert.ok(boundary !== undefined && later.length === 0, "a reset, then one rollover");
+	assert.equal(piCompactions, 0, "the turn-end draft, not Pi's own compaction");
+	const stored = record(record(boundary).providerSummary);
+	assert.deepEqual(stored.block, h.block);
+	assert.equal(stored.reason, undefined);
+	assert.match(requireValue(h.instructions[0]), /the details are in the recovery record below/);
+	const firstKept = messageEntry(h.sessionManager.getEntry(boundary.firstKeptEntryId)).message;
+	assert.equal(firstKept.role, "assistant");
+	h.heldAfterRollover();
+});
+
 await test("edited image recovery points to the replacement rather than the raw original", async (t) => {
 	const image: NativeAi.ImageContent = {
 		type: "image",

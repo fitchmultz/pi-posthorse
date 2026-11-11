@@ -19,12 +19,12 @@ all recent messages.
 
 With Posthorse loaded:
 
-| Path                               | What the next context receives                                                        | Summary-model call        |
-| ---------------------------------- | ------------------------------------------------------------------------------------- | ------------------------- |
-| Supported automatic rollover       | A bounded recovery record and a safe recent-message tail, reduced if necessary to fit | No                        |
-| Explicit `new_context`             | Optional handoff, with no prior messages retained                                     | No                        |
-| Manual `/compact`                  | Pi's normal summary and retained tail                                                 | Pi's normal summarization |
-| Unsupported small automatic budget | Pi's native compaction fallback                                                       | May use Pi's summarizer   |
+| Path                               | What the next context receives                                                        | Summary-model call                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Supported automatic rollover       | A bounded recovery record and a safe recent-message tail, reduced if necessary to fit | No. One host and model family gets [one line](#claude-reasoning-in-the-retained-tail) |
+| Explicit `new_context`             | Optional handoff, with no prior messages retained                                     | No                                                                                    |
+| Manual `/compact`                  | Pi's normal summary and retained tail                                                 | Pi's normal summarization                                                             |
+| Unsupported small automatic budget | Pi's native compaction fallback                                                       | May use Pi's summarizer                                                               |
 
 The practical additions are project-wide `notes` with private fork scopes, model-callable `history` search/read, context guidance,
 and a best-effort checkpoint nudge. The automatic record is assembled from selected inputs, tool
@@ -38,6 +38,64 @@ compaction and with Posthorse on two models.
 See the [reference](reference.md#how-it-works) for record selection, provenance and budget details,
 and Pi's [compaction reference](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/compaction.md)
 for the stock algorithm.
+
+## Claude reasoning in the retained tail
+
+A Claude model accepts the reasoning of an earlier reply only while every message before that reply
+is unchanged. A rollover replaces the older messages, so Claude drops the reasoning in every
+retained reply. The replies, the tool calls and the tool results stay.
+
+Pi can prevent that drop with a provider summary block. The Anthropic API writes the block and signs
+it, and the block then stands where the older messages stood. Posthorse asks Pi for a block at an
+automatic rollover that retains recent messages, when both of these conditions are true:
+
+- The host can make the block. [fitchmultz/pi](https://github.com/fitchmultz/pi) can, in builds
+  that include [fitchmultz/pi#443](https://github.com/fitchmultz/pi/pull/443). Official Pi cannot.
+- The session's model is a Claude model of the `anthropic` or `cloudflare-ai-gateway` provider.
+
+With any other host or model, a rollover sends no request and works as the rest of this guide
+describes.
+
+A rollover with a block differs in these ways:
+
+1. Pi sends one more request to the session's model, with the session's login. Posthorse asks for
+   one line of at most 20 words that names the task and points to the task note. When the session
+   wrote no note, the line points to the recovery record. The line states no progress and no next
+   step: the note, the record and the retained messages hold the task state.
+2. The next request starts with the block. The retained messages follow as the model last saw them,
+   and the recovery record follows the retained messages.
+3. Posthorse changes no message before the record. The retained messages start at a completed
+   reply. A task-note reminder among them stays in model input, because Claude drops the reasoning
+   that follows a removed message.
+
+The request adds time and cost to the rollover. With `claude-fable-5-2` and windows of 112,000 to
+326,000 tokens, the request took 3 to 9 seconds and cost 2 to 7 US cents. The provider's prompt
+cache held the window in those measurements. When the cache has expired, the request reads the
+whole window at the uncached input price. That case was not measured. Pi waits 30 seconds at most.
+
+Pi continues the rollover without a block in these cases, and Claude then drops the retained
+reasoning as before:
+
+- The rollover follows a context overflow.
+- An extension replaced the system prompt of the run.
+- The rollover retains no recent message.
+- The request fails, is refused, or takes longer than 30 seconds.
+
+Pi writes the block, or the reason for its absence, to `providerSummary` on the compaction entry in
+the session file. Only the model that wrote a block can read it. After a switch to another model, Pi
+sends the line as text, and the retained reasoning is dropped.
+
+Another extension can undo the effect. Claude drops the retained reasoning again when an extension
+changes, removes or inserts a message before the recovery record. A `pi-change-working-dir`
+checkout older than its commit `6e034f8` does that in a session that changed directory: it inserts
+its directory update after the leading system messages. `pi update --extensions` installs the
+corrected package.
+
+A 20-minute session on `claude-fable-5-2` made two rollovers with a block. The first request after
+each rollover sent 4 and 3 retained reasoning blocks, and Claude dropped none. In two sessions on
+the same task without a block, the first requests after four rollovers sent 11 retained reasoning
+blocks, and Claude dropped all of them. No test has measured whether the retained reasoning changes
+the quality of the work.
 
 ## Available evidence is not guaranteed recall
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep Claude's reasoning in the retained replies across an automatic rollover on [fitchmultz/pi](https://github.com/fitchmultz/pi). Claude drops that reasoning when the messages before it change, and every rollover changes them. Posthorse now asks the fork for a provider summary block: one more request to the session's model, answered with one line that points to the task note. The block stands where the older messages stood, so the retained replies keep their reasoning. The notes, the recovery record and the retained messages still hold the task state, and the block holds none. This applies to Claude models of the `anthropic` and `cloudflare-ai-gateway` providers. Official Pi and other models send no request and are unchanged. See [Claude reasoning in the retained tail](docs/context-recovery.md#claude-reasoning-in-the-retained-tail).
+
 ## 0.10.21 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->

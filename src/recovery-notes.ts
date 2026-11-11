@@ -172,34 +172,62 @@ function trackedNotes(
 	}
 	return [...tracked.values()].sort((a, b) => b.order - a.order);
 }
+type NoteSources = {
+	readonly retained: ReadonlySet<string>;
+	readonly notes?: NotesRecovery | undefined;
+};
+function sessionNotes(
+	chainEntries: readonly EntryLike[],
+	allEntries: readonly EntryLike[],
+	projected: readonly ProjectedEntry[],
+	sources: NoteSources,
+): { readonly all: readonly TrackedNote[]; readonly notesDirectory: string | undefined } {
+	const collected = sessionNoteTouches({
+		branch: chainEntries,
+		allEntries: sources.notes?.entries ?? allEntries,
+		projected,
+		retained: sources.retained,
+	});
+	const touches = scopeRecoveryTouches(collected.touches, sources.notes);
+	const { defaultDir } = collected;
+	return {
+		all: trackedNotes(touches, defaultDir),
+		notesDirectory:
+			sources.notes === undefined ? defaultDir : scopeDirectory(sources.notes.binding),
+	};
+}
+/**
+ * The file path of the note that the record names first, when this session wrote one. The path is
+ * absolute whenever the notes directory is known, so the `read` tool opens it from any directory.
+ */
+export function primaryNotePath(
+	chainEntries: readonly EntryLike[],
+	allEntries: readonly EntryLike[],
+	projected: readonly ProjectedEntry[],
+	sources: NoteSources,
+): string | undefined {
+	const { all, notesDirectory } = sessionNotes(chainEntries, allEntries, projected, sources);
+	const primary = all.find((note) => note.kind === "written");
+	return primary === undefined
+		? undefined
+		: (pathElsewhere(primary, notesDirectory) ?? primary.absPath ?? primary.notePath);
+}
 export function renderSessionNotes(
 	chainEntries: readonly EntryLike[],
 	allEntries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
-	options: {
-		readonly retained: ReadonlySet<string>;
+	options: NoteSources & {
 		readonly span: RetainedSpan | undefined;
 		readonly maxChars: number;
-		readonly notes?: NotesRecovery | undefined;
 	},
 ): string | undefined {
-	const { retained, span, maxChars } = options;
-	const collected = sessionNoteTouches({
-		branch: chainEntries,
-		allEntries: options.notes?.entries ?? allEntries,
-		projected,
-		retained,
-	});
-	const touches = scopeRecoveryTouches(collected.touches, options.notes);
-	const { defaultDir } = collected;
-	const all = trackedNotes(touches, defaultDir);
+	const { span, maxChars } = options;
+	const { all, notesDirectory } = sessionNotes(chainEntries, allEntries, projected, options);
 	if (all.length === 0) {
 		return;
 	}
 	const written = all.filter((note) => note.kind === "written").slice(0, MAX_WRITTEN_NOTES);
 	const readOnly = all.filter((note) => note.kind === "read").slice(0, MAX_READ_NOTES);
-	const notesDirectory =
-		options.notes === undefined ? defaultDir : scopeDirectory(options.notes.binding);
 	const lines = [
 		...written.map((note) => formatWrittenNoteLine(note, span, notesDirectory)),
 		...readOnly.map((note) => formatReadNoteLine(note, span, notesDirectory)),

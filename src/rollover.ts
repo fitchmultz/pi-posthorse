@@ -19,6 +19,11 @@ import {
 import { registerContextTools } from "./context-tools.ts";
 import { registerGuidance } from "./guidance.ts";
 import { safeJsonStringify } from "./message-text.ts";
+import {
+	hostMakesProviderSummary,
+	messagesHeldByProviderSummary,
+	type ProviderSummaryRequest,
+} from "./provider-summary.ts";
 import { hasRetainedRolloverMarker } from "./recovery.ts";
 import { automaticRecovery } from "./retention.ts";
 import { ResetRequests } from "./reset-requests.ts";
@@ -157,8 +162,11 @@ function registerReminderFilter(
 ): void {
 	pi.on("context_with_system", (event, ctx) => {
 		const stale = staleReminderPredicate(event.messages, ctx, policy, reminders);
-		const filtered = event.messages.some(stale)
-			? event.messages.filter((message) => !stale(message))
+		const held = messagesHeldByProviderSummary(event.messages);
+		const removable = (message: (typeof event.messages)[number], index: number) =>
+			index >= held && stale(message);
+		const filtered = event.messages.some(removable)
+			? event.messages.filter((message, index) => !removable(message, index))
 			: event.messages;
 		const ordered = chronologicalRetainedTail(filtered, ctx, stale);
 		if (ordered !== event.messages) {
@@ -166,6 +174,10 @@ function registerReminderFilter(
 		}
 		return;
 	});
+}
+/** A host without the capability ignores the field; one that has it stores why no block was made. */
+function providerSummaryField(request: ProviderSummaryRequest | undefined) {
+	return request === undefined ? {} : { providerSummary: request };
 }
 function automaticDraft(
 	pi: ExtensionAPI,
@@ -175,6 +187,7 @@ function automaticDraft(
 		readonly tokensBefore: number;
 		readonly reason: string;
 		readonly firstKeptEntryId?: string | undefined;
+		readonly providerSummary?: ProviderSummaryRequest | undefined;
 	},
 ) {
 	let firstKeptEntryId = recovery.firstKeptEntryId;
@@ -192,6 +205,7 @@ function automaticDraft(
 			firstKeptEntryId,
 			tokensBefore: recovery.tokensBefore,
 			details: { posthorse: 1, reason: recovery.reason },
+			...providerSummaryField(recovery.providerSummary),
 		},
 	};
 }
@@ -280,6 +294,7 @@ function thresholdFallback(
 			toolTokens: toolTokens(),
 			pendingMessages: event.context.pendingMessages,
 			notes: capacity.notes(ctx),
+			providerSummary: hostMakesProviderSummary(ctx.model),
 		},
 		ownerQuestionRegistered,
 	);
@@ -298,6 +313,7 @@ function thresholdFallback(
 					summary: recovery.handoff,
 					firstKeptEntryId: recovery.firstKeptEntryId ?? null,
 					details: { posthorse: 1, reason: "threshold" },
+					...providerSummaryField(recovery.providerSummary),
 				},
 			],
 			continue: event.continue,
@@ -341,6 +357,8 @@ function prepareAutomatic(
 			toolTokens: capacity.toolTokens(),
 			firstKeptEntryId: event.preparation.firstKeptEntryId,
 			notes: capacity.notes(ctx),
+			// Pi makes no block at an overflow, so the tail keeps its usual start there.
+			providerSummary: event.reason !== "overflow" && hostMakesProviderSummary(ctx.model),
 		},
 		ownerQuestionRegistered,
 	);
