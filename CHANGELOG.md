@@ -2,7 +2,33 @@
 
 ## Unreleased
 
+## 0.10.24 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+
 - Accept an absolute path in `notes read` when it resolves inside the session's own notes directory (#175). Recovery records and provider summary blocks cite a note's absolute path, and passing that path to `notes read` failed with a relative-path error before a retry. Out-of-scope absolute paths, `scope`-qualified reads, and writes still require a relative path.
+
+<!-- npm-release:unreleased:end -->
+
+<!-- npm-release:carried:start -->
+
+- Keep the `<posthorse>` guidance section byte-identical for the life of a context window across package updates, restarts, and mid-window deferred-tool loads (#162, #172). Posthorse now records each window's rendered guidance once per model/compaction budget (`posthorse-window-guidance`), omits the `new_context` and `get_context_remaining` sentences when those tools are not active at the start of the window, and carries the saved guidance across rollovers that use a provider summary block until a new prompt prefix begins.
+
+<!-- npm-release:carried:end -->
+
+- Supersedes unpublished 0.10.23 from f05ded14ba8cb65a0412ccdb13a0f926b4c84130. Includes all changes since v0.10.22; the original release records remain unchanged.
+
+- ci: align shared automation pins and wire release supersession inputs (#177) ([9b5a33a](https://github.com/fitchmultz/pi-posthorse/commit/9b5a33af147b512824219878bf7b1b34672ca298))
+
+### What's Changed
+
+- fix(guidance): lock window guidance and omit inactive context tools by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/179
+- chore(release): 0.10.23 by @pi-durable[bot] in https://github.com/fitchmultz/pi-posthorse/pull/180
+- fix(notes): accept in-scope absolute paths in notes read by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/178
+- feat: scope release quality controls to machinery changes on pull requests by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/181
+- ci: align shared automation pins and wire release supersession inputs by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/177
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.22...v0.10.24
 
 ## 0.10.23 - 2026-11-11
 
