@@ -118,8 +118,8 @@ async function readReference(
 	path: string,
 	signal: AbortSignal | undefined,
 ): Promise<DiscoveredNote | undefined> {
-	const target = await session.read(path, { signal });
-	if (target.writable) {
+	const target = await session.access(path, { signal });
+	if (target.kind === "own") {
 		return;
 	}
 	const info = await stat(target.path).catch((error: unknown) => {
@@ -248,10 +248,9 @@ export class NoteDiscovery {
 		const paths = new Set(touches.map((touch) => touch.notePath));
 		const candidates = [...paths].filter(
 			(path) =>
-				!session.owns(path) &&
-				(options.path === undefined ||
-					path === options.path ||
-					path.startsWith(`${options.path}/`)),
+				options.path === undefined ||
+				path === options.path ||
+				path.startsWith(`${options.path}/`),
 		);
 		const resolved = await mapBatch(candidates, (path) =>
 			readReference(session, path, options.signal),

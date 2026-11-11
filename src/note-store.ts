@@ -33,12 +33,14 @@ import type { NotesRecovery } from "./note-evidence.ts";
 
 type NotesManager = ExtensionContext["sessionManager"];
 export type NoteCall = { readonly id: string; readonly rootId: string };
-type Adoption = "owned" | "unavailable" | "adopted";
-export type NoteRead = {
-	readonly address: NoteAddress;
-	readonly path: string;
-	readonly writable: boolean;
-};
+type Adoption = "owned" | "adopted";
+/**
+ * One note path as this session may use it: a private copy it can write (own scope, whether or not
+ * the file exists yet), or an inherited file it reads in place and copies on first edit.
+ */
+export type NoteAccess =
+	| { readonly kind: "own"; readonly address: NoteAddress; readonly path: string }
+	| { readonly kind: "inherited"; readonly address: NoteAddress; readonly path: string };
 export class SessionNotes {
 	readonly #pi: ExtensionAPI;
 	readonly binding: NoteBinding;
@@ -87,7 +89,8 @@ export class SessionNotes {
 	call(id: string): NoteCall {
 		return { id, rootId: this.#calls.get(id) ?? id };
 	}
-	owns(path: string): boolean {
+	/** A project session owns its whole scope; a fork owns recorded paths and files it already has. */
+	#ownsPath(path: string): boolean {
 		return (
 			this.binding.kind === "project" ||
 			this.#owned.has(path) ||
@@ -153,45 +156,53 @@ export class SessionNotes {
 			includeDirectories: options.includeDirectories,
 		});
 	}
-	async read(
+	async access(
 		path: string,
 		options: {
 			readonly scope?: string | undefined;
+			readonly includeDirectories?: boolean | undefined;
 			readonly signal?: AbortSignal | undefined;
 		} = {},
-	): Promise<NoteRead> {
+	): Promise<NoteAccess> {
 		if (options.scope !== undefined) {
 			const relative = noteRelative(path);
 			const scope = await this.selectScope(options.scope);
 			return {
+				kind: sameScope(scope, this.binding) ? "own" : "inherited",
 				address: addressIn(scope, relative),
 				path: notePath(scope, relative),
-				writable: sameScope(scope, this.binding),
 			};
 		}
 		const relative = scopeNoteRelative(this.binding, path);
-		const reference = this.owns(relative)
-			? undefined
-			: await this.#reference(relative, {
-					includeDirectories: true,
-					signal: options.signal,
-				});
-		const address = reference ?? addressIn(this.binding, relative);
-		return { address, path: notePath(address, relative), writable: reference === undefined };
+		if (this.#ownsPath(relative)) {
+			return {
+				kind: "own",
+				address: addressIn(this.binding, relative),
+				path: notePath(this.binding, relative),
+			};
+		}
+		const reference = await this.#reference(relative, {
+			includeDirectories: options.includeDirectories,
+			signal: options.signal,
+		});
+		return reference === undefined
+			? {
+					kind: "own",
+					address: addressIn(this.binding, relative),
+					path: notePath(this.binding, relative),
+				}
+			: { kind: "inherited", address: reference, path: notePath(reference, relative) };
 	}
 	async adopt(path: string, call: NoteCall): Promise<Adoption> {
 		const relative = noteRelative(path);
-		if (this.owns(relative)) {
+		const access = await this.access(relative, { includeDirectories: false });
+		if (access.kind === "own") {
 			return "owned";
-		}
-		const source = await this.#reference(relative);
-		if (source === undefined) {
-			return "unavailable";
 		}
 		const result = await adoptNote(this.binding, {
 			path: relative,
-			source,
-			lineage: source,
+			source: access.address,
+			lineage: access.address,
 			anchors: [],
 		});
 		this.record(
