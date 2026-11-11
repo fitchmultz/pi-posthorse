@@ -1,0 +1,78 @@
+dulwich-A-r0                       
+dulwich-A-r1                       
+dulwich-A-r2                       YYY
+dulwich-B-r0                       YYY YYY YYY YYY YYY YYY
+dulwich-B-r1                       YYY
+dulwich-B-r2                       YYY YYY YYY YYY YYY
+dulwich-G-r0                       YYY YYY
+dulwich-G-r1                       
+dulwich-G-r2                       
+jinja-A-r0                         
+jinja-A-r1                         YYY
+jinja-A-r2                         
+jinja-B-r0                         YYY YYY
+jinja-B-r1                         YYY YYY
+jinja-B-r2                         YYY YYY
+jinja-G-r0                         YYY
+jinja-G-r1                         YYY YYY
+jinja-G-r2                         YYY YYY
+networkx-A-r0                      
+networkx-A-r1                      
+networkx-A-r2                      YYY
+networkx-B-r0                      YYY YYY YYY --- --- ---
+networkx-B-r1                      
+networkx-B-r2                      YYY YYY YYY YYY YYY
+networkx-G-r0                      
+networkx-G-r1                      YYY
+networkx-G-r2                      
+pydantic-A-r0                      
+pydantic-A-r1                      
+pydantic-A-r2                      
+pydantic-B-r0                      
+pydantic-B-r1                      YYY --- --- ---
+pydantic-B-r2                      
+pydantic-G-r0                      
+pydantic-G-r1                      
+pydantic-G-r2                      YYY
+pylint-A-r0                        
+pylint-A-r1                        
+pylint-A-r2                        YYY YYY
+pylint-B-r0                        YYY YYY YYY
+pylint-B-r1                        YYY YYY YYY YYY YYY
+pylint-B-r2                        
+pylint-B-r2-providererror          
+pylint-G-r0                        
+pylint-G-r1                        
+pylint-G-r2                        
+python-prompt-toolkit-A-r0         YYY
+python-prompt-toolkit-A-r1         YYY
+python-prompt-toolkit-A-r2         YYY
+python-prompt-toolkit-A-r2-providererror 
+python-prompt-toolkit-B-r0         YYY YYY
+python-prompt-toolkit-B-r1         YYY YYY
+python-prompt-toolkit-B-r2         YYY YYY
+python-prompt-toolkit-G-r0         YYY YYY
+python-prompt-toolkit-G-r1         YYY YYY
+python-prompt-toolkit-G-r2         
+sphinx-A-r0                        YYY
+sphinx-A-r1                        
+sphinx-A-r2                        
+sphinx-B-r0                        YYY YYY YYY YYY
+sphinx-B-r1                        
+sphinx-B-r2                        YYY YYY YYY YYY YYY
+sphinx-G-r0                        YYY
+sphinx-G-r1                        
+sphinx-G-r2                        
+tornado-A-r0                       YYY
+tornado-A-r1                       YYY
+tornado-A-r2                       
+tornado-A-r2-providererror         YYY
+tornado-B-r0                       YYY YYY YYY YYY YYY
+tornado-B-r1                       YYY YYY YYY YYY YYY
+tornado-B-r2                       YYY YYY YYY YYY
+tornado-G-r0                       
+tornado-G-r1                       YYY YYY
+tornado-G-r2                       YYY
+# arm A: 11 boundaries in 10 runs; text states rule 1 in 11, rule 2 in 11, rule 3 in 11; runs where rule 2 is missing after some boundary: 0, after the first boundary: 0
+# arm B: 70 boundaries in 19 runs; text states rule 1 in 64, rule 2 in 64, rule 3 in 64; runs where rule 2 is missing after some boundary: 2, after the first boundary: 0
+# arm G: 17 boundaries in 11 runs; text states rule 1 in 17, rule 2 in 17, rule 3 in 17; runs where rule 2 is missing after some boundary: 0, after the first boundary: 0

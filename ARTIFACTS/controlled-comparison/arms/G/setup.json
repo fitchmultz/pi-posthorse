@@ -1,0 +1,6 @@
+{
+	"what": "official Pi with its own compaction, as arm A, plus one paragraph appended to the system prompt (APPEND_SYSTEM.md)",
+	"why": "Posthorse adds a guidance section to the system prompt. Its first paragraph tells the agent not to stop early. This arm gives stock Pi the same paragraph, so that the comparison can separate the paragraph from the rollover design.",
+	"paragraph_source": "pi-posthorse 0.10.17 src/budget.ts automaticGuidance(), first paragraph, with 'rolls context over' changed to 'compacts context' and 'because rollover is near' changed to 'because compaction is near'",
+	"created": "2026-11-11"
+}

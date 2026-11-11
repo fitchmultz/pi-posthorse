@@ -1,0 +1,3 @@
+# arm A: 26 own stops in 10 runs: cannot 5 stops in 2 runs, documented 7 stops in 3 runs, remains 14 stops in 8 runs
+# arm B: 13 own stops in 4 runs: cannot 9 stops in 3 runs, documented 3 stops in 2 runs, remains 1 stops in 1 runs
+# arm G: 20 own stops in 8 runs: cannot 7 stops in 4 runs, documented 12 stops in 5 runs, remains 1 stops in 1 runs

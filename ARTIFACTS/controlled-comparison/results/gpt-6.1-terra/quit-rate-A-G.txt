@@ -1,0 +1,14 @@
+                                                                 stock         stock + paragraph
+Before the first boundary
+  sessions with agent time there                                    24                        24
+  agent hours                                                     11.2                       6.7
+  times the agent quit unfinished                                   81                        80
+  quits per agent hour                                            7.22                     11.96
+After the first boundary
+  sessions with agent time there                                    10                        11
+  agent hours                                                      1.3                       2.7
+  times the agent quit unfinished                                   15                        12
+  quits per agent hour                                           11.84                      4.37
+Minutes of work after a "Continue." until the next stop (median; count; of these ended by the agent unfinished)
+  sent before the first boundary                           8.1; 67; 67               4.0; 67; 66
+  sent after the first boundary                              6.2; 5; 5                16.7; 4; 2

@@ -1,0 +1,86 @@
+== dulwich-A-r0: 74 commands; git history 1
+   [git history] 01:35:38 git -C repo add dulwich/graph.py dulwich/reflog.py dulwich/config.py dulwich/protocol.py && git -C repo commit -m 'Implement graph traversal, reflogs and packet framing'
+== dulwich-A-r1: 92 commands; 
+== dulwich-A-r2: 129 commands; 
+== dulwich-B-r0: 466 commands; 
+== dulwich-B-r1: 128 commands; 
+== dulwich-B-r2: 412 commands; 
+== dulwich-G-r0: 171 commands; 
+== dulwich-G-r1: 100 commands; 
+== dulwich-G-r2: 49 commands; git history 1, other containers or runs 1
+   [git history] 04:38:54 mkdir -p scratch; mv scratch-collect.txt scratch/collect.txt; cd repo && git add dulwich && git commit -m 'Implement reflog operations and object helpers'
+   [other containers or runs] 04:36:27 cd repo && find dulwich -name '*.py' | xargs wc -l | tail -1; rg '^\s*(async )?def ' dulwich | wc -l; head -90 ../../scratch-test-output.txt
+== jinja-A-r0: 74 commands; 
+== jinja-A-r1: 98 commands; 
+== jinja-A-r2: 74 commands; 
+== jinja-B-r0: 213 commands; docker 1
+   [docker] 01:34:20 docker ps -a --filter name=c0-gpt-6-1-terra-jinja-B-r0 --format '{{.Status}}'; docker start c0-gpt-6-1-terra-jinja-B-r0
+== jinja-B-r1: 194 commands; 
+== jinja-B-r2: 199 commands; 
+== jinja-G-r0: 102 commands; 
+== jinja-G-r1: 200 commands; 
+== jinja-G-r2: 187 commands; 
+== networkx-A-r0: 44 commands; 
+== networkx-A-r1: 37 commands; 
+== networkx-A-r2: 133 commands; 
+== networkx-B-r0: 490 commands; 
+== networkx-B-r1: 73 commands; 
+== networkx-B-r2: 496 commands; 
+== networkx-G-r0: 71 commands; 
+== networkx-G-r1: 100 commands; 
+== networkx-G-r2: 38 commands; 
+== pydantic-A-r0: 91 commands; 
+== pydantic-A-r1: 58 commands; 
+== pydantic-A-r2: 58 commands; 
+== pydantic-B-r0: 82 commands; 
+== pydantic-B-r1: 405 commands; 
+== pydantic-B-r2: 97 commands; 
+== pydantic-G-r0: 104 commands; 
+== pydantic-G-r1: 45 commands; 
+== pydantic-G-r2: 135 commands; 
+== pylint-A-r0: 89 commands; 
+== pylint-A-r1: 97 commands; 
+== pylint-A-r2: 259 commands; 
+== pylint-B-r0: 430 commands; 
+== pylint-B-r1: 571 commands; installed copies 1, compiled files 1
+   [installed copies] 02:55:02 ls repo/tests/regrtest_data/beyond_top; rg -n 'relative_to_absolute_name' repo/.venv/lib/python3.10/site-packages/astroid/nodes/scoped_nodes/scoped_nodes.py
+   [compiled files] 02:03:53 cd repo && python3 - <<'PY' ⏎ import os ⏎ x=[(len([n for n in files+dirs if not n.startswith(('_','.'))]),d) for d,dirs,files in os.walk('tests/functional') if '__pycache__' not in d] ⏎ print(sorted(x,reverse=True)[:10]) ⏎ PY
+== pylint-B-r2: 106 commands; 
+== pylint-G-r0: 110 commands; 
+== pylint-G-r1: 53 commands; 
+== pylint-G-r2: 81 commands; 
+== python-prompt-toolkit-A-r0: 204 commands; 
+== python-prompt-toolkit-A-r1: 152 commands; 
+== python-prompt-toolkit-A-r2: 187 commands; 
+== python-prompt-toolkit-B-r0: 251 commands; 
+== python-prompt-toolkit-B-r1: 255 commands; 
+== python-prompt-toolkit-B-r2: 279 commands; 
+== python-prompt-toolkit-G-r0: 264 commands; other containers or runs 1
+   [other containers or runs] 03:37:14 bin/envrun pytest tests/ > ../scratch-test-output.txt 2>&1; result=$?; cd repo; n=$(grep -oE '[0-9]+ passed' ../../scratch-test-output.txt | tail -1 | grep -oE '[0-9]+' ); git add -A; git commit --allow-empty -m "tests: ${n:-0} passed"; exit $result
+== python-prompt-toolkit-G-r1: 282 commands; 
+== python-prompt-toolkit-G-r2: 80 commands; 
+== sphinx-A-r0: 139 commands; 
+== sphinx-A-r1: 73 commands; 
+== sphinx-A-r2: 115 commands; 
+== sphinx-B-r0: 622 commands; installed copies 1, whole-disk search 3
+   [installed copies] 01:57:23 rg -n '\bssp\(|sphinx_smarty_pants\(' repo/sphinx repo/tests; rg -n 'def smartyPants|def educate' /usr/lib/python3*/site-packages/docutils/utils/smartquotes.py 2>/dev/null || true
+   [whole-disk search] 02:17:40 rg -n -m 3 'invalid token|AssertionError|nested_zipped|theme_api|dark_style' /tmp/themeall2.log; find /tmp -path '*/_build/html/index.html' | head
+   [whole-disk search] 02:17:58 find /tmp/pytest-of-cc/pytest-56 -name index.html | head -10
+   [whole-disk search] 02:18:03 bin/envrun bash -c 'find /tmp/pytest-of-cc -path "*/_build/html/index.html" | head'
+== sphinx-B-r1: 134 commands; 
+== sphinx-B-r2: 545 commands; 
+== sphinx-G-r0: 198 commands; 
+== sphinx-G-r1: 116 commands; 
+== sphinx-G-r2: 74 commands; 
+== tornado-A-r0: 133 commands; 
+== tornado-A-r1: 124 commands; 
+== tornado-A-r2: 56 commands; network 1
+   [network] 03:48:24 python - <<'PY' ⏎ p='repo/tornado/escape.py' ⏎ s=open(p).read(); replacements=['return html.escape(to_unicode(value))','return html.unescape(to_unicode(value))',"return json.dumps(value).replace('</', '<\\\\/')",'return json.loads(value)',"return re.sub(r'\\s+', ' ', value).strip()","return (urllib.parse.quote_plus if plus else urllib.parse.quote)(value)","""if plus: ⏎         value = value.replace(b'+', b' ') if isinstance(value, bytes) else value.replace('+', ' ') ⏎     result = urllib.parse.unquote_to_bytes(value) ⏎     return result if encoding is None else result.decode(encoding)""","""if isinstance(qs, bytes): ⏎         qs = qs.decode('latin1') ⏎     result = {} ⏎     for key, value in urllib.parse.pa
+== tornado-B-r0: 443 commands; 
+== tornado-B-r1: 428 commands; 
+== tornado-B-r2: 529 commands; 
+== tornado-G-r0: 77 commands; 
+== tornado-G-r1: 179 commands; network 2
+   [network] 04:39:29 bin/envrun bash -c 'python -m http.server 18766 >/dev/null 2>&1 & p=$!; sleep .2; python -c "from tornado.httpclient import HTTPClient; c=HTTPClient(); r=c.fetch(\"http://127.0.0.1:18766/\"); print(r.code, len(r.body)); c.close()"; kill $p; wait $p 2>/dev/null'
+   [network] 04:39:40 bin/envrun bash -c 'python -m http.server 18766 >/dev/null 2>&1 & p=$!; sleep .2; python -c "from tornado.httpclient import HTTPClient; c=HTTPClient(); r=c.fetch(\"http://127.0.0.1:18766/\"); print(r.code, len(r.body)); c.close()"; kill $p; wait $p 2>/dev/null || : '
+== tornado-G-r2: 98 commands; 

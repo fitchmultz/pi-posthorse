@@ -1,0 +1,7 @@
+{"id": "b001", "run": "pylint-G-r0", "arm": "G", "lib": "pylint", "void": false, "stop": 2, "kind": "agent", "minute": 48.0, "passed": 681, "reference_passed": 1868, "boundaries_before": 2}
+{"id": "b002", "run": "sphinx-G-r0", "arm": "G", "lib": "sphinx", "void": false, "stop": 0, "kind": "agent", "minute": 35.9, "passed": 393, "reference_passed": 2187, "boundaries_before": 2}
+{"id": "b003", "run": "pylint-G-r0", "arm": "G", "lib": "pylint", "void": false, "stop": 1, "kind": "agent", "minute": 40.3, "passed": 609, "reference_passed": 1868, "boundaries_before": 2}
+{"id": "b004", "run": "pylint-G-r0", "arm": "G", "lib": "pylint", "void": false, "stop": 0, "kind": "agent", "minute": 27.9, "passed": 478, "reference_passed": 1868, "boundaries_before": 1}
+{"id": "b005", "run": "sphinx-A-r0", "arm": "A", "lib": "sphinx", "void": false, "stop": 2, "kind": "agent", "minute": 85.6, "passed": 615, "reference_passed": 2187, "boundaries_before": 4}
+{"id": "b006", "run": "pylint-A-r1", "arm": "A", "lib": "pylint", "void": false, "stop": 1, "kind": "agent", "minute": 108.9, "passed": 1197, "reference_passed": 1868, "boundaries_before": 6}
+{"id": "b007", "run": "sphinx-A-r0", "arm": "A", "lib": "sphinx", "void": false, "stop": 3, "kind": "agent", "minute": 110.5, "passed": 792, "reference_passed": 2187, "boundaries_before": 5}

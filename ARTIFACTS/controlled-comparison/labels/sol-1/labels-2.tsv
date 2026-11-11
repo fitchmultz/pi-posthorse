@@ -1,0 +1,44 @@
+a001	cannot	unchanged test defects or missing Swift prerequisites
+a002	remains	Incomplete
+a003	cannot	all attributable to prohibited test-helper repairs or unavailable Swift infrastructure
+a004	remains	Work remains incomplete
+a005	cannot	remaining failures are blocked by stripped helpers
+a006	remains	The implementation remains incomplete
+a007	remains	Remaining **345 failures and 10 errors**
+a008	remains	missing application bootstrap methods
+a009	cannot	9 externally blocked failures
+a010	remains	other library implementations also remain unfinished
+a011	remains	753 failed
+a012	remains	Incomplete
+a013	remains	772 failed
+a014	cannot	No further compliant fix is available
+a015	remains	Full suite remains incomplete
+a016	remains	Remaining failures inspect generated Python source
+a017	remains	Full-suite results remain unchanged
+a018	remains	The task remains incomplete
+a019	remains	missing application initialization APIs
+a020	cannot	cannot be changed under your rules, or missing external Swift configuration/service
+a021	remains	Partial implementation
+a022	cannot	Remaining failures are blocked
+a023	remains	Suite remains incomplete
+a024	remains	978 failed
+a025	remains	345 failed
+a026	remains	858 failed
+a027	remains	The suite is not yet passing
+a028	remains	The suite is still not passing
+a029	cannot	all remaining outcomes blocked by immutable test defects or missing Swift configuration
+a030	remains	683 failed
+a031	remains	the suite remains incomplete
+a032	cannot	Further fixes require changing the no-test-edits constraint or supplying Swift infrastructure
+a033	cannot	Remaining failures require restoring prohibited test fixtures/teardown or supplying an external Swift service and credentials
+a034	cannot	Remaining outcomes are blocked by
+a035	remains	Incomplete
+a036	remains	unfinished builders/transforms
+a037	remains	Incomplete
+a038	cannot	stripped test infrastructure and unavailable Swift service configuration
+a039	remains	Core directives and domain APIs remain major blockers
+a040	remains	Incomplete
+a041	remains	The suite is not yet passing
+a042	cannot	All remaining failures are Swift integration tests requiring external OpenStack Swift configuration
+a043	remains	1292 failed
+a044	cannot	13 failures require editing a test fixture; 9 require unavailable Swift infrastructure

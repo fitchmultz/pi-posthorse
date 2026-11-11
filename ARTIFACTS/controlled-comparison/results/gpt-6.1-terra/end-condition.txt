@@ -1,0 +1,57 @@
+dulwich-A-r2                       F         remains remains remains remains
+    1 F Implement the stripped Python library under `repo/dulwich` so the entire test suite passes, or identify why each remaining failure cannot be fixed.
+dulwich-G-r0                       FF        remains remains remains remains
+    1 F Implement the stripped Python library in `repo/dulwich` so the full test suite passes, or explain individually why each remaining failure cannot be fixed. The user subsequently said “Continue.”
+    2 F Implement the stripped Python library in `repo/dulwich` so the full test suite passes, or explain individually why each remaining failure cannot be fixed. The user subsequently said “Continue.”
+jinja-A-r1                         F         remains remains remains remains
+    1 F Implement the Jinja library under `repo/src/jinja2` so the entire test suite in `repo/tests` passes, or explain why each remaining failure cannot be fixed.
+jinja-G-r0                         F         remains remains remains remains
+    1 F Implement the stripped Jinja Python library in `repo/src/jinja2` until the whole test suite passes, or establish why each remaining failure cannot be fixed.
+jinja-G-r1                         FF        remains remains
+    1 F Implement the stripped Python library under `repo/src/jinja2` so the whole test suite passes, or establish why each remaining failure cannot be fixed. The user said to continue without asking questions or reporting progress.
+    2 F Implement the stripped Python library under `repo/src/jinja2` so the whole test suite passes, or establish why each remaining failure cannot be fixed. Continue without asking questions or reporting progress.
+jinja-G-r2                         FF        remains remains remains remains
+    1 F Implement the stripped Jinja Python library under `repo/src/jinja2` so the whole test suite passes, or explain why each remaining failure cannot be fixed.
+    2 F Implement the stripped Jinja Python library under `repo/src/jinja2` so the whole test suite passes, or explain why each remaining failure cannot be fixed.
+networkx-A-r2                      F         remains remains remains remains
+    1 F Implement the stripped NetworkX library under `repo/networkx` until the whole test suite passes, or explain why each remaining failure cannot be fixed.
+networkx-G-r1                      F         remains remains remains remains
+    1 F Implement the stripped NetworkX library under `repo/networkx` so its entire test suite passes, or identify why each remaining failure cannot be fixed.
+pydantic-G-r2                      F         remains remains remains remains
+    1 F Implement the skeleton Python library under `repo/pydantic` so its whole test suite passes, or explain why each remaining failure cannot be fixed.
+pylint-A-r2                        FF        remains remains remains remains
+    1 F Implement the stripped Python library in `repo/pylint` so the whole test suite passes, or identify why each remaining failure cannot be fixed.
+    2 F Implement the stripped Python library in `repo/pylint` so the whole test suite passes, or identify why each remaining failure cannot be fixed.
+python-prompt-toolkit-A-r0         F         remains remains remains remains
+    1 F Implement the stripped Python library in `repo/src/prompt_toolkit` so the whole test suite passes, or identify why each remaining failure cannot be fixed.
+python-prompt-toolkit-A-r1         F         remains remains remains remains
+    1 F Implement the stripped `python-prompt-toolkit` library in `repo/src/prompt_toolkit` until the whole test suite passes, or explain why each remaining failure cannot be fixed.
+python-prompt-toolkit-A-r2         F         remains remains remains remains
+    1 F Implement the stripped `python-prompt-toolkit` library under `repo/src/prompt_toolkit` until the whole test suite passes, or explain why each remaining failure cannot be fixed.
+python-prompt-toolkit-G-r0         FF        remains remains remains remains
+    1 F Implement `repo/src/prompt_toolkit` so the whole test suite passes, or explain individually why each remaining failure cannot be fixed.
+    2 F Implement `repo/src/prompt_toolkit` so the whole test suite passes, or explain individually why each remaining failure cannot be fixed.
+python-prompt-toolkit-G-r1         FF        remains remains
+    1 F Implement the stubbed `python-prompt-toolkit` library under `repo/src/prompt_toolkit` until the whole test suite passes, or explain why each remaining failure cannot be fixed.
+    2 F Implement the stubbed `python-prompt-toolkit` library under `repo/src/prompt_toolkit` until the whole test suite passes, or explain why each remaining failure cannot be fixed.
+sphinx-A-r0                        F         remains remains remains remains
+    1 F Implement the stripped Sphinx Python library under `repo/sphinx` so the entire test suite passes, or explain why each remaining failure cannot be fixed.
+sphinx-G-r0                        F         remains remains remains remains
+    1 F Implement the stripped Sphinx library in `repo/sphinx` so the whole test suite passes, or explain why each remaining failure cannot be fixed.
+tornado-A-r0                       F         remains remains remains remains
+    1 F Implement the stripped Python Tornado library in `repo/tornado` until its entire test suite passes, or explain why each remaining failure cannot be fixed.
+tornado-A-r1                       F         remains remains remains remains
+    1 F Implement the stripped Tornado Python library in `repo/tornado` so its entire test suite passes, or explain why each remaining failure cannot be fixed.
+tornado-G-r1                       FF        remains remains remains remains
+    1 F Implement the stripped Tornado Python library under `repo/tornado` so its whole test suite passes, or identify why each remaining failure cannot be fixed.
+    2 F Implement the stripped Tornado Python library under `repo/tornado` so its whole test suite passes, or identify why each remaining failure cannot be fixed.
+tornado-G-r2                       F         remains remains remains remains
+    1 F Implement the stripped Tornado library in `repo/tornado` until the whole test suite passes, or explain individually why each remaining failure cannot be fixed.
+# arm A: first summary F: 10 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm A: first summary E: 0 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm A: first summary P: 0 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm A: first summary -: 0 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm G: first summary F: 11 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm G: first summary E: 0 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm G: first summary P: 0 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm G: first summary -: 0 runs; with a stop labelled documented: 0 runs, 0 stops

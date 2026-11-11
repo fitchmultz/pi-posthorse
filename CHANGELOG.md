@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a [controlled comparison](docs/controlled-comparison.md) of Posthorse and stock Pi compaction: 144 unattended two-hour coding sessions on two models, scored for tests passing, stops with work left, kept rules, wait time, and cost. The harness, the tables, and the stop labels are under `ARTIFACTS/controlled-comparison/` (#140).
+
 ## 0.10.20 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->
