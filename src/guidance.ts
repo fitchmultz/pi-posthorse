@@ -24,7 +24,9 @@ export function registerGuidance(pi: ExtensionAPI, policy: SnapshotReader): void
 		if (promptOptions?.forceSystemPrompt !== undefined) {
 			// ponytail: Pi applies forced prompts after this hook; keep request-local guidance
 			// until the host projects forced text before context_with_system.
-			event.messages.splice(1, 0, {
+			// After a compaction a second system message (the tool update) can follow the first.
+			const conversation = event.messages.findIndex((message) => message.role !== "system");
+			event.messages.splice(conversation === -1 ? event.messages.length : conversation, 0, {
 				role: "custom",
 				customType: "posthorse-guidance",
 				content: guidance,

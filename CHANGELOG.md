@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- With a forced system prompt, the hidden guidance message now follows every leading system message. It stood at index 1, between the prompt and the tool update that the Pi fork keeps as a second leading system message after a compaction.
+
 ## 0.10.19 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->
