@@ -17,6 +17,7 @@ export type PolicyContext = {
 	readonly getCompactionSettings: () => CompactionPolicy;
 	readonly getContextUsage: () => ContextUsage | undefined;
 	readonly getSystemPrompt: () => string;
+	readonly getGuidance?: () => string;
 };
 export type PolicyReader = (ctx: ExtensionContext) => CompactionPolicy;
 export type SnapshotReader = (
@@ -70,6 +71,7 @@ export type EntryLike = {
 	readonly parentSession?: string | undefined;
 	readonly handoff?: string | undefined;
 	readonly firstKeptEntryId?: string | null | undefined;
+	readonly providerSummary?: unknown;
 	readonly targetId?: string | undefined;
 	readonly replacement?: { readonly content: unknown } | null | undefined;
 };

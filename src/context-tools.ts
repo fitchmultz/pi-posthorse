@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { toolCards, type PosthorseDisplay } from "../ui.ts";
 import { budgetFor, freshPayloadChars, unsupportedMessage, type Budget } from "./budget.ts";
+import { activeGuidanceTools } from "./guidance.ts";
 import {
 	EMPTY_HANDOFF,
 	MAX_HANDOFF_CHARS,
@@ -16,7 +17,7 @@ function rolloverStatus(budget: Budget | undefined): "disabled" | "enabled" | "u
 	}
 	return budget.supported ? "enabled" : "unsupported";
 }
-function contextReport(host: PolicyContext): TextResult {
+function contextReport(host: PolicyContext, newContextAvailable: boolean): TextResult {
 	const usage = host.getContextUsage();
 	if (usage === undefined || usage.tokens === null) {
 		return textResult("Context usage is not known until the next model response.", [], {
@@ -41,7 +42,11 @@ function contextReport(host: PolicyContext): TextResult {
 		);
 	}
 	if (!budget.supported) {
-		return textResult(`${unsupportedMessage(budget)} ${configured}`, [], display);
+		return textResult(
+			`${unsupportedMessage(budget, newContextAvailable)} ${configured}`,
+			[],
+			display,
+		);
 	}
 	return textResult(
 		`≈${n(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until automatic rollover (line at ${n(budget.rolloverAt)}); ${configured}`,
@@ -97,7 +102,7 @@ export function registerContextTools(
 			"verify remaining context before reporting a token count or changing plans because of context limits",
 		parameters: Type.Object({}),
 		async execute(...[, , , , ctx]) {
-			return contextReport(policy(ctx));
+			return contextReport(policy(ctx), activeGuidanceTools(pi).newContext);
 		},
 	});
 }

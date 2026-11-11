@@ -2266,6 +2266,67 @@ await test("a rollover drafted at the end of a turn gets a provider summary bloc
 	h.heldAfterRollover();
 });
 
+await test("a provider summary block keeps the leading guidance unchanged after mid-window tool activation", async (t) => {
+	const h = await providerSummaryHost(t, (pi) => {
+		pi.registerTool({
+			name: "pad",
+			label: "pad",
+			description: "Small local result",
+			parameters: { type: "object", properties: {} },
+			async execute() {
+				return { content: [{ type: "text", text: "pad ".repeat(2_000) }], details: {} };
+			},
+		});
+	});
+	if (h === undefined) {
+		return;
+	}
+	h.session.setActiveToolsByName(["notes", "pad"]);
+	let turns = 0;
+	let firstGuidance: string | null | undefined;
+	h.faux.setResponses(
+		Array.from({ length: 18 }, (): NativeAi.FauxResponseStep => (ctx, options) => {
+			const request = record(options ?? {}).providerSummary;
+			if (request !== undefined) {
+				return Object.assign(fauxAssistantMessage([]), {
+					rawStopReason: "compaction",
+					providerSummary: {
+						provider: h.faux.getModel().provider,
+						api: h.faux.getModel().api,
+						model: h.faux.getModel().id,
+						block: h.block,
+					},
+				});
+			}
+			const head = requireValue(ctx.messages[0]);
+			assert.equal(head.role, "system");
+			firstGuidance ??= head.sections?.posthorse;
+			if (turns === 0) {
+				h.session.setActiveToolsByName([
+					"notes",
+					"pad",
+					"new_context",
+					"get_context_remaining",
+				]);
+			}
+			turns++;
+			return ctx.messages.some((message) => textOf(message).includes(RECOVERY_RECORD))
+				? fauxAssistantMessage("done")
+				: fauxAssistantMessage(fauxToolCall("pad", {}), { stopReason: "toolUse" });
+		}),
+	);
+	await h.session.prompt("p".repeat(240_000));
+	const held = h.heldAfterRollover();
+	const postRolloverHead = requireValue(held[0]);
+	assert.equal(postRolloverHead.role, "system");
+	assert.equal(
+		postRolloverHead.sections?.posthorse,
+		firstGuidance,
+		"the leading system message under a provider summary block keeps the guidance it was signed under",
+	);
+	assert.doesNotMatch(firstGuidance ?? "", /\bnew_context\b/u);
+});
+
 await test("edited image recovery points to the replacement rather than the raw original", async (t) => {
 	const image: NativeAi.ImageContent = {
 		type: "image",
@@ -2564,6 +2625,187 @@ for (const mode of ["unforced", "forced", "forced-user-to-custom"]) {
 		);
 	});
 }
+
+await test("window guidance stays byte-identical across restarts and updates until a fresh window", async (t) => {
+	const initial = await fixture(t);
+	const capturedInitial: TranscriptMessages[] = [];
+	initial.faux.setResponses([
+		(ctx) => {
+			capturedInitial.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Turn one.");
+		},
+		(ctx) => {
+			capturedInitial.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Turn two.");
+		},
+	]);
+	await initial.session.prompt("First prompt.");
+	await initial.session.prompt("Second prompt in same window.");
+	assert.equal(capturedInitial.length, 2);
+	const savedEntries = () =>
+		initial.sessionManager
+			.getBranch()
+			.filter(
+				(entry) =>
+					entry.type === "custom" && entry.customType === "posthorse-window-guidance",
+			);
+	assert.equal(
+		savedEntries().length,
+		1,
+		"persisted once per window budget, not on every request",
+	);
+
+	const sessionFile = requireValue(initial.sessionManager.getSessionFile());
+	const legacyBody =
+		"## Automatic context management (Posthorse)\nSaved guidance from an earlier release in this window.";
+	const rewritten = readFileSync(sessionFile, "utf8")
+		.split("\n")
+		.map((line) => {
+			if (line === "") {
+				return "";
+			}
+			const parsed = record(JSON.parse(line));
+			if (parsed.type === "custom" && parsed.customType === "posthorse-window-guidance") {
+				return JSON.stringify({
+					...parsed,
+					data: { ...record(parsed.data), text: legacyBody },
+				});
+			}
+			return line;
+		})
+		.join("\n");
+	writeFileSync(sessionFile, rewritten);
+
+	const resumed = await fixture(t, {
+		cwd: initial.cwd,
+		manager: () => SessionManager.open(sessionFile),
+	});
+	const capturedResumed: TranscriptMessages[] = [];
+	resumed.faux.setResponses([
+		(ctx) => {
+			capturedResumed.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Still in legacy window.");
+		},
+	]);
+	await resumed.session.prompt("Continue after update and restart.");
+	resumed.settingsManager.applyOverrides({ compaction: { reserveTokens: 32_000 } });
+	let switchedPrompt = "";
+	resumed.faux.setResponses([
+		(ctx) => {
+			switchedPrompt = getCurrentSystemPrompt(ctx.messages);
+			return fauxAssistantMessage("Different budget.");
+		},
+	]);
+	await resumed.session.prompt("Check different reserve.");
+	assert.match(switchedPrompt, /rollover line is 68,001 tokens used/u);
+	resumed.settingsManager.applyOverrides({ compaction: { reserveTokens: 16_384 } });
+	resumed.faux.setResponses([
+		(ctx) => {
+			capturedResumed.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage(
+				fauxToolCall("new_context", { handoff: "Start fresh window." }),
+				{ stopReason: "toolUse" },
+			);
+		},
+		(ctx) => {
+			capturedResumed.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Fresh window.");
+		},
+	]);
+	await resumed.session.prompt("Back on initial budget, then reset.");
+
+	const expectedSection = `<posthorse>\n${legacyBody}\n</posthorse>`;
+	const firstResumedHead = requireValue(requireValue(capturedResumed[0])[0]);
+	const returnedBudgetHead = requireValue(requireValue(capturedResumed[1])[0]);
+	const postResetHead = requireValue(requireValue(capturedResumed[2])[0]);
+	assert.ok(firstResumedHead.role === "system");
+	assert.ok(returnedBudgetHead.role === "system");
+	assert.ok(postResetHead.role === "system");
+	assert.equal(firstResumedHead.sections?.posthorse, expectedSection);
+	assert.equal(
+		returnedBudgetHead.sections?.posthorse,
+		expectedSection,
+		"switching budgets and back reuses the window's saved guidance for that budget",
+	);
+	assert.notEqual(postResetHead.sections?.posthorse, expectedSection);
+	assert.match(postResetHead.sections?.posthorse ?? "", /rollover line is 83,617 tokens used/u);
+});
+
+await test("guidance omits undeclared context tools and stays locked when tools activate mid-window", async (t) => {
+	const h = await fixture(t);
+	h.session.setActiveToolsByName(["notes", "history"]);
+	const requests: TranscriptMessages[] = [];
+	h.faux.setResponses([
+		(ctx) => {
+			requests.push(structuredClone(ctx.messages));
+			h.session.setActiveToolsByName([
+				"notes",
+				"history",
+				"new_context",
+				"get_context_remaining",
+			]);
+			return fauxAssistantMessage(fauxToolCall("notes", { op: "list" }), {
+				stopReason: "toolUse",
+			});
+		},
+		(ctx) => {
+			requests.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage(
+				fauxToolCall("new_context", { handoff: "Tools are now active." }),
+				{ stopReason: "toolUse" },
+			);
+		},
+		(ctx) => {
+			requests.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Done.");
+		},
+	]);
+	await h.session.prompt("Run with deferred context tools, then activate them.");
+	assert.equal(requests.length, 3);
+	const head0 = requireValue(requireValue(requests[0])[0]);
+	const head1 = requireValue(requireValue(requests[1])[0]);
+	const head2 = requireValue(requireValue(requests[2])[0]);
+	assert.ok(head0.role === "system" && head1.role === "system" && head2.role === "system");
+	const initialSection = head0.sections?.posthorse ?? "";
+	assert.doesNotMatch(initialSection, /\bnew_context\b/u);
+	assert.doesNotMatch(initialSection, /\bget_context_remaining\b/u);
+	assert.match(
+		initialSection,
+		/Do not guess capacity or remaining space from response-token or reasoning limits\. If usage is unknown, report it as unknown\./u,
+	);
+	assert.deepEqual(
+		head1,
+		head0,
+		"activating tools mid-window must not rewrite the leading system message",
+	);
+	assert.ok(
+		requireValue(requests[1])
+			.slice(1)
+			.some(
+				(msg) =>
+					msg.role === "system" &&
+					msg.toolsAdded?.some((tool) => tool.name === "new_context") === true,
+			),
+	);
+	const freshSection = head2.sections?.posthorse ?? "";
+	assert.match(freshSection, /new_context is an optional clean reset\./u);
+	assert.match(freshSection, /call get_context_remaining\./u);
+
+	for (const options of [{ enabled: false }, { contextWindow: 8192 }] as const) {
+		const sub = await fixture(t, options);
+		sub.session.setActiveToolsByName(["notes", "get_context_remaining"]);
+		let prompt = "";
+		sub.faux.setResponses([
+			(ctx) => {
+				prompt = getCurrentSystemPrompt(ctx.messages);
+				return fauxAssistantMessage("Checked.");
+			},
+		]);
+		await sub.session.prompt("Check guidance without new_context.");
+		assert.doesNotMatch(prompt, /\bnew_context\b/u);
+		assert.match(prompt, /call get_context_remaining\./u);
+	}
+});
 
 await test("namespaced tools count toward the fresh handoff budget", async (t) => {
 	const h = await fixture(t, {

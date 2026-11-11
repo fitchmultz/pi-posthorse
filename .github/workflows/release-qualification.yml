@@ -42,11 +42,25 @@ jobs:
       - name: Use the repository npm version
         run: npm install --global "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --ignore-scripts --no-audit
+      - name: Configure backup DNS resolvers
+        run: |
+          if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet systemd-resolved; then
+            sudo mkdir -p /etc/systemd/resolved.conf.d
+            {
+              printf '[Resolve]\nDNS=1.1.1.1 1.0.0.1 9.9.9.9\n'
+              if resolvectl domain 2>/dev/null | grep -Eq '(^|[[:space:]])~\.($|[[:space:]])'; then
+                printf 'Domains=~.\n'
+              fi
+            } | sudo tee /etc/systemd/resolved.conf.d/ci-dns.conf >/dev/null
+            sudo systemctl restart systemd-resolved
+            sudo resolvectl flush-caches || true
+            resolvectl query archive.ubuntu.com security.ubuntu.com
+          fi
       - name: Install native test prerequisites
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends fd-find ripgrep attr
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends fd-find ripgrep attr
       - run: npm run verify
       - name: Prove release quality controls
         run: bash scripts/release-quality-controls.sh
