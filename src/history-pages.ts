@@ -7,6 +7,7 @@ import {
 	type WindowedEntry,
 } from "./contracts.ts";
 import { excerpt, shortKey, sourceTag } from "./message-text.ts";
+import { cursorFor as cursorAt } from "./history-cursor.ts";
 import type { HistoryMatches, HistoryParams } from "./history-search.ts";
 import type { PageAccess } from "./paging.ts";
 
@@ -18,11 +19,6 @@ type SearchPage = {
 	readonly spans: readonly { readonly headerLength: number; readonly length: number }[];
 	readonly continuation: Continuation<string>;
 };
-function cursorFor(matches: HistoryMatches, hit: HistoryHit, offset: number): string {
-	return Buffer.from(JSON.stringify([hit.id, hit.priority, offset, matches.key])).toString(
-		"base64url",
-	);
-}
 function searchFooter(next: string): string {
 	return `\n[More results; continue with cursor "${next}" and the same query/scope.]`;
 }
@@ -70,7 +66,7 @@ function searchParts(matches: HistoryMatches, chars: number): SearchPage {
 		available -= fragment.part.length + 1;
 		continuation =
 			fragment.end < hit.text.length || parts.length < matches.hits.length
-				? { kind: "more", next: cursorFor(matches, hit, fragment.end) }
+				? { kind: "more", next: cursorAt(matches.key, hit, fragment.end) }
 				: { kind: "complete" };
 		if (available <= 0 || parts.length >= matches.limit) {
 			break;
@@ -87,7 +83,9 @@ export function searchPage(
 	const chars = pages.size(host);
 	const reserve = Math.max(
 		0,
-		...matches.hits.map((hit) => searchFooter(cursorFor(matches, hit, hit.text.length)).length),
+		...matches.hits.map(
+			(hit) => searchFooter(cursorAt(matches.key, hit, hit.text.length)).length,
+		),
 	);
 	if (reserve >= chars) {
 		pages.error(host, "History entry id is too large for pagination.");

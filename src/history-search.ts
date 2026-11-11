@@ -3,11 +3,11 @@ import type { LineMatcher } from "./session-lines.ts";
 import {
 	isReminderType,
 	requireValue,
-	unknownArray,
 	type EntryLike,
 	type HistoryHit,
 	type ProjectedEntry,
 } from "./contracts.ts";
+import { decodeCursor, type HistoryCursor } from "./history-cursor.ts";
 import { historyHit, seenText, reverseWindowEntries } from "./history-entries.ts";
 import { shortKey } from "./message-text.ts";
 import {
@@ -34,7 +34,6 @@ export type HistorySource = {
 	readonly branch: () => readonly EntryLike[];
 	readonly projection: () => readonly ProjectedEntry[];
 };
-export type HistoryCursor = readonly [id: string, priority: 0 | 1, offset: number, key: string];
 export type HistoryMatches = {
 	readonly hits: readonly HistoryHit[];
 	readonly skipped: number;
@@ -42,32 +41,6 @@ export type HistoryMatches = {
 	readonly key: string;
 	readonly limit: number;
 };
-function cursorOffset(value: unknown, storedKey: unknown, key: string): number {
-	if (
-		typeof value !== "number" ||
-		!Number.isSafeInteger(value) ||
-		value < 0 ||
-		storedKey !== key
-	) {
-		throw new Error("Invalid cursor offset or scope.");
-	}
-	return value;
-}
-function decodeCursor(encoded: string | undefined, key: string): HistoryCursor | undefined {
-	if (encoded === undefined || encoded === "") {
-		return undefined;
-	}
-	const value: unknown = JSON.parse(Buffer.from(encoded, "base64url").toString());
-	const parts = unknownArray(value);
-	if (parts === undefined || parts.length !== 4) {
-		throw new Error("Invalid cursor tuple.");
-	}
-	const [id, priority, offset, storedKey] = parts;
-	if (typeof id !== "string" || id === "" || (priority !== 0 && priority !== 1)) {
-		throw new Error("Invalid cursor anchor.");
-	}
-	return [id, priority, cursorOffset(offset, storedKey, key), key];
-}
 function entryMessage(entry: EntryLike) {
 	switch (entry.type) {
 		case "message":
@@ -109,15 +82,20 @@ function contextVisibility(project: HistorySource["projection"]): (entry: EntryL
 	};
 }
 type SearchProgress = {
-	readonly cursor?: HistoryCursor | undefined;
 	readonly limit: number;
 	readonly add: (hit: HistoryHit) => void;
 	readonly seeking: (priority: 0 | 1) => boolean;
 	readonly enough: () => boolean;
+	readonly fileFeed: () => FileFeed;
 };
 type CursorProgress =
 	| { readonly kind: "seeking"; readonly cursor: HistoryCursor }
 	| { readonly kind: "collecting"; readonly cursor?: HistoryCursor };
+/** One archive file's newest-first hits: a bounded window per rank, closing at the seek anchor. */
+export type FileFeed = {
+	readonly add: (hit: HistoryHit) => void;
+	readonly finish: () => readonly (readonly HistoryHit[])[];
+};
 /** Owns ranking, lookahead and one cursor's progress; never holds the whole archive. */
 class SearchAccumulator {
 	readonly groups: [HistoryHit[], HistoryHit[]] = [[], []];
@@ -170,36 +148,37 @@ class SearchAccumulator {
 		}
 		return this.groups.flat();
 	}
-}
-function archiveCollector(accumulator: SearchProgress): {
-	readonly add: (hit: HistoryHit) => void;
-	readonly finish: () => readonly (readonly HistoryHit[])[];
-} {
-	const recent: [HistoryHit[], HistoryHit[]] = [[], []];
-	let anchorHere = false;
-	return {
-		add: (hit) => {
-			const seeking = accumulator.seeking(hit.priority);
-			if (seeking && anchorHere) {
-				return;
-			}
-			if (seeking && hit.id === accumulator.cursor?.[0]) {
-				anchorHere = true;
-			}
-			const group = recent[hit.priority];
-			group.push(hit);
-			if (group.length > accumulator.limit + 2) {
-				group.shift();
-			}
-		},
-		finish: () => {
-			const cursor = accumulator.cursor;
-			if (cursor !== undefined && accumulator.seeking(cursor[1]) && !anchorHere) {
-				recent[cursor[1]] = [];
-			}
-			return recent;
-		},
-	};
+	/**
+	 * A file may hold the anchor. Its window keeps two extra hits, and a file that never reaches
+	 * the anchor contributes nothing to the rank being sought.
+	 */
+	fileFeed(): FileFeed {
+		const recent: [HistoryHit[], HistoryHit[]] = [[], []];
+		let anchorHere = false;
+		return {
+			add: (hit) => {
+				const seeking = this.seeking(hit.priority);
+				if (seeking && anchorHere) {
+					return;
+				}
+				if (seeking && hit.id === this.cursor?.[0]) {
+					anchorHere = true;
+				}
+				const group = recent[hit.priority];
+				group.push(hit);
+				if (group.length > this.limit + 2) {
+					group.shift();
+				}
+			},
+			finish: () => {
+				const cursor = this.cursor;
+				if (cursor !== undefined && this.seeking(cursor[1]) && !anchorHere) {
+					recent[cursor[1]] = [];
+				}
+				return recent;
+			},
+		};
+	}
 }
 async function scanArchive(
 	file: string,
@@ -212,7 +191,7 @@ async function scanArchive(
 	},
 	accumulator: SearchProgress,
 ): Promise<{ readonly groups: readonly (readonly HistoryHit[])[]; readonly skipped: number }> {
-	const collector = archiveCollector(accumulator);
+	const collector = accumulator.fileFeed();
 	let skipped = 0;
 	for await (const item of sessionWindowEntries(
 		file,
