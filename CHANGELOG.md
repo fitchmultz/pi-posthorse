@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+## 0.10.23 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+
 - Keep the `<posthorse>` guidance section byte-identical for the life of a context window across package updates, restarts, and mid-window deferred-tool loads (#162, #172). Posthorse now records each window's rendered guidance once per model/compaction budget (`posthorse-window-guidance`), omits the `new_context` and `get_context_remaining` sentences when those tools are not active at the start of the window, and carries the saved guidance across rollovers that use a provider summary block until a new prompt prefix begins.
+
+<!-- npm-release:unreleased:end -->
+
+- fix(guidance): lock window guidance and omit inactive context tools (#179) ([7dec1a1](https://github.com/fitchmultz/pi-posthorse/commit/7dec1a14ed3ff5ea66454e73fa70211a48ff684e))
+
+### What's Changed
+
+- fix(guidance): lock window guidance and omit inactive context tools by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/179
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.22...v0.10.23
 
 ## 0.10.22 - 2026-11-11
 
