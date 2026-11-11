@@ -35,27 +35,40 @@ export type PageAccess = {
 	readonly error: (ctx: PolicyContext, message: string) => never;
 	readonly notes: (ctx: PolicyContext, page: NotesPage) => TextResult;
 };
-type PageAccounting = {
-	readonly pendingTokens: number;
-	readonly usage: number | null | undefined;
-};
-function reconcile(accounting: PageAccounting, usage: PageAccounting["usage"]): PageAccounting {
+/**
+ * Reservations start as estimates. A settle marks that native usage was read, and from then on the
+ * number is what Pi has not counted yet: each new reading absorbs the reservations it covers.
+ */
+type PageAccounting =
+	| { readonly kind: "estimated"; readonly tokens: number }
+	| { readonly kind: "pending"; readonly baseline: number | null; readonly tokens: number };
+const NO_RESERVATIONS: PageAccounting = { kind: "estimated", tokens: 0 };
+
+function reconcile(accounting: PageAccounting, usage: number | null | undefined): PageAccounting {
+	const baseline = usage ?? null;
 	// Native usage may already include serial results, but not parallel siblings.
 	const counted =
-		typeof usage === "number" && typeof accounting.usage === "number"
-			? Math.max(0, usage - accounting.usage)
+		accounting.kind === "pending" &&
+		typeof baseline === "number" &&
+		typeof accounting.baseline === "number"
+			? Math.max(0, baseline - accounting.baseline)
 			: 0;
-	return { pendingTokens: Math.max(0, accounting.pendingTokens - counted), usage };
+	return { kind: "pending", baseline, tokens: Math.max(0, accounting.tokens - counted) };
+}
+function withTokens(accounting: PageAccounting, tokens: number): PageAccounting {
+	return accounting.kind === "estimated"
+		? { kind: "estimated", tokens }
+		: { kind: "pending", baseline: accounting.baseline, tokens };
 }
 /** Shared by note and history tools. Reservations precede delivery and reset at a turn boundary. */
 export class PageReservations {
-	private accounting: PageAccounting = { pendingTokens: 0, usage: undefined };
+	private accounting: PageAccounting = NO_RESERVATIONS;
 	private readonly toolTokens: () => number;
 	constructor(toolTokens: () => number) {
 		this.toolTokens = toolTokens;
 	}
 	reset(): void {
-		this.accounting = { pendingTokens: 0, usage: undefined };
+		this.accounting = NO_RESERVATIONS;
 	}
 	/**
 	 * Body characters for the next page. Near the rollover line pages shrink to MIN_PAGE_CHARS
@@ -63,7 +76,7 @@ export class PageReservations {
 	 */
 	size(ctx: PolicyContext, request: PageRequest = {}): number {
 		this.settle(ctx);
-		const remaining = pageCapacity(ctx, this.toolTokens) - this.accounting.pendingTokens;
+		const remaining = pageCapacity(ctx, this.toolTokens) - this.accounting.tokens;
 		const budget = Math.min(
 			MAX_PAGE_CHARS,
 			Math.max(0, remaining - PAGE_MARGIN_TOKENS) * 4 -
@@ -75,13 +88,12 @@ export class PageReservations {
 		this.accounting = reconcile(this.accounting, ctx.getContextUsage()?.tokens);
 	}
 	private reserve(text: string, imageCount = 0): void {
-		this.accounting = {
-			...this.accounting,
-			pendingTokens:
-				this.accounting.pendingTokens +
+		this.accounting = withTokens(
+			this.accounting,
+			this.accounting.tokens +
 				Math.ceil(text.length / 4) +
 				imageCount * (ESTIMATED_IMAGE_CHARS / 4),
-		};
+		);
 	}
 	result(text: string, images: readonly ImageLike[], display: PosthorseDisplay): TextResult {
 		this.reserve(text, images.length);
