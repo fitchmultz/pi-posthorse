@@ -8,7 +8,8 @@ import {
 	type GuidanceTools,
 } from "./budget.ts";
 import { isRecord, type EntryLike, type PolicyContext, type SnapshotReader } from "./contracts.ts";
-import { sessionEntry, sessionIdentity, toolFacts } from "./host.ts";
+import { createEpochCache, type EpochValue } from "./epoch-cache.ts";
+import { sessionEntry, toolFacts, type SessionHost, type SessionIdentity } from "./host.ts";
 
 export const WINDOW_GUIDANCE_TYPE = "posthorse-window-guidance";
 const guidanceRecordSchema = Type.Object({
@@ -25,11 +26,7 @@ type MemoryEpoch = {
 	readonly byBudget: Map<string, string>;
 	tools: GuidanceTools | undefined;
 };
-type EpochState = {
-	readonly manager: ExtensionContext["sessionManager"];
-	readonly sessionId: string;
-	readonly file: string | undefined;
-	readonly leaf: EntryLike | undefined;
+type GuidanceEpoch = {
 	readonly anchorKey: string;
 	readonly byBudget: ReadonlyMap<string, string>;
 	readonly tools: GuidanceTools | undefined;
@@ -98,11 +95,11 @@ function withMemoryEpoch(
 	return { byBudget: merged, tools: collected.tools ?? memory.tools };
 }
 function scanGuidanceEpoch(
-	manager: ExtensionContext["sessionManager"],
-	identity: { readonly sessionId: string; readonly leaf: EntryLike | undefined },
-	previous: EpochState | undefined,
+	manager: SessionHost,
+	identity: SessionIdentity,
+	previous: EpochValue<GuidanceEpoch> | undefined,
 	memoryByEpoch: ReadonlyMap<string, MemoryEpoch> | undefined,
-): Pick<EpochState, "anchorKey" | "byBudget" | "tools"> {
+): GuidanceEpoch {
 	const reversed: EntryLike[] = [];
 	let anchor: EntryLike | undefined;
 	for (
@@ -110,15 +107,15 @@ function scanGuidanceEpoch(
 		entry !== undefined;
 		entry = sessionEntry(manager, entry.parentId)
 	) {
-		if (previous !== undefined && previous.leaf === entry) {
+		if (previous !== undefined && previous.identity.leaf === entry) {
 			const collected = collectGuidanceEntries(
 				reversed.reverse(),
-				previous.byBudget,
-				previous.tools,
+				previous.value.byBudget,
+				previous.value.tools,
 			);
 			return {
-				anchorKey: previous.anchorKey,
-				...withMemoryEpoch(collected, memoryByEpoch?.get(previous.anchorKey)),
+				anchorKey: previous.value.anchorKey,
+				...withMemoryEpoch(collected, memoryByEpoch?.get(previous.value.anchorKey)),
 			};
 		}
 		if (startsFreshGuidanceEpoch(entry)) {
@@ -138,42 +135,25 @@ function scanGuidanceEpoch(
 	};
 }
 export function createWindowGuidance(pi: ExtensionAPI): WindowGuidance {
-	let state: EpochState | undefined;
 	let memoryByManager = new WeakMap<object, Map<string, MemoryEpoch>>();
-	const readEpoch = (ctx: ExtensionContext): EpochState => {
-		const manager = ctx.sessionManager;
-		const { sessionId, file, leaf } = sessionIdentity(manager);
-		const previous =
-			state?.manager === manager && state.sessionId === sessionId && state.file === file
-				? state
-				: undefined;
-		if (previous !== undefined && previous.leaf === leaf) {
-			return previous;
-		}
-		state = {
-			manager,
-			sessionId,
-			file,
-			leaf,
-			...scanGuidanceEpoch(
-				manager,
-				{ sessionId, leaf },
-				previous,
-				memoryByManager.get(manager),
-			),
-		};
-		return state;
-	};
+	const epochs = createEpochCache<GuidanceEpoch>((ctx, identity, previous) =>
+		scanGuidanceEpoch(
+			ctx.sessionManager,
+			identity,
+			previous,
+			memoryByManager.get(ctx.sessionManager),
+		),
+	);
 	return {
 		resolve(ctx, host) {
-			const epoch = readEpoch(ctx);
+			const epoch = epochs.read(ctx);
 			const key = budgetGuidanceKey(host);
 			return (
 				epoch.byBudget.get(key) ?? buildGuidance(host, epoch.tools ?? ALL_GUIDANCE_TOOLS)
 			);
 		},
 		deliver(ctx, host) {
-			const epoch = readEpoch(ctx);
+			const epoch = epochs.read(ctx);
 			const key = budgetGuidanceKey(host);
 			const existing = epoch.byBudget.get(key);
 			if (existing !== undefined) {
@@ -193,7 +173,7 @@ export function createWindowGuidance(pi: ExtensionAPI): WindowGuidance {
 			}
 			memory.byBudget.set(key, text);
 			memory.tools ??= tools;
-			state = undefined;
+			epochs.reset();
 			pi.appendEntry(WINDOW_GUIDANCE_TYPE, {
 				version: 1,
 				budgetKey: key,
@@ -203,7 +183,7 @@ export function createWindowGuidance(pi: ExtensionAPI): WindowGuidance {
 			return text;
 		},
 		reset() {
-			state = undefined;
+			epochs.reset();
 			memoryByManager = new WeakMap();
 		},
 	};
