@@ -2821,6 +2821,31 @@ for (const start of ["explicit", "automatic", "replaced owner", "omitted owner"]
 	});
 }
 
+await test("a short owner follow-up keeps the original request in the next automatic record", async (t) => {
+	const h = await fixture(t, {
+		extension(pi) {
+			registerDump(pi, false, [600_000, 350_000]);
+		},
+	});
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("dump", {})),
+		toolTurn(fauxToolCall("dump", {})),
+		fauxAssistantMessage("Stopped before the work was done."),
+	]);
+	await h.session.prompt("ORIGINAL_OWNER_INTENT: inspect without bash.");
+	assert.equal(boundaries(h).length, 2);
+	h.faux.setResponses([toolTurn(fauxToolCall("dump", {})), fauxAssistantMessage("Done.")]);
+	await h.session.prompt("Continue.");
+	const records = boundaries(h);
+	assert.equal(records.length, 3);
+	const last = requireValue(records.at(-1)).summary;
+	assert.match(
+		last,
+		/owner input; carried from an earlier window, possibly already handled; not current progress/,
+	);
+	assert.match(last, /ORIGINAL_OWNER_INTENT: inspect without bash/);
+});
+
 await test("fresh-window truncated answers keep native omit-and-retry recovery", async (t) => {
 	const intercepted: Pick<SessionBeforeCompactEvent, "reason" | "willRetry">[] = [];
 	const h = await fixture(t, {
