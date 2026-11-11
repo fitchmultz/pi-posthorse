@@ -1,5 +1,6 @@
-import { AUTO_HANDOFF_PREFIX, isRecord, type EntryLike, type ProjectedEntry } from "./contracts.ts";
-import { contextEdits, contextStart, windowHandoff } from "./history-entries.ts";
+import type { EntryLike, ProjectedEntry } from "./contracts.ts";
+import { chainsAncestry, contextStart } from "./boundary.ts";
+import { contextEdits } from "./history-entries.ts";
 import { toolCalls } from "./message-text.ts";
 import {
 	formatRecord,
@@ -88,24 +89,10 @@ function anchors(records: readonly RecoveryRecord[]): {
 		others: records.filter((record) => !selected.has(record)),
 	};
 }
-function automaticBoundary(entry: EntryLike | undefined): boolean {
-	if (
-		entry === undefined ||
-		windowHandoff(entry)?.trim().startsWith(AUTO_HANDOFF_PREFIX) !== true
-	) {
-		return false;
-	}
-	return (
-		entry.type === "context_window" ||
-		(isRecord(entry.details) &&
-			entry.details.posthorse === 1 &&
-			(entry.details.reason === "threshold" || entry.details.reason === "overflow"))
-	);
-}
 export function automaticChainStart(entries: readonly EntryLike[]): number {
 	let prefix = entries;
 	let window = contextStart(prefix);
-	while (automaticBoundary(window.boundary) && window.boundary !== undefined) {
+	while (chainsAncestry(window.boundary) && window.boundary !== undefined) {
 		prefix = prefix.slice(0, prefix.indexOf(window.boundary));
 		window = contextStart(prefix);
 	}
@@ -134,7 +121,7 @@ function* earlierWindows(entries: readonly EntryLike[]): Generator<{
 }> {
 	let prefix = entries;
 	let boundary = contextStart(prefix).boundary;
-	while (boundary !== undefined && automaticBoundary(boundary)) {
+	while (boundary !== undefined && chainsAncestry(boundary)) {
 		prefix = prefix.slice(0, prefix.indexOf(boundary));
 		const window = contextStart(prefix);
 		yield {
@@ -210,7 +197,7 @@ function recoveryAncestry(
 		reached = window.openedBy;
 	}
 	return {
-		checkpoint: automaticBoundary(reached) ? undefined : reached,
+		checkpoint: chainsAncestry(reached) ? undefined : reached,
 		carried,
 		skipped: skipped.map((boundary) => boundary.id?.slice(0, 120) ?? "unknown"),
 	};

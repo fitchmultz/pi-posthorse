@@ -8,7 +8,8 @@ import {
 	type ProjectedEntry,
 	type ReminderFingerprint,
 } from "./contracts.ts";
-import { contextEdits, contextStart, isWindow } from "./history-entries.ts";
+import { contextStart, isWindow } from "./boundary.ts";
+import { contextEdits } from "./history-entries.ts";
 import { createEpochCache, type EpochValue } from "./epoch-cache.ts";
 import { sessionBranch, sessionEntry, sessionProjection, type SessionHost } from "./host.ts";
 

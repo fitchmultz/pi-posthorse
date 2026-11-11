@@ -6,6 +6,7 @@ import type {
 	SessionBeforeCompactEvent,
 	TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
+import { activeBoundaryIndex } from "./boundary.ts";
 import { budgetFor, freshPayloadChars } from "./budget.ts";
 import {
 	isRecord,
@@ -221,9 +222,7 @@ function reportAutomaticFailure(ctx: ExtensionContext, error: unknown): void {
 	}
 }
 function freshWindowWithoutInput(projected: readonly ProjectedEntry[]): boolean {
-	const boundary = projected.findIndex(
-		(entry) => entry.sourceEntry.type === "compaction" && entry.messages.length > 0,
-	);
+	const boundary = activeBoundaryIndex(projected);
 	if (boundary < 0) {
 		return false;
 	}

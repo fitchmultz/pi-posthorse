@@ -1,5 +1,6 @@
 import { AUTO_HANDOFF_PREFIX, type EntryLike, type ProjectedEntry } from "./contracts.ts";
-import { contextEdits, contextStart, windowHandoff } from "./history-entries.ts";
+import { contextStart, windowHandoff } from "./boundary.ts";
+import { contextEdits } from "./history-entries.ts";
 import { boundedBlock, excerpt } from "./message-text.ts";
 import { automaticChainStart, recoveryInputs } from "./recovery-inputs.ts";
 import {
