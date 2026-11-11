@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isRecord, type EntryLike } from "./contracts.ts";
@@ -130,7 +130,7 @@ export async function resolveReference(
 			throw new Error(`Cyclic note provenance at ${directory}.`);
 		}
 		visited.add(directory);
-		if (existsSync(notePath(current, path))) {
+		if (statSync(notePath(current, path), { throwIfNoEntry: false })?.isFile() === true) {
 			return addressIn(current, path);
 		}
 		// A manifest includes later adoptions; the journal includes later writes and deletions.

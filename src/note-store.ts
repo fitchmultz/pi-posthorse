@@ -23,6 +23,7 @@ import {
 	sameOwner,
 	sameScope,
 	scopeDirectory,
+	scopeNoteRelative,
 	type NoteAddress,
 	type NoteBinding,
 	type NoteScope,
@@ -151,8 +152,8 @@ export class SessionNotes {
 			readonly signal?: AbortSignal | undefined;
 		} = {},
 	): Promise<NoteRead> {
-		const relative = noteRelative(path);
 		if (options.scope !== undefined) {
+			const relative = noteRelative(path);
 			const scope = await this.selectScope(options.scope);
 			return {
 				address: addressIn(scope, relative),
@@ -160,6 +161,7 @@ export class SessionNotes {
 				writable: sameScope(scope, this.binding),
 			};
 		}
+		const relative = scopeNoteRelative(this.binding, path);
 		const reference = this.owns(relative)
 			? undefined
 			: await this.#reference(relative, options.signal);

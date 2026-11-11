@@ -113,6 +113,36 @@ export function noteRelative(path: string): string {
 	}
 	return normalized;
 }
+function ancestorsOf(path: string): string[] {
+	const ancestors: string[] = [];
+	let current = dirname(path);
+	while (true) {
+		ancestors.push(current);
+		const parent = dirname(current);
+		if (parent === current) {
+			return ancestors.toReversed();
+		}
+		current = parent;
+	}
+}
+export function scopeNoteRelative(scope: NoteScope, path: string): string {
+	if (
+		path !== "" &&
+		isAbsolute(path) &&
+		!path.includes("\0") &&
+		!path.split(/[/\\]/u).includes("..")
+	) {
+		const targetDirectory = canonicalPath(scopeDirectory(scope));
+		const resolved = resolve(path);
+		const matched = ancestorsOf(resolved).find(
+			(ancestor) => canonicalPath(ancestor) === targetDirectory,
+		);
+		if (matched !== undefined) {
+			return noteRelative(relative(matched, resolved));
+		}
+	}
+	return noteRelative(path);
+}
 /** Resolve existing ancestors too, so aliases to files not created yet have one owner. */
 export function canonicalPath(path: string): string {
 	const absolute = isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`;

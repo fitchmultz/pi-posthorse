@@ -244,11 +244,24 @@ function notesCallKind(args: Readonly<Record<string, unknown>>): ContentTouchKin
 	return args.op === "read" ? "read" : undefined;
 }
 
+function preferredNotePath(
+	callTarget: NoteTarget | undefined,
+	resTarget: NoteTarget | undefined,
+): string | undefined {
+	if (callTarget === undefined) {
+		return resTarget?.notePath;
+	}
+	if (callTarget.absPath !== undefined && resTarget !== undefined) {
+		return resTarget.notePath;
+	}
+	return callTarget.notePath;
+}
+
 function mergeNoteTargets(
 	callTarget: NoteTarget | undefined,
 	resTarget: NoteTarget | undefined,
 ): NoteTarget | undefined {
-	const notePath = callTarget?.notePath ?? resTarget?.notePath;
+	const notePath = preferredNotePath(callTarget, resTarget);
 	return notePath === undefined
 		? undefined
 		: { notePath, absPath: resTarget?.absPath ?? callTarget?.absPath };

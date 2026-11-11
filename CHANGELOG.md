@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Accept an absolute path in `notes read` when it resolves inside the session's own notes directory (#175). Recovery records and provider summary blocks cite a note's absolute path, and passing that path to `notes read` failed with a relative-path error before a retry. Out-of-scope absolute paths, `scope`-qualified reads, and writes still require a relative path.
+
 ## 0.10.23 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->
