@@ -2,7 +2,22 @@
 
 ## Unreleased
 
+## 0.10.21 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+
 - Add a [controlled comparison](docs/controlled-comparison.md) of Posthorse and stock Pi compaction: 144 unattended two-hour coding sessions on two models, scored for tests passing, stops with work left, kept rules, wait time, and cost. The harness, the tables, and the stop labels are under `ARTIFACTS/controlled-comparison/` (#140).
+
+<!-- npm-release:unreleased:end -->
+
+- Wake the version workflow only for release events (#170) ([6618510](https://github.com/fitchmultz/pi-posthorse/commit/6618510e89a15dfbb88cda8ba9479a7b24712f48))
+
+### What's Changed
+
+- Wake the version workflow only for release events by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/170
+- docs: add controlled comparison with stock compaction by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/169
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.20...v0.10.21
 
 ## 0.10.20 - 2026-11-11
 
