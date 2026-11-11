@@ -9,19 +9,16 @@ import {
 	type ReminderFingerprint,
 } from "./contracts.ts";
 import { contextEdits, contextStart, isWindow } from "./history-entries.ts";
-import { sessionBranch, sessionEntry, sessionProjection } from "./host.ts";
+import { createEpochCache, type EpochValue } from "./epoch-cache.ts";
+import { sessionBranch, sessionEntry, sessionProjection, type SessionHost } from "./host.ts";
 
-type ReminderState = {
-	readonly manager: ExtensionContext["sessionManager"];
-	readonly sessionId: string;
-	readonly file: string | undefined;
-	readonly leaf: EntryLike | undefined;
+type ReminderFacts = {
 	readonly windowId: string;
 	readonly reminders: readonly EntryLike[];
 };
 export type ReminderLookup = {
 	readonly reset: () => void;
-	readonly read: (ctx: ExtensionContext) => ReminderState;
+	readonly read: (ctx: ExtensionContext) => ReminderFacts;
 };
 export type StaleReminderPredicate = (message: {
 	readonly role: string;
@@ -144,18 +141,22 @@ function advanceBoundary(entry: EntryLike, progress: ScanProgress): ScanProgress
 	return { boundary, window, kept };
 }
 function scanAncestry(
-	manager: ExtensionContext["sessionManager"],
+	manager: SessionHost,
 	leaf: EntryLike | undefined,
-	previous: ReminderState | undefined,
-): { readonly windowId: string; readonly reminders: readonly EntryLike[] } {
+	previous: EpochValue<ReminderFacts> | undefined,
+): ReminderFacts {
 	const reversed: EntryLike[] = [];
 	let progress: ScanProgress = { kept: false };
 	for (let entry = leaf; entry !== undefined; entry = sessionEntry(manager, entry.parentId)) {
 		// Entry identity, not a reusable id, certifies an append-only extension of this leaf.
-		if (progress.boundary === undefined && previous !== undefined && previous.leaf === entry) {
+		if (
+			progress.boundary === undefined &&
+			previous !== undefined &&
+			previous.identity.leaf === entry
+		) {
 			return {
-				windowId: previous.windowId,
-				reminders: [...previous.reminders, ...onlyReminders(reversed.reverse())],
+				windowId: previous.value.windowId,
+				reminders: [...previous.value.reminders, ...onlyReminders(reversed.reverse())],
 			};
 		}
 		reversed.push(entry);
@@ -171,29 +172,11 @@ function scanAncestry(
 		reminders: onlyReminders(entries.slice(contextStart(entries).start)),
 	};
 }
-/** This cache owns only leaf-certified branch facts; session/tree changes invalidate them. */
 export function createReminderLookup(): ReminderLookup {
-	let state: ReminderState | undefined;
-	return {
-		reset: () => {
-			state = undefined;
-		},
-		read: (ctx) => {
-			const manager = ctx.sessionManager;
-			const sessionId = manager.getSessionId();
-			const file = manager.getSessionFile();
-			const leaf = manager.getEntry(manager.getLeafId() ?? "");
-			const previous =
-				state?.manager === manager && state.sessionId === sessionId && state.file === file
-					? state
-					: undefined;
-			if (previous !== undefined && previous.leaf === leaf) {
-				return previous;
-			}
-			state = { manager, sessionId, file, leaf, ...scanAncestry(manager, leaf, previous) };
-			return state;
-		},
-	};
+	const cache = createEpochCache<ReminderFacts>((ctx, identity, previous) =>
+		scanAncestry(ctx.sessionManager, identity.leaf, previous),
+	);
+	return { reset: cache.reset, read: cache.read };
 }
 
 function retainedEntryIdSet(branch: readonly EntryLike[]): ReadonlySet<string> | undefined {
