@@ -1178,9 +1178,14 @@ await test("guidance uses request-local sections and preserves custom or forced 
 		"the hidden guidance follows every leading system message",
 	);
 
-	// The run settles: a later idle evaluation edits the leading system section instead of
-	// splicing a request-local message, and a turn boundary clears the options even when the
-	// host never fires the settle.
+	// Options belong to the run, not its turns: before_agent_start fires before turn_start.
+	requireValue(handlers.get("turn_start"))({}, context);
+	const continuing = {
+		messages: [{ role: "system", content: "Forced instructions", timestamp: 0 }],
+	};
+	requireValue(handlers.get("context_with_system"))(continuing, context);
+	assert.equal(continuing.messages.length, 2, "a continuing turn keeps forced guidance");
+
 	requireValue(handlers.get("agent_settled"))({}, context);
 	const settled = [
 		{ role: "system", content: "Forced instructions", sections: record({}), timestamp: 0 },
@@ -1189,18 +1194,6 @@ await test("guidance uses request-local sections and preserves custom or forced 
 	assert.equal(settled.length, 1, "a settled run clears the forced-prompt options");
 	assert.match(
 		stringValue(requireValue(settled[0]).sections.posthorse),
-		/Configured context capacity: 100,000 tokens/,
-	);
-
-	handler({ systemPromptOptions: forcedOptions }, context);
-	requireValue(handlers.get("turn_start"))({}, context);
-	const nextTurn = [
-		{ role: "system", content: "Forced instructions", sections: record({}), timestamp: 0 },
-	];
-	requireValue(handlers.get("context_with_system"))({ messages: nextTurn }, context);
-	assert.equal(nextTurn.length, 1, "a turn boundary clears the forced-prompt options");
-	assert.match(
-		stringValue(requireValue(nextTurn[0]).sections.posthorse),
 		/Configured context capacity: 100,000 tokens/,
 	);
 });

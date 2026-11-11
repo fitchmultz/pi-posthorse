@@ -221,11 +221,7 @@ export function registerGuidance(
 	pi.on("before_agent_start", (event) => {
 		promptOptions = event.systemPromptOptions;
 	});
-	pi.on("turn_start", () => {
-		// Prompt options belong to one run. A settle the host never fires must not leak them
-		// into a later turn's idle evaluation; every turn starts with a clean slate.
-		promptOptions = undefined;
-	});
+
 	pi.on("agent_settled", () => {
 		// Prompt options belong to one run, never to later idle context evaluation.
 		promptOptions = undefined;
