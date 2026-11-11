@@ -67,7 +67,7 @@ function reminderBudget(
 		return { kind: "skip", reason: "unknown-usage" };
 	}
 	const budget = budgetFor(host, usage.contextWindow);
-	if (budget === undefined || !budget.enabled || !budget.supported) {
+	if (budget === undefined || budget.state !== "enabled") {
 		return { kind: "skip", reason: "unavailable-budget" };
 	}
 	const buffer = Math.min(REMINDER_BUFFER_TOKENS, Math.floor(budget.usable * 0.1));

@@ -23,7 +23,7 @@ for (const scenario of scenarios) {
 			getContextUsage: () => ({ tokens: null, contextWindow: WINDOW, percent: null }),
 			getSystemPrompt: () => "Synthetic reserve arithmetic",
 		});
-		assert.equal(budget?.supported, true);
+		assert.equal(budget?.state, "enabled");
 		assert.equal(budget.usable, scenario.usable);
 		assert.equal(budget.rolloverAt, scenario.line);
 		assert.equal(shouldCompact(scenario.usable, WINDOW, settings), false);

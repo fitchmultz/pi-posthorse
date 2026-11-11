@@ -245,8 +245,7 @@ function reachedThreshold(host: PolicyContext): boolean {
 	const usage = host.getContextUsage();
 	const budget = budgetFor(host);
 	return (
-		budget?.supported === true &&
-		budget.enabled &&
+		budget?.state === "enabled" &&
 		usage !== undefined &&
 		usage.tokens !== null &&
 		usage.tokens >= budget.rolloverAt
@@ -344,7 +343,8 @@ function prepareAutomatic(
 		return { kind: "cancel" };
 	}
 	const host = capacity.policy(ctx, event.preparation.settings);
-	if (budgetFor(host)?.supported !== true) {
+	const budget = budgetFor(host);
+	if (budget === undefined || budget.state === "unsupported") {
 		return { kind: "delegate" };
 	}
 	const ownerQuestionRegistered = pi
