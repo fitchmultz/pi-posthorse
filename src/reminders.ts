@@ -9,6 +9,7 @@ import {
 	type ReminderFingerprint,
 } from "./contracts.ts";
 import { contextEdits, contextStart, isWindow } from "./history-entries.ts";
+import { sessionBranch, sessionEntry, sessionProjection } from "./host.ts";
 
 type ReminderState = {
 	readonly manager: ExtensionContext["sessionManager"];
@@ -142,12 +143,6 @@ function advanceBoundary(entry: EntryLike, progress: ScanProgress): ScanProgress
 			(boundary.type === "context_window" || entry.id === boundary.firstKeptEntryId));
 	return { boundary, window, kept };
 }
-function parentEntry(
-	manager: ExtensionContext["sessionManager"],
-	id: string | null | undefined,
-): EntryLike | undefined {
-	return id === undefined || id === null || id === "" ? undefined : manager.getEntry(id);
-}
 function scanAncestry(
 	manager: ExtensionContext["sessionManager"],
 	leaf: EntryLike | undefined,
@@ -155,7 +150,7 @@ function scanAncestry(
 ): { readonly windowId: string; readonly reminders: readonly EntryLike[] } {
 	const reversed: EntryLike[] = [];
 	let progress: ScanProgress = { kept: false };
-	for (let entry = leaf; entry !== undefined; entry = parentEntry(manager, entry.parentId)) {
+	for (let entry = leaf; entry !== undefined; entry = sessionEntry(manager, entry.parentId)) {
 		// Entry identity, not a reusable id, certifies an append-only extension of this leaf.
 		if (progress.boundary === undefined && previous !== undefined && previous.leaf === entry) {
 			return {
@@ -262,21 +257,14 @@ export function countRetainedMessages(
 	ctx: ExtensionContext,
 	stale: StaleReminderPredicate,
 ): number {
-	const manager: unknown = ctx.sessionManager;
-	const branch: readonly EntryLike[] =
-		isRecord(manager) && typeof manager.getBranch === "function"
-			? ctx.sessionManager.getBranch()
-			: [];
+	const branch = sessionBranch(ctx.sessionManager) ?? [];
 	const retainedIds = retainedEntryIdSet(branch);
 	if (retainedIds === undefined || retainedIds.size === 0) {
 		return 0;
 	}
-	if (isRecord(manager) && typeof manager.buildSessionProjection === "function") {
-		return countRetainedFromProjected(
-			ctx.sessionManager.buildSessionProjection().entries,
-			retainedIds,
-			stale,
-		);
+	const projection = sessionProjection(ctx.sessionManager);
+	if (projection !== undefined) {
+		return countRetainedFromProjected(projection, retainedIds, stale);
 	}
 	const edits = contextEdits(branch);
 	return branch.filter(

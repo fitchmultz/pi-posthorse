@@ -14,6 +14,7 @@ import { policySnapshot } from "./src/budget.ts";
 import type { CompactionPolicy, PolicyReader } from "./src/contracts.ts";
 import { createWindowGuidance } from "./src/guidance.ts";
 import { registerHistory } from "./src/history.ts";
+import { toolFacts } from "./src/host.ts";
 import { safeJsonStringify } from "./src/message-text.ts";
 import { registerNotes } from "./src/notes.ts";
 import { createNotesStore } from "./src/note-store.ts";
@@ -22,9 +23,8 @@ import { PageReservations } from "./src/paging.ts";
 import { registerRollover } from "./src/rollover.ts";
 
 function activeToolTokens(pi: ExtensionAPI): number {
-	const active = new Set(pi.getActiveTools());
-	return pi
-		.getAllTools()
+	const { active, tools } = toolFacts(pi);
+	return tools
 		.filter((tool) => active.has(tool.name))
 		.reduce(
 			(total, tool) =>

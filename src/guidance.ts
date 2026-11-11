@@ -8,6 +8,7 @@ import {
 	type GuidanceTools,
 } from "./budget.ts";
 import { isRecord, type EntryLike, type PolicyContext, type SnapshotReader } from "./contracts.ts";
+import { sessionEntry, sessionIdentity, toolFacts } from "./host.ts";
 
 export const WINDOW_GUIDANCE_TYPE = "posthorse-window-guidance";
 const guidanceRecordSchema = Type.Object({
@@ -40,17 +41,10 @@ export type WindowGuidance = {
 };
 
 export function activeGuidanceTools(pi: ExtensionAPI): GuidanceTools {
-	const active = new Set(pi.getActiveTools());
-	const unnamespaced = new Set(
-		pi
-			.getAllTools()
-			.filter((tool) => tool.namespace === undefined)
-			.map((tool) => tool.name),
-	);
+	const { activeUnnamespaced } = toolFacts(pi);
 	return {
-		newContext: active.has("new_context") && unnamespaced.has("new_context"),
-		getContextRemaining:
-			active.has("get_context_remaining") && unnamespaced.has("get_context_remaining"),
+		newContext: activeUnnamespaced.has("new_context"),
+		getContextRemaining: activeUnnamespaced.has("get_context_remaining"),
 	};
 }
 /**
@@ -65,32 +59,6 @@ function startsFreshGuidanceEpoch(entry: EntryLike): boolean {
 		entry.type === "compaction" &&
 		!(isRecord(entry.providerSummary) && isRecord(entry.providerSummary.block))
 	);
-}
-function parentEntry(
-	manager: ExtensionContext["sessionManager"],
-	id: string | null | undefined,
-): EntryLike | undefined {
-	const raw: unknown = manager;
-	if (id === undefined || id === null || id === "" || !isRecord(raw)) {
-		return undefined;
-	}
-	return typeof raw.getEntry === "function" ? manager.getEntry(id) : undefined;
-}
-function sessionIdentityOf(manager: ExtensionContext["sessionManager"]): {
-	readonly sessionId: string;
-	readonly file: string | undefined;
-	readonly leaf: EntryLike | undefined;
-} {
-	const raw: unknown = manager;
-	const sessionId =
-		isRecord(raw) && typeof raw.getSessionId === "function" ? manager.getSessionId() : "";
-	const file =
-		isRecord(raw) && typeof raw.getSessionFile === "function"
-			? manager.getSessionFile()
-			: undefined;
-	const leafId =
-		isRecord(raw) && typeof raw.getLeafId === "function" ? manager.getLeafId() : null;
-	return { sessionId, file, leaf: parentEntry(manager, leafId) };
 }
 function collectGuidanceEntries(
 	entries: readonly EntryLike[],
@@ -140,7 +108,7 @@ function scanGuidanceEpoch(
 	for (
 		let entry = identity.leaf;
 		entry !== undefined;
-		entry = parentEntry(manager, entry.parentId)
+		entry = sessionEntry(manager, entry.parentId)
 	) {
 		if (previous !== undefined && previous.leaf === entry) {
 			const collected = collectGuidanceEntries(
@@ -174,7 +142,7 @@ export function createWindowGuidance(pi: ExtensionAPI): WindowGuidance {
 	let memoryByManager = new WeakMap<object, Map<string, MemoryEpoch>>();
 	const readEpoch = (ctx: ExtensionContext): EpochState => {
 		const manager = ctx.sessionManager;
-		const { sessionId, file, leaf } = sessionIdentityOf(manager);
+		const { sessionId, file, leaf } = sessionIdentity(manager);
 		const previous =
 			state?.manager === manager && state.sessionId === sessionId && state.file === file
 				? state
