@@ -89,8 +89,11 @@ Another extension can undo the effect. Claude drops the retained reasoning again
 changes, removes or inserts a message before the recovery record. `pi-change-working-dir` 0.6.0
 does that: it inserts its directory update after the leading system messages.
 
-PENDING-REAL-CHECK-SENTENCE No test has measured whether the retained reasoning changes the
-quality of the work.
+A 20-minute session on `claude-fable-5-2` made two rollovers with a block. The first request after
+each rollover sent 4 and 3 retained reasoning blocks, and Claude dropped none. In two sessions on
+the same task without a block, the first requests after four rollovers sent 11 retained reasoning
+blocks, and Claude dropped all of them. No test has measured whether the retained reasoning changes
+the quality of the work.
 
 ## Available evidence is not guaranteed recall
 
