@@ -1,0 +1,3 @@
+# arm A: 96 own stops in 24 runs: remains 96 stops in 24 runs
+# arm B: 59 own stops in 24 runs: remains 59 stops in 24 runs
+# arm G: 92 own stops in 24 runs: remains 92 stops in 24 runs

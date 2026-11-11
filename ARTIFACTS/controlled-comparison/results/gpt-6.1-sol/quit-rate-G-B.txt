@@ -1,0 +1,14 @@
+                                                     stock + paragraph                 Posthorse
+Before the first boundary
+  sessions with agent time there                                    24                        24
+  agent hours                                                      7.5                       7.5
+  times the agent quit unfinished                                    0                         0
+  quits per agent hour                                            0.00                      0.00
+After the first boundary
+  sessions with agent time there                                    24                        24
+  agent hours                                                     27.8                      28.5
+  times the agent quit unfinished                                   20                        13
+  quits per agent hour                                            0.72                      0.46
+Minutes of work after a "Continue." until the next stop (median; count; of these ended by the agent unfinished)
+  sent before the first boundary                                     -                         -
+  sent after the first boundary                            5.0; 28; 12                0.9; 22; 9

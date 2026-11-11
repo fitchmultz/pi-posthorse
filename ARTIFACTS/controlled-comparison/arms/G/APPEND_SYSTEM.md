@@ -1,0 +1,1 @@
+Pi compacts context automatically, so the context window is not a deadline. Do not reduce scope, skip steps or verification, or write a final summary because compaction is near, and do not wait for the user to say "continue". Finish when the requested work and its verification are complete, or report a genuine blocker.

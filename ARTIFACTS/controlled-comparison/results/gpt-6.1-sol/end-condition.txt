@@ -1,0 +1,242 @@
+dulwich-A-r0                       FFFFFF    cannot cannot cannot
+    1 F - Finish only when suite passes or every remaining failure has an explanation why unfixable.
+    2 F Implement stripped Dulwich functions in `repo/dulwich` until `repo/tests` passes, or explain why every remaining failure is unfixable.
+    3 F Implement stripped Dulwich functions in `repo/dulwich` until `repo/tests` passes, or explain why every remaining failure is unfixable.
+    4 F Implement stripped Dulwich functions in `repo/dulwich` until `repo/tests` passes, or explain why every remaining failure is unfixable.
+    5 F Implement stripped Dulwich functions in `repo/dulwich` until `repo/tests` passes, or explain why every remaining failure is unfixable.
+    6 F Implement stripped Dulwich functions in `repo/dulwich` until `repo/tests` passes, or explain why every remaining failure is unfixable.
+dulwich-A-r1                       FFFFFF    remains cannot cannot
+    1 F - No questions/progress reports; finish only when all tests pass or each remaining failure has an unfixable explanation.
+    2 F - No questions or progress reports; finish only when all tests pass or every remaining failure has an unfixable explanation.
+    3 F - No questions or progress reports; finish only when all tests pass or remaining failures have unfixable explanations.
+    4 F - No questions or progress reports; finish only when all tests pass or remaining failures have unfixable explanations.
+    5 F - No questions or progress reports; finish only when all tests pass or remaining failures have unfixable explanations.
+    6 F - No questions or progress reports; finish only when all tests pass or remaining failures have unfixable explanations.
+dulwich-A-r2                       PPP       remains remains remains remains
+    1 P Implement stripped function/method bodies in the Python Dulwich library under `repo/dulwich` until the entire `repo/tests` suite passes, without questions or progress reports.
+    2 P Implement stripped function/method bodies in `repo/dulwich` until the entire `repo/tests` suite passes.
+    3 P Implement stripped function/method bodies in `repo/dulwich` until the entire `repo/tests` suite passes.
+dulwich-G-r0                       FFFF      cannot documented cannot cannot
+    1 F Implement the skeleton Python dulwich library under `repo/dulwich` so all tests in `repo/tests` pass. Use `bin/envrun` for the prepared environment; no network, installation, or copying implementations. Do not modify any test files; scratch
+    2 F Implement the skeleton library in `repo/dulwich` so all tests in `repo/tests` pass, or explain why every remaining failure cannot be fixed.
+    3 F Implement the skeleton library in `repo/dulwich` so all tests in `repo/tests` pass, or explain why every remaining failure cannot be fixed.
+    4 F Implement the skeleton library in `repo/dulwich` so all tests in `repo/tests` pass, or explain why every remaining failure cannot be fixed.
+dulwich-G-r1                       FFFFFF    cannot cannot
+    1 F - Continue without questions/progress reports until all tests pass or every remaining failure is explained as unfixable.
+    2 F Implement stripped Python dulwich library under `repo/dulwich` until all tests pass or remaining failures are explained as unfixable.
+    3 F Implement stripped Python dulwich library under `repo/dulwich` until all tests pass or remaining failures are explained as unfixable.
+    4 F Implement stripped Python dulwich library under `repo/dulwich` until all tests pass or remaining failures are explained as unfixable.
+    5 F Implement stripped Python dulwich library under `repo/dulwich` until all tests pass or remaining failures are explained as unfixable.
+    6 F Implement stripped Python dulwich library under `repo/dulwich` until all tests pass or remaining failures are explained as unfixable.
+dulwich-G-r2                       FFFFF     cannot documented
+    1 F Implement stripped function/method bodies in `repo/dulwich` so the full test suite passes. Use `bin/envrun` for the prepared Python environment (working directory becomes `repo/`); no network, installing Dulwich, or copying its implementati
+    2 F Implement stripped bodies and missing APIs in `repo/dulwich` until all tests pass or every remaining failure is explained as unfixable.
+    3 F Implement stripped bodies and missing APIs in `repo/dulwich` until all tests pass or every remaining failure is explained as unfixable.
+    4 F Implement stripped bodies and missing APIs in `repo/dulwich` until all tests pass or every remaining failure is explained as unfixable.
+    5 F Implement stripped bodies and missing APIs in `repo/dulwich` until all tests pass or every remaining failure is explained as unfixable.
+jinja-A-r0                         F         
+    1 F - Do not ask questions or report progress; finish when everything passes or explain why each remaining failure cannot be fixed.
+jinja-A-r1                         E         documented
+    1 E - Work without questions/progress reports until all tests pass or each remaining failure has an explanation.
+jinja-A-r2                         E         
+    1 E - Work autonomously until passing or each remaining failure has an explanation.
+jinja-G-r0                         F         
+    1 F - Finish only when all tests pass or each remaining failure has an explanation why it cannot be fixed.
+jinja-G-r1                         F         
+    1 F - Continue without questions or progress reports until passing, or explain why every remaining failure cannot be fixed.
+jinja-G-r2                         P         
+    1 P Implement the stripped Jinja Python library in `repo/src/jinja2` so all `repo/tests` pass. No questions/progress reports. Do not modify tests or copy/install library code. Use `bin/envrun COMMAND` for the prepared environment (Python 3.10).
+networkx-A-r0                      FFFF      
+    1 F - Work autonomously until passing or every remaining failure has an explanation why it cannot be fixed.
+    2 F Implement stripped function/method bodies throughout `repo/networkx` until tests pass, or all remaining failures have explanations why they cannot be fixed.
+    3 F Implement stripped function/method bodies throughout `repo/networkx` until tests pass, or all remaining failures have explanations why they cannot be fixed.
+    4 F Implement stripped function/method bodies throughout `repo/networkx` until tests pass, or explain why remaining failures cannot be fixed.
+networkx-A-r1                      FFFF      
+    1 F - Work autonomously until all tests pass or every remaining failure has an explanation why it cannot be fixed.
+    2 F Implement stripped bodies and missing helpers throughout `repo/networkx` until the entire test suite passes, or explain every remaining unfixable failure.
+    3 F Implement stripped bodies and missing helpers throughout `repo/networkx` until the entire test suite passes, or explain every remaining unfixable failure.
+    4 F Implement stripped bodies and missing helpers throughout `repo/networkx` until the entire test suite passes, or explain every remaining unfixable failure.
+networkx-A-r2                      FFFF      
+    1 F - Finish only when all tests pass or each remaining failure can be explained as unfixable.
+    2 F Implement the stripped NetworkX 3.3 library under `repo/networkx` until all tests pass, or every remaining failure is demonstrably unfixable.
+    3 F Implement the stripped NetworkX 3.3 library under `repo/networkx` until all tests pass, or every remaining failure is demonstrably unfixable.
+    4 F Implement the stripped NetworkX 3.3 library under `repo/networkx` until all tests pass, or every remaining failure is demonstrably unfixable.
+networkx-G-r0                      FFFF      
+    1 F - Do not ask questions or report progress. Finish only when all tests pass or each remaining failure can be explained as unfixable.
+    2 F Implement the stripped NetworkX 3.3 library in `repo/networkx` until tests pass, or remaining failures are demonstrably unfixable.
+    3 F Implement the stripped NetworkX 3.3 library in `repo/networkx` until tests pass, or remaining failures are demonstrably unfixable.
+    4 F Implement the stripped NetworkX 3.3 library in `repo/networkx` until tests pass, or remaining failures are demonstrably unfixable.
+networkx-G-r1                      FFFFF     
+    1 F - Finish only when all tests pass or each remaining failure has an unfixable explanation.
+    2 F Implement stripped NetworkX library under `repo/networkx` until all tests pass or every remaining failure has an unfixable explanation.
+    3 F Implement stripped NetworkX library under `repo/networkx` until all tests pass or every remaining failure has an unfixable explanation.
+    4 F Implement stripped NetworkX library under `repo/networkx` until all tests pass or every remaining failure has an unfixable explanation.
+    5 F Implement stripped NetworkX library under `repo/networkx` until all tests pass or every remaining failure has an unfixable explanation.
+networkx-G-r2                      FFFF      
+    1 F - Finish only when all tests pass or each remaining failure has an explanation why it cannot be fixed.
+    2 F Implement stripped function/method bodies in `repo/networkx` until the full test suite passes, or every remaining failure has an explanation why it cannot be fixed.
+    3 F Implement stripped function/method bodies in `repo/networkx` until the full test suite passes, or every remaining failure has an explanation why it cannot be fixed.
+    4 F Implement stripped function/method bodies in `repo/networkx` until the full test suite passes, or every remaining failure has an explanation why it cannot be fixed.
+pydantic-A-r0                      EEEEE     remains
+    1 E - Continue without questions/progress reports until all tests pass or explain every remaining failure.
+    2 E Implement the stripped Pydantic library under `repo/pydantic` until tests pass, or explain every remaining failure.
+    3 E Implement the stripped Pydantic library under `repo/pydantic` until tests pass, or explain every remaining failure.
+    4 E Implement the stripped Pydantic library under `repo/pydantic` until tests pass, or explain every remaining failure.
+    5 E Reconstruct the stripped Pydantic implementation under `repo/pydantic` until tests pass, or document every remaining failure.
+pydantic-A-r1                      FFFFFF    
+    1 F - Continue without questions/progress reports until all tests pass or every remaining failure can be explained as unfixable.
+    2 F - Continue without questions/progress reports until all tests pass or remaining failures are demonstrably unfixable.
+    3 F - Continue without questions/progress reports until all tests pass or remaining failures are demonstrably unfixable.
+    4 F - Continue without questions/progress reports until all tests pass or remaining failures are demonstrably unfixable.
+    5 F - Continue without questions/progress reports until all tests pass or remaining failures are demonstrably unfixable.
+    6 F - Continue without questions/progress reports until all tests pass or remaining failures are demonstrably unfixable.
+pydantic-A-r2                      FFFFFF    
+    1 F - Do not ask questions or report progress. Finish only when all tests pass or every remaining failure has an explanation why unfixable.
+    2 F - Do not ask questions or report progress. Finish only when all tests pass or every remaining failure is explained as unfixable.
+    3 F - Do not ask questions or report progress. Finish only when all tests pass or every remaining failure is explained as unfixable.
+    4 F - Do not ask questions or report progress. Finish only when all tests pass or every remaining failure is explained as unfixable.
+    5 F - Do not ask questions or report progress. Finish only when all tests pass or every remaining failure is explained as unfixable.
+    6 F - Do not ask questions or report progress. Finish only when all tests pass or every remaining failure is explained as unfixable.
+pydantic-G-r0                      FEEEEE    
+    1 F - Continue without questions/progress reports until all tests pass or explain why each remaining failure cannot be fixed.
+    2 E - Continue without questions/progress reports until all tests pass or explain remaining failures.
+    3 E - Continue without questions/progress reports until all tests pass or explain remaining failures.
+    4 E - Continue without questions/progress reports until all tests pass or explain remaining failures.
+    5 E - Continue without questions/progress reports until all tests pass or explain remaining failures.
+    6 E - Continue without questions/progress reports until all tests pass or explain remaining failures.
+pydantic-G-r1                      EEEEE     
+    1 E - Continue without questions/progress reports until all tests pass or each remaining failure is explained.
+    2 E Implement the stripped pydantic 2.8.2 library under `repo/pydantic` until all tests pass or every remaining failure is explained.
+    3 E Implement the stripped pydantic 2.8.2 library under `repo/pydantic` until all tests pass or every remaining failure is explained.
+    4 E Implement the stripped pydantic 2.8.2 library under `repo/pydantic` until all tests pass or every remaining failure is explained.
+    5 E Implement the stripped pydantic 2.8.2 library under `repo/pydantic` until all tests pass or every remaining failure is explained.
+pydantic-G-r2                      EEEEEE    documented documented
+    1 E - Continue without questions/progress reports until everything passes or every remaining failure has an explanation.
+    2 E Implement stripped functionality in `repo/pydantic` so tests pass, continuing until all pass or every remaining failure has an explanation.
+    3 E Implement stripped functionality in `repo/pydantic` so tests pass, continuing until all pass or every remaining failure has an explanation.
+    4 E Implement stripped functionality in `repo/pydantic`, continuing until all tests pass or every remaining failure has an explanation.
+    5 E Implement stripped functionality in `repo/pydantic`, continuing until all tests pass or every remaining failure has an explanation.
+    6 E Implement stripped functionality in `repo/pydantic`, continuing until all tests pass or every remaining failure has an explanation.
+pylint-A-r0                        FFFFF     
+    1 F - Continue without questions/progress reports until passing or explaining every unavoidable failure.
+    2 F - Continue without questions/progress reports until passing or explaining unavoidable failures.
+    3 F - Continue without questions/progress reports until passing or explaining unavoidable failures.
+    4 F - Continue without questions/progress reports until passing or explaining unavoidable failures.
+    5 F - Continue without questions/progress reports until passing or explaining unavoidable failures.
+pylint-A-r1                        FFFFFF    remains remains
+    1 F - Work autonomously until all tests pass or each remaining failure has an explanation why it cannot be fixed.
+    2 F Implement the stripped Python pylint library under `repo/pylint` so all tests pass, working autonomously until completion or explaining every remaining unfixable failure.
+    3 F Implement the stripped Python pylint library under `repo/pylint` so all tests pass, working autonomously until completion or explaining every remaining unfixable failure.
+    4 F Implement the stripped Python pylint library under `repo/pylint` so all tests pass, working autonomously until completion or explaining every remaining unfixable failure.
+    5 F Implement the stripped Python pylint library under `repo/pylint` until all tests pass, working autonomously or explaining every remaining unfixable failure.
+    6 F Restore the stripped Python pylint library under `repo/pylint` until all tests pass, working autonomously or explaining every remaining unfixable failure.
+pylint-A-r2                        EEEEE     remains documented documented documented
+    1 E - Continue without asking questions or reporting progress until all tests pass or each remaining failure has an explanation.
+    2 E Implement stripped function/method bodies in `repo/pylint` so existing tests pass, or explain every remaining failure.
+    3 E Implement stripped function/method bodies in `repo/pylint` so existing tests pass, or explain every remaining failure.
+    4 E Implement stripped function/method bodies in `repo/pylint` so existing tests pass, or explain every remaining failure.
+    5 E Implement stripped function/method bodies in `repo/pylint` so existing tests pass, or explain every remaining failure.
+pylint-G-r0                        EEEE      documented documented documented documented
+    1 E - Continue without questions or progress reports until all tests pass or every remaining failure has an explanation.
+    2 E Implement the stripped pylint library under `repo/pylint` until all tests pass or every remaining failure has an explanation.
+    3 E Implement the stripped pylint library under `repo/pylint` until all tests pass or every remaining failure has an explanation.
+    4 E Implement the stripped pylint library under `repo/pylint` until all tests pass or every remaining failure has an explanation.
+pylint-G-r1                        EEEEE     documented documented documented documented
+    1 E - Do not ask questions or give progress reports; finish only when passing or every remaining failure is explained.
+    2 E - No questions or progress reports; finish only when tests pass or every remaining failure is explained.
+    3 E - No questions or progress reports; finish only when tests pass or every remaining failure is explained.
+    4 E Implement the stripped pylint library in `repo/pylint` so all tests in `repo/tests` pass, or explain every remaining failure.
+    5 E Implement the stripped pylint library in `repo/pylint` so all tests in `repo/tests` pass, or explain every remaining failure.
+pylint-G-r2                        FFFFFF    
+    1 F - Do not ask questions or report progress. Finish only when all tests pass or every remaining failure has an unfixable explanation.
+    2 F Implement the stripped pylint library under `repo/pylint` until all tests pass or every remaining failure has an unfixable explanation.
+    3 F Implement the stripped pylint library under `repo/pylint` until all tests pass or every remaining failure has an unfixable explanation.
+    4 F Implement the stripped pylint library under `repo/pylint` until all tests pass or every remaining failure has an unfixable explanation.
+    5 F Implement the stripped pylint library under `repo/pylint` until all tests pass or every remaining failure has an unfixable explanation.
+    6 F Implement the stripped pylint library under `repo/pylint` until all tests pass or every remaining failure has an unfixable explanation.
+python-prompt-toolkit-A-r0         F         
+    1 F - Work autonomously until all pass or every remaining failure has an unfixable explanation.
+python-prompt-toolkit-A-r1         F         
+    1 F - Finish only when suite passes or every remaining failure has an explanation why unfixable.
+python-prompt-toolkit-A-r2         P         
+    1 P Implement the stripped Python `python-prompt-toolkit` library under `repo/src/prompt_toolkit` until its tests pass. Do not ask questions or report progress.
+python-prompt-toolkit-G-r0         F         
+    1 F - Do not ask questions or report progress; finish when passing or explain each unfixable failure.
+python-prompt-toolkit-G-r1         F         
+    1 F - Do not ask questions or report progress; finish when all tests pass or every remaining failure is explained as unfixable.
+python-prompt-toolkit-G-r2         E         
+    1 E - Work unattended until complete or every remaining failure has an explanation.
+sphinx-A-r0                        EEEEE     remains documented documented documented
+    1 E - Do not ask questions or report progress. Finish when all tests pass or each remaining failure has an explanation.
+    2 E Implement the stripped Sphinx library under `repo/sphinx` until tests pass, or every remaining failure has an explanation.
+    3 E Implement the stripped Sphinx library under `repo/sphinx` until tests pass, or every remaining failure has an explanation. The latter stopping condition has now been reached.
+    4 E Implement the stripped Sphinx library under `repo/sphinx` until tests pass, or every remaining failure has an explanation. After resuming implementation, the explanation-based stopping condition has again been reached.
+    5 E Implement the stripped Sphinx library under `repo/sphinx` until tests pass, or every remaining failure has an explanation. Following continued implementation, the explanation-based stopping condition is again satisfied.
+sphinx-A-r1                        FFFFF     remains remains
+    1 F - Finish only when all pass or each remaining failure has an explanation why it cannot be fixed.
+    2 F - Finish only when all tests pass or every remaining failure has an explanation why it cannot be fixed.
+    3 F - Finish only when all tests pass or every remaining failure has an explanation why it cannot be fixed.
+    4 F - Finish only when all tests pass or every remaining failure has an explanation why it cannot be fixed.
+    5 F - Finish only when all tests pass or every remaining failure has an explanation why it cannot be fixed.
+sphinx-A-r2                        FFFEE     remains remains
+    1 F - Continue without questions/progress reports until passing or explain why each remaining failure cannot be fixed.
+    2 F - Continue without questions/progress reports until passing, or explain why remaining failures cannot be fixed.
+    3 F - Continue without questions/progress reports until passing, or explain why remaining failures cannot be fixed.
+    4 E - Continue without questions/progress reports until passing or explain unresolved limitations.
+    5 E - Continue without questions/progress reports until passing or explain unresolved limitations.
+sphinx-G-r0                        FFFFFF    remains
+    1 F - Finish only when all tests pass or each remaining failure has an explanation why unfixable.
+    2 F Implement stripped functions/methods in `repo/sphinx` until the full test suite passes, or explain why each remaining failure is unfixable.
+    3 F Implement stripped functions/methods in `repo/sphinx` until the full test suite passes, or explain why each remaining failure is unfixable.
+    4 F Implement stripped functions/methods in `repo/sphinx` until the full test suite passes, or explain why each remaining failure is unfixable.
+    5 F Implement stripped functions/methods in `repo/sphinx` until the full test suite passes, or explain why each remaining failure is unfixable.
+    6 F Implement stripped functions/methods in `repo/sphinx` until the full test suite passes, or explain why each remaining failure is unfixable.
+sphinx-G-r1                        EEEEE     cannot
+    1 E - Work autonomously until everything passes or each remaining failure has an explanation.
+    2 E Implement the stripped Sphinx library under `repo/sphinx` until all `repo/tests` pass, or every remaining failure has an explanation.
+    3 E Implement the stripped Sphinx library under `repo/sphinx` until all `repo/tests` pass, or every remaining failure has an explanation.
+    4 E Restore the heavily stripped Sphinx implementation under `repo/sphinx` until all `repo/tests` pass, or every remaining failure has an explanation. The user requested continued implementation.
+    5 E Restore the heavily stripped Sphinx implementation under `repo/sphinx` until all `repo/tests` pass, or every remaining failure has an explanation. Continue implementation autonomously.
+sphinx-G-r2                        FFFFFF    
+    1 F - Finish only when all tests pass or every remaining failure has an explanation why it cannot be fixed.
+    2 F Implement the stripped Sphinx library under `repo/sphinx` until all tests pass, or explain why every remaining failure cannot be fixed.
+    3 F Implement the stripped Sphinx library under `repo/sphinx` until all tests pass, or explain why every remaining failure cannot be fixed.
+    4 F Implement the stripped Sphinx library under `repo/sphinx` until all tests pass, or explain why every remaining failure cannot be fixed.
+    5 F Implement the stripped Sphinx library under `repo/sphinx` until all tests pass, or explain why every remaining failure cannot be fixed.
+    6 F Implement the stripped Sphinx library under `repo/sphinx` until all tests pass, or explain why every remaining failure cannot be fixed.
+tornado-A-r0                       PPPP      
+    1 P Implement stripped Tornado library functions under `repo/tornado` until its tests pass. User is away: do not ask questions or report progress.
+    2 P Implement stripped Tornado functions in `repo/tornado` until tests pass, independently without copying library source.
+    3 P Implement stripped Tornado functions in `repo/tornado` until tests pass, independently without copying library source.
+    4 P Implement stripped Tornado functions in `repo/tornado` independently, without copying library source, until tests pass. **Completed: official suite passes.**
+tornado-A-r1                       FFFF      
+    1 F Implement stripped Python Tornado library under `repo/tornado` until its whole test suite passes, or explain why each remaining failure cannot be fixed.
+    2 F Implement the stripped Tornado library in `repo/tornado` until the whole test suite passes, or explain why every remaining failure cannot be fixed.
+    3 F Implement the stripped Tornado library in `repo/tornado` until the whole test suite passes, or explain why every remaining failure cannot be fixed.
+    4 F Implement the stripped Tornado library in `repo/tornado` until the whole test suite passes, or explain why every remaining failure cannot be fixed.
+tornado-A-r2                       FFFF      
+    1 F - Do not ask questions or report progress; continue until passing or every remaining failure is explained as unfixable.
+    2 F Implement the stripped Tornado library under `repo/tornado` until tests under `repo/tornado/test` pass, or explain every remaining failure as unfixable.
+    3 F Implement the stripped Tornado library under `repo/tornado` until tests under `repo/tornado/test` pass, or explain every remaining failure as unfixable.
+    4 F Implement the stripped Tornado library under `repo/tornado` until tests under `repo/tornado/test` pass, or explain every remaining failure as unfixable.
+tornado-G-r0                       FFF       
+    1 F Implement the stripped Python Tornado library under `repo/tornado` so its tests pass. Use `bin/envrun COMMAND` for the prepared environment (working directory becomes `repo/`); no network or copying/installing Tornado. Do not modify tests; 
+    2 F - Do not ask questions or report progress; finish only when all tests pass or explain why remaining failures cannot be fixed.
+    3 F - Do not ask questions or report progress; finish only when all tests pass or explain why remaining failures cannot be fixed.
+tornado-G-r1                       FFF       
+    1 F - Do not ask questions or report progress. Finish only when all tests pass or each remaining failure has an explanation why unfixable.
+    2 F Implement the stripped Tornado library under `repo/tornado` until all tests pass, or explain why each remaining failure is unfixable.
+    3 F Implement the stripped Tornado library under `repo/tornado` until all tests pass, or explain why each remaining failure is unfixable.
+tornado-G-r2                       FFFF      
+    1 F - Finish only when all tests pass or every remaining failure has an unfixable explanation.
+    2 F Implement the stripped Tornado library in `repo/tornado` until all tests pass or every remaining failure has an unfixable explanation.
+    3 F Implement the stripped Tornado library in `repo/tornado` until all tests pass or every remaining failure has an unfixable explanation.
+    4 F Implement the stripped Tornado library in `repo/tornado` until all tests pass or every remaining failure has an unfixable explanation.
+# arm A: first summary F: 16 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm A: first summary E: 5 runs; with a stop labelled documented: 3 runs, 7 stops
+# arm A: first summary P: 3 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm A: first summary -: 0 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm G: first summary F: 17 runs; with a stop labelled documented: 2 runs, 2 stops
+# arm G: first summary E: 6 runs; with a stop labelled documented: 3 runs, 10 stops
+# arm G: first summary P: 1 runs; with a stop labelled documented: 0 runs, 0 stops
+# arm G: first summary -: 0 runs; with a stop labelled documented: 0 runs, 0 stops

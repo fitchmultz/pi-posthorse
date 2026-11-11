@@ -1,0 +1,16 @@
+c001	cannot	Remaining failures require repairing prohibited test files or supplying an external Swift service
+c002	documented	Every remaining failure is documented
+c003	documented	Every remaining failure is explained
+c004	documented	all remaining blockers documented
+c005	cannot	remaining failures are blocked by stripped test fixtures or missing Swift configuration
+c006	cannot	Remaining failures are blocked by stripped/missing test helpers or unavailable Swift configuration/service
+c007	documented	All 123 failures/errors explained
+c008	documented	Every remaining failure is documented
+c009	documented	All remaining failures are individually documented
+c010	documented	Remaining failures are documented individually
+c011	cannot	Further test fixes are blocked by the existing constraints
+c012	documented	Remaining failures are documented individually
+c013	cannot	337 failures from prohibited, empty test helpers
+c014	documented	Remaining blockers are unchanged and documented
+c015	cannot	No further fixes are possible without modifying prohibited test infrastructure
+c016	cannot	most are blocked by missing application/build infrastructure

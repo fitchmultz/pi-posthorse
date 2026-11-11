@@ -1,0 +1,67 @@
+dulwich-A-r0	0	cannot	min 99	1104 of 1522	boundaries before 5	Stripped immutable test helpers
+dulwich-A-r0	1	cannot	min 109	1104 of 1522	boundaries before 5	blocked by immutable test defects or missing Swift configuration
+dulwich-A-r0	2	cannot	min 120	1104 of 1522	boundaries before 6	from unchanged test defects or missing Swift prerequisites
+dulwich-A-r1	0	remains	min 30	480 of 1522	boundaries before 1	other library implementations also remain unfinished
+dulwich-A-r1	1	cannot	min 118	1450 of 1522	boundaries before 6	requiring external OpenStack Swift configuration
+dulwich-A-r1	2	cannot	min 121	1450 of 1522	boundaries before 6	9 externally blocked failures
+dulwich-A-r2	0	remains	min 29	360 of 1522	boundaries before 1	Incomplete
+dulwich-A-r2	1	remains	min 45	552 of 1522	boundaries before 2	Suite remains incomplete
+dulwich-A-r2	2	remains	min 55	687 of 1522	boundaries before 2	687 passed, 753 failed, 21 errors
+dulwich-A-r2	3	remains	min 67	757 of 1522	boundaries before 3	757 passed, 683 failed, 21 errors
+dulwich-B-r0	0	cannot	min 80	1104 of 1522	boundaries before 4	cannot be changed under your rules
+dulwich-B-r0	1	cannot	min 86	1104 of 1522	boundaries before 5	stripped test infrastructure and unavailable Swift service configuration
+dulwich-B-r0	2	documented	min 90	1104 of 1522	boundaries before 5	unchanged blockers, individually documented
+dulwich-B-r0	3	documented	min 96	1104 of 1522	boundaries before 5	Remaining blockers are documented individually
+dulwich-B-r1	0	cannot	min 84	1437 of 1522	boundaries before 5	Repair requires changing a prohibited test file
+dulwich-B-r1	1	cannot	min 85	1437 of 1522	boundaries before 5	No further compliant fix is available for these failures
+dulwich-B-r1	2	cannot	min 88	1437 of 1522	boundaries before 5	Further fixes require changing the no-test-edits constraint or supplying Swift infrastructure
+dulwich-B-r1	3	cannot	min 89	1437 of 1522	boundaries before 5	blocked by the original constraints
+dulwich-B-r2	0	cannot	min 92	1101 of 1522	boundaries before 4	require restoring prohibited test fixtures/teardown or supplying an external Swift service
+dulwich-B-r2	1	cannot	min 94	1101 of 1522	boundaries before 4	Fixing the test helpers would violate your no-test-edits rule
+dulwich-B-r2	2	cannot	min 100	1101 of 1522	boundaries before 4	all attributable to prohibited test-helper repairs or unavailable Swift infrastructure
+dulwich-B-r2	3	documented	min 106	1101 of 1522	boundaries before 4	Every remaining blocker is documented
+dulwich-G-r0	0	cannot	min 103	1103 of 1522	boundaries before 4	337 failures from prohibited, empty test helpers
+dulwich-G-r0	1	documented	min 108	1103 of 1522	boundaries before 4	Remaining blockers are unchanged and documented
+dulwich-G-r0	2	cannot	min 109	1103 of 1522	boundaries before 4	Further test fixes are blocked by the existing constraints
+dulwich-G-r0	3	cannot	min 111	1103 of 1522	boundaries before 4	No further fixes are possible without modifying prohibited test infrastructure
+dulwich-G-r1	0	cannot	min 110	1104 of 1522	boundaries before 5	Remaining failures require repairing prohibited test files or supplying an external Swift service
+dulwich-G-r1	1	cannot	min 118	1104 of 1522	boundaries before 5	remaining failures are blocked by stripped test fixtures or missing Swift configuration
+dulwich-G-r2	0	cannot	min 100	1104 of 1522	boundaries before 4	Remaining failures are blocked by stripped/missing test helpers or unavailable Swift configuration/service
+dulwich-G-r2	1	documented	min 111	1104 of 1522	boundaries before 5	all remaining blockers documented
+jinja-A-r1	0	documented	min 27	847 of 851	boundaries before 1	These fail because the compiler serializes ASTs for interpretation
+pydantic-A-r0	0	remains	min 69	4569 of 5091	boundaries before 2	The implementation remains incomplete
+pydantic-G-r2	0	documented	min 45	4042 of 5091	boundaries before 1	Remaining failures are documented individually
+pydantic-G-r2	1	documented	min 111	4897 of 5091	boundaries before 5	Every remaining failure is explained
+pylint-A-r1	0	remains	min 38	615 of 1868	boundaries before 2	substantial implementation remains
+pylint-A-r1	1	remains	min 109	1197 of 1868	boundaries before 6	Remaining failures still require implementation work
+pylint-A-r1-probe (not a main run)	0	remains	min 79	1078 of 1868	boundaries before 4	The suite is not yet passing
+pylint-A-r2	0	remains	min 31	530 of 1868	boundaries before 1	Partial implementation
+pylint-A-r2	1	documented	min 63	873 of 1868	boundaries before 2	remaining failures/errors are documented
+pylint-A-r2	2	documented	min 97	1013 of 1868	boundaries before 4	Every remaining failure is documented
+pylint-A-r2	3	documented	min 114	1098 of 1868	boundaries before 5	Every remaining failure is documented
+pylint-A-r2-probe (not a main run)	0	remains	min 62	738 of 1868	boundaries before 3	The task remains incomplete
+pylint-G-r0	0	documented	min 28	478 of 1868	boundaries before 1	Every remaining failure/error is documented in `scratch/remaining-failures.md`
+pylint-G-r0	1	documented	min 40	609 of 1868	boundaries before 2	All remaining failures are explained in `scratch/remaining-failures.md`
+pylint-G-r0	2	documented	min 48	681 of 1868	boundaries before 2	Remaining failures are explained in `scratch/remaining-failures.md`
+pylint-G-r0	3	documented	min 68	780 of 1868	boundaries before 4	All 123 failures/errors explained
+pylint-G-r1	0	documented	min 63	938 of 1868	boundaries before 3	Remaining failures are documented individually
+pylint-G-r1	1	documented	min 74	977 of 1868	boundaries before 4	All remaining failures are individually documented
+pylint-G-r1	2	documented	min 87	1039 of 1868	boundaries before 4	Every remaining failure is documented
+pylint-G-r1	3	documented	min 99	1089 of 1868	boundaries before 5	Every remaining failure is documented
+sphinx-A-r0	0	remains	min 35	360 of 2187	boundaries before 2	Main blocker: missing application bootstrap methods
+sphinx-A-r0	1	documented	min 65	455 of 2187	boundaries before 3	All remaining failures/errors are explained
+sphinx-A-r0	2	documented	min 86	615 of 2187	boundaries before 4	All 1205 remaining failures/errors are explained in `scratch/remaining-failures.md`
+sphinx-A-r0	3	documented	min 110	792 of 2187	boundaries before 5	all explained in `scratch/remaining-failures.md`
+sphinx-A-r0 VOID	0	remains	min 29	350 of 2187	boundaries before 1	missing application initialization APIs
+sphinx-A-r0 VOID	1	remains	min 54	439 of 2187	boundaries before 3	Core directives and domain APIs remain major blockers
+sphinx-A-r0 VOID	2	remains	min 102	892 of 2187	boundaries before 5	unfinished builders/transforms
+sphinx-A-r1	0	remains	min 21	256 of 2187	boundaries before 0	Remaining failures still require implementation
+sphinx-A-r1	1	remains	min 46	396 of 2187	boundaries before 2	Work remains incomplete
+sphinx-A-r1-probe (not a main run)	0	remains	min 94	806 of 2187	boundaries before 4	The suite is not yet passing
+sphinx-A-r1-probe (not a main run)	1	remains	min 127	923 of 2187	boundaries before 5	The suite is still not passing
+sphinx-A-r2	0	remains	min 43	547 of 2187	boundaries before 2	I could not finish that reconstruction in this run
+sphinx-A-r2	1	remains	min 97	1060 of 2187	boundaries before 4	Full suite remains incomplete
+sphinx-A-r2-probe (not a main run)	0	remains	min 32	363 of 2187	boundaries before 1	the suite remains incomplete
+sphinx-B-r0	0	remains	min 46	392 of 2187	boundaries before 2	these are not established as unfixable
+sphinx-G-r0	0	remains	min 36	393 of 2187	boundaries before 2	Incomplete: stripped application, builder, and writer implementations still block integration tests
+sphinx-G-r1	0	cannot	min 33	357 of 2187	boundaries before 1	most are blocked by missing application/build infrastructure

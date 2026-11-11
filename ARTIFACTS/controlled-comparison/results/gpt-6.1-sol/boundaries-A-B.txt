@@ -1,0 +1,23 @@
+                                                         stock       Posthorse
+Boundaries                                                  93              99
+Seconds blocked per boundary, median                      52.0             0.0
+Seconds blocked per boundary, mean                        50.7             0.0
+Seconds blocked, largest                                  84.1             0.1
+Hours blocked, all runs                                   1.31            0.00
+Context before a boundary, median                      112,067         112,057
+Context after a boundary, median                        25,977          23,717
+Summary request cost per boundary, mean              0.131 USD       0.000 USD
+Summary request input tokens, mean                      53,499               0
+Summary request output tokens, mean                      2,374               0
+File reads in the 10 replies after, mean                  4.27            3.75
+  of files already seen (after)                           2.88            2.64
+  of files already seen (10 replies before)               2.25            1.62
+Tests gained in the 10 min after, mean                   365.9           414.4
+Replies that only updated notes, per run                   0.0             9.3
+  their share of the run's cost                           0.0%            4.2%
+Notes tool calls per run                                   0.0             9.3
+History tool calls per run                                 0.0             0.6
+
+Seconds blocked by position of the boundary in its session (mean, count):
+  stock: #1 27 s (n=24), #2 46 s (n=18), #3 57 s (n=18), #4 65 s (n=17), #5 69 s (n=11), #6 70 s (n=5)
+  Posthorse: #1 0 s (n=24), #2 0 s (n=18), #3 0 s (n=18), #4 0 s (n=15), #5 0 s (n=13), #6 0 s (n=9), #7 0 s (n=2)
