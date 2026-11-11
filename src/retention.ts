@@ -60,10 +60,17 @@ function safeStart(entry: ProjectionEntry): boolean {
 		visibleMessages(entry).some((message) => CUT_ROLES.has(message.role))
 	);
 }
-/** A provider summary block stands for the request that produced the tail's first message. */
+/**
+ * A provider summary block stands for the request that produced the tail's first message, so
+ * that message must be a reply the provider completed.
+ */
 function assistantStart(entry: ProjectionEntry): boolean {
+	const [first] = visibleMessages(entry);
 	return (
-		entry.sourceEntry.type !== "compaction" && visibleMessages(entry)[0]?.role === "assistant"
+		entry.sourceEntry.type !== "compaction" &&
+		first?.role === "assistant" &&
+		first.stopReason !== "error" &&
+		first.stopReason !== "aborted"
 	);
 }
 function nativeMessage(
