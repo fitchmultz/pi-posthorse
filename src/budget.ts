@@ -155,20 +155,29 @@ function guidanceTokenCount(guidance: string): number {
 export function guidanceTokens(ctx: PolicyContext): number {
 	return guidanceTokenCount(guidanceFor(ctx));
 }
+/**
+ * Which guidance the reservation subtracts: the text rebuilt for the next request, or the host's
+ * effective text that is already in the prompt.
+ */
+export type GuidanceReservation = "rebuild" | "effective";
 /** Half the fresh capacity after prompt/tool/input overhead remains for continued work. */
 export function freshPayloadChars(
 	ctx: PolicyContext,
 	toolTokens: number,
-	pendingMessages: readonly MessageLike[] = [],
-	cap = MAX_HANDOFF_CHARS,
+	options: {
+		readonly pendingMessages?: readonly MessageLike[] | undefined;
+		readonly cap?: number | undefined;
+		readonly guidance?: GuidanceReservation | undefined;
+	} = {},
 ): number {
+	const { pendingMessages = [], cap = MAX_HANDOFF_CHARS, guidance = "rebuild" } = options;
 	const budget = budgetFor(ctx);
 	if (budget === undefined) {
 		return cap;
 	}
 	const line = budget.state === "enabled" ? budget.rolloverAt : budget.contextWindow;
 	const reservedGuidance =
-		cap === MAX_HANDOFF_CHARS ? guidanceTokenCount(buildGuidance(ctx)) : guidanceTokens(ctx);
+		guidance === "rebuild" ? guidanceTokenCount(buildGuidance(ctx)) : guidanceTokens(ctx);
 	const promptTokens = Math.ceil(ctx.getSystemPrompt().length / 4) + reservedGuidance;
 	const pendingTokens = pendingMessages.reduce(
 		(total, message) =>
@@ -188,7 +197,11 @@ export function freshPayloadChars(
 export function pageCapacity(ctx: PolicyContext, toolTokens: () => number): number {
 	const usage = ctx.getContextUsage();
 	if (usage === undefined || usage.tokens === null) {
-		return freshPayloadChars(ctx, toolTokens(), [], MAX_PAGE_CHARS) / 4 + PAGE_MARGIN_TOKENS;
+		return (
+			freshPayloadChars(ctx, toolTokens(), { cap: MAX_PAGE_CHARS, guidance: "effective" }) /
+				4 +
+			PAGE_MARGIN_TOKENS
+		);
 	}
 	const budget = budgetFor(ctx, usage.contextWindow);
 	const line = budget?.state === "enabled" ? budget.rolloverAt : usage.contextWindow;

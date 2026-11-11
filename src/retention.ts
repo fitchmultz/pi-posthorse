@@ -218,12 +218,11 @@ export function automaticRecovery(
 			readonly providerSummary?: ProviderSummaryRequest | undefined;
 	  }
 	| undefined {
-	const payload = freshPayloadChars(
-		capacity.host,
-		capacity.toolTokens,
-		capacity.pendingMessages,
-		Number.MAX_SAFE_INTEGER,
-	);
+	const payload = freshPayloadChars(capacity.host, capacity.toolTokens, {
+		pendingMessages: capacity.pendingMessages,
+		cap: Number.MAX_SAFE_INTEGER,
+		guidance: "effective",
+	});
 	const limit = Math.min(MAX_HANDOFF_CHARS, payload);
 	if (limit < MIN_PAGE_CHARS) {
 		return undefined;

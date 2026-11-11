@@ -11,6 +11,7 @@ import { Type } from "typebox";
 import { toolCards } from "../ui.ts";
 import {
 	MAX_PAGE_CHARS,
+	presentText,
 	requireValue,
 	textResult,
 	type PolicyContext,
@@ -54,7 +55,7 @@ async function listNotes(
 	access: NotesAccess,
 ): Promise<TextResult> {
 	const { host, pages, signal } = access;
-	const folder = params.path;
+	const folder = presentText(params.path);
 	const [inventory, selectedScope] = await Promise.all([
 		access.discovery.list(session, {
 			path: folder,
@@ -82,7 +83,7 @@ async function listNotes(
 		rows,
 		offset: params.offset ?? 0,
 		kind: "notes-list",
-		empty: folder === undefined || folder === "" ? "(no notes yet)" : `(no notes in ${folder})`,
+		empty: folder === undefined ? "(no notes yet)" : `(no notes in ${folder})`,
 		header: `Notes directory: ${dir}\n`,
 	});
 }
@@ -288,10 +289,9 @@ async function searchNotes(
 		header: hits.skipped > 0 ? `[Not searched: ${skipped} over 1 MiB.]\n` : "",
 	});
 }
-/** Some models send every optional argument; an empty scope means no scope. */
 function withoutEmptyScope(params: NotesParams): NotesParams {
 	const { scope, ...unscoped } = params;
-	return scope === "" ? unscoped : params;
+	return presentText(scope) === undefined ? unscoped : params;
 }
 const notesParameters = Type.Object({
 	op: Type.Union(

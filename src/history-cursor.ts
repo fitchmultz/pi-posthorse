@@ -1,4 +1,4 @@
-import { unknownArray } from "./contracts.ts";
+import { presentText, unknownArray } from "./contracts.ts";
 
 /** Where a search page stopped: the anchor entry, its rank, its offset, and the search it belongs to. */
 export type HistoryCursor = readonly [id: string, priority: 0 | 1, offset: number, key: string];
@@ -26,10 +26,11 @@ function cursorOffset(value: unknown, storedKey: unknown, key: string): number {
 }
 /** A cursor is anonymous unless it decodes to the same query and scope that produced it. */
 export function decodeCursor(encoded: string | undefined, key: string): HistoryCursor | undefined {
-	if (encoded === undefined || encoded === "") {
+	const cursor = presentText(encoded);
+	if (cursor === undefined) {
 		return undefined;
 	}
-	const value: unknown = JSON.parse(Buffer.from(encoded, "base64url").toString());
+	const value: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString());
 	const parts = unknownArray(value);
 	if (parts === undefined || parts.length !== 4) {
 		throw new Error("Invalid cursor tuple.");

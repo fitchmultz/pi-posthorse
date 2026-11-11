@@ -118,6 +118,10 @@ export function unknownArray(value: unknown): readonly unknown[] | undefined {
 export function optionalString(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
+/** Some models send every optional argument; an empty string means the argument was omitted. */
+export function presentText(value: unknown): string | undefined {
+	return typeof value === "string" && value !== "" ? value : undefined;
+}
 export function requireValue(value: string | undefined, name: string, op: string): string {
 	if (value === undefined || value === "") {
 		throw new Error(`"${name}" is required for op "${op}".`);

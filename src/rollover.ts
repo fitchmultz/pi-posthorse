@@ -405,7 +405,9 @@ export function registerRollover(
 		}
 		if (reset.kind === "reset") {
 			return explicitReset(event, ctx, reset.handoff, () =>
-				freshPayloadChars(host, activeToolTokens(), event.context.pendingMessages),
+				freshPayloadChars(host, activeToolTokens(), {
+					pendingMessages: event.context.pendingMessages,
+				}),
 			);
 		}
 		const fallback = thresholdFallback(pi, event, ctx, {
