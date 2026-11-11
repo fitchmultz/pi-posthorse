@@ -12,10 +12,7 @@ import {
 } from "./contracts.ts";
 
 function rolloverStatus(budget: Budget | undefined): "disabled" | "enabled" | "unsupported" {
-	if (budget?.enabled !== true) {
-		return "disabled";
-	}
-	return budget.supported ? "enabled" : "unsupported";
+	return budget?.state ?? "disabled";
 }
 function contextReport(host: PolicyContext, newContextAvailable: boolean): TextResult {
 	const usage = host.getContextUsage();
@@ -34,14 +31,14 @@ function contextReport(host: PolicyContext, newContextAvailable: boolean): TextR
 		rolloverAt: budget?.rolloverAt,
 	};
 	const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate.`;
-	if (budget?.enabled !== true) {
+	if (budget === undefined || budget.state === "disabled") {
 		return textResult(
 			`Automatic rollover is disabled in the available settings (Pi compaction.enabled=false). ${configured}`,
 			[],
 			display,
 		);
 	}
-	if (!budget.supported) {
+	if (budget.state === "unsupported") {
 		return textResult(
 			`${unsupportedMessage(budget, newContextAvailable)} ${configured}`,
 			[],

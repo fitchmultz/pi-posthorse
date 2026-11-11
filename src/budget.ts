@@ -24,11 +24,18 @@ export const ALL_GUIDANCE_TOOLS: GuidanceTools = {
 export type Budget = {
 	readonly contextWindow: number;
 	readonly reserveTokens: number;
-	readonly enabled: boolean;
+	/** One classification of how Posthorse may use this capacity. */
+	readonly state: BudgetState;
 	readonly usable: number;
 	readonly rolloverAt: number;
-	readonly supported: boolean;
 };
+export type BudgetState = "disabled" | "unsupported" | "enabled";
+function budgetState(enabled: boolean, usable: number): BudgetState {
+	if (!enabled) {
+		return "disabled";
+	}
+	return usable >= MIN_USABLE_TOKENS ? "enabled" : "unsupported";
+}
 /** A synchronous evaluation owns one snapshot; never carry it across an await. */
 export function policySnapshot(
 	ctx: ExtensionContext,
@@ -73,10 +80,9 @@ export function budgetFor(
 	return {
 		contextWindow,
 		reserveTokens,
-		enabled,
+		state: budgetState(enabled, usable),
 		usable,
 		rolloverAt: usable + 1,
-		supported: !enabled || usable >= MIN_USABLE_TOKENS,
 	};
 }
 export function budgetGuidanceKey(ctx: PolicyContext): string {
@@ -84,9 +90,9 @@ export function budgetGuidanceKey(ctx: PolicyContext): string {
 	if (budget === undefined) {
 		return ctx.getCompactionSettings().enabled ? "1:unknown" : "0:unknown";
 	}
-	return budget.enabled
-		? `1:${budget.contextWindow}:${budget.reserveTokens}`
-		: `0:${budget.contextWindow}`;
+	return budget.state === "disabled"
+		? `0:${budget.contextWindow}`
+		: `1:${budget.contextWindow}:${budget.reserveTokens}`;
 }
 export function unsupportedMessage(budget: Budget, newContextAvailable = true): string {
 	const n = (value: number) => value.toLocaleString("en-US");
@@ -104,7 +110,7 @@ function automaticGuidance(
 		const reset = tools.newContext ? " new_context remains available." : "";
 		return `Pi compaction is disabled in the available settings, so Posthorse sends no checkpoint reminder.${reset}`;
 	}
-	if (budget !== undefined && !budget.supported) {
+	if (budget?.state === "unsupported") {
 		return unsupportedMessage(budget, tools.newContext);
 	}
 	const line =
@@ -120,7 +126,8 @@ export function buildGuidance(
 	tools: GuidanceTools = ALL_GUIDANCE_TOOLS,
 ): string {
 	const budget = budgetFor(ctx);
-	const enabled = budget?.enabled ?? ctx.getCompactionSettings().enabled;
+	const enabled =
+		budget === undefined ? ctx.getCompactionSettings().enabled : budget.state !== "disabled";
 	const capacity =
 		budget === undefined
 			? "Configured context capacity is unknown."
@@ -159,7 +166,7 @@ export function freshPayloadChars(
 	if (budget === undefined) {
 		return cap;
 	}
-	const line = budget.enabled && budget.supported ? budget.rolloverAt : budget.contextWindow;
+	const line = budget.state === "enabled" ? budget.rolloverAt : budget.contextWindow;
 	const reservedGuidance =
 		cap === MAX_HANDOFF_CHARS ? guidanceTokenCount(buildGuidance(ctx)) : guidanceTokens(ctx);
 	const promptTokens = Math.ceil(ctx.getSystemPrompt().length / 4) + reservedGuidance;
@@ -184,7 +191,6 @@ export function pageCapacity(ctx: PolicyContext, toolTokens: () => number): numb
 		return freshPayloadChars(ctx, toolTokens(), [], MAX_PAGE_CHARS) / 4 + PAGE_MARGIN_TOKENS;
 	}
 	const budget = budgetFor(ctx, usage.contextWindow);
-	const line =
-		budget?.enabled === true && budget.supported ? budget.rolloverAt : usage.contextWindow;
+	const line = budget?.state === "enabled" ? budget.rolloverAt : usage.contextWindow;
 	return line - usage.tokens - guidanceTokens(ctx);
 }
