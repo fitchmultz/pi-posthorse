@@ -10,7 +10,8 @@ import {
 	type RecoveryRecord,
 } from "./recovery-records.ts";
 import type { NotesRecovery } from "./note-evidence.ts";
-import { primaryNotePath, renderSessionNotes, type RetainedSpan } from "./recovery-notes.ts";
+import { primaryNotePath, renderSessionNotes } from "./recovery-notes.ts";
+import { retainedSpan, type RetainedSpan } from "./retained-tail.ts";
 import {
 	recoverableToolResults,
 	type RecoveryBatch,
@@ -28,28 +29,6 @@ export function hasRetainedRolloverMarker(summary: string): boolean {
 	return (
 		summary.startsWith(AUTO_HANDOFF_PREFIX) && summary.includes(`\n${RETAINED_MARKER_PREFIX}`)
 	);
-}
-function retainedSpanOf(
-	entries: readonly EntryLike[],
-	retained: ReadonlySet<string>,
-): RetainedSpan | undefined {
-	if (retained.size === 0) {
-		return undefined;
-	}
-	const kept = entries.filter(
-		(e) =>
-			e.id !== undefined &&
-			e.id !== "" &&
-			retained.has(e.id) &&
-			(e.type === "message" || e.type === "custom_message" || e.type === "branch_summary"),
-	);
-	const list =
-		kept.length > 0
-			? kept
-			: entries.filter((e) => e.id !== undefined && e.id !== "" && retained.has(e.id));
-	const firstId = list[0]?.id?.slice(0, 120);
-	const lastId = list.at(-1)?.id?.slice(0, 120);
-	return firstId === undefined || lastId === undefined ? undefined : { firstId, lastId };
 }
 function buildRolloverPreamble(span: RetainedSpan | undefined): string {
 	if (span === undefined) {
@@ -237,7 +216,7 @@ function rolloverPreambleWithNotes(
 	},
 ): string {
 	const { retained, reserveParts, maxChars } = options;
-	const span = retainedSpanOf(entries.slice(contextStart(entries).start), retained);
+	const span = retainedSpan(entries.slice(contextStart(entries).start), retained);
 	const basePreamble = buildRolloverPreamble(span);
 	const reserveLen = joined([basePreamble, ...reserveParts]).length;
 	const notesSection = renderSessionNotes(

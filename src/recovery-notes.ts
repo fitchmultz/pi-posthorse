@@ -3,11 +3,11 @@ import type { EntryLike, ProjectedEntry } from "./contracts.ts";
 import { sessionNoteTouches, scopeRecoveryTouches, type NotesRecovery } from "./note-evidence.ts";
 import { scopeDirectory } from "./note-scopes.ts";
 import type { NoteTarget, NoteTouch } from "./recovery-note-touches.ts";
+import type { RetainedSpan } from "./retained-tail.ts";
 
 const MAX_WRITTEN_NOTES = 4;
 const MAX_READ_NOTES = 3;
 
-export type RetainedSpan = { readonly firstId: string; readonly lastId: string };
 type ContentProof =
 	| { readonly kind: "full"; readonly entryId: string; readonly updatedAt?: string }
 	| { readonly kind: "partial"; readonly entryId: string }
