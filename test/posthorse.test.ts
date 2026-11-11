@@ -1153,6 +1153,20 @@ await test("guidance uses request-local sections and preserves custom or forced 
 		requireValue(event.messages[1]).content,
 		/Configured context capacity: 100,000 tokens/,
 	);
+
+	const compacted = {
+		messages: [
+			{ role: "system", content: "Forced instructions", timestamp: 0 },
+			{ role: "system", content: "", timestamp: 0 },
+			{ role: "compactionSummary", summary: "Earlier work", tokensBefore: 0, timestamp: 0 },
+		],
+	};
+	requireValue(handlers.get("context_with_system"))(compacted, context);
+	assert.deepEqual(
+		compacted.messages.map((message) => message.role),
+		["system", "system", "custom", "compactionSummary"],
+		"the hidden guidance follows every leading system message",
+	);
 });
 
 await test("disabled Pi compaction disables automatic Posthorse behavior but not new_context", async () => {
