@@ -154,4 +154,8 @@ export function registerNoteGuards(pi: ExtensionAPI, store: NotesStore): void {
 		calls.get(event.toolCallId)?.session.finishCall(event.toolCallId);
 		calls.delete(event.toolCallId);
 	});
+	pi.on("session_shutdown", () => {
+		// A captured call belongs to its tool batch; a shutdown runtime runs no more of it.
+		calls.clear();
+	});
 }

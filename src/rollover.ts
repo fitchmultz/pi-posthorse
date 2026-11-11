@@ -421,6 +421,12 @@ export function registerRollover(
 		reminders.reset();
 		resources.guidance.reset();
 	});
+	pi.on("session_shutdown", () => {
+		// A shutdown runtime never sees another event; drop every per-turn and per-window fact.
+		resetTurn();
+		reminders.reset();
+		resources.guidance.reset();
+	});
 	registerReminderFilter(pi, policy, reminders);
 	registerGuidance(pi, policy, resources.guidance);
 	registerAutomaticRollover(pi, policy, activeToolTokens, resources.notes);
