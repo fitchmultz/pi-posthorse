@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isRecord, type EntryLike } from "./contracts.ts";
@@ -115,10 +115,22 @@ async function sourceScope(
 		source.file === undefined ? manager.getEntries() : await journalMetadata(source.file, true);
 	return legacySource(legacy.length > 0 ? legacy : manager.getEntries());
 }
+function hasReferencedTarget(
+	current: NoteScope,
+	path: string,
+	includeDirectories: boolean,
+): boolean {
+	const info = statSync(notePath(current, path), { throwIfNoEntry: false });
+	if (info === undefined) {
+		return false;
+	}
+	return info.isFile() || (includeDirectories && info.isDirectory());
+}
 export async function resolveReference(
 	scope: NoteScope,
 	path: string,
 	entries: readonly EntryLike[],
+	options: { readonly includeDirectories?: boolean | undefined } = {},
 ): Promise<NoteAddress | undefined> {
 	let source: NoteScope | null = scope;
 	const bindings = bindingsOf(entries);
@@ -130,7 +142,7 @@ export async function resolveReference(
 			throw new Error(`Cyclic note provenance at ${directory}.`);
 		}
 		visited.add(directory);
-		if (existsSync(notePath(current, path))) {
+		if (hasReferencedTarget(current, path, options.includeDirectories === true)) {
 			return addressIn(current, path);
 		}
 		// A manifest includes later adoptions; the journal includes later writes and deletions.

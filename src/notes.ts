@@ -92,15 +92,20 @@ async function readNote(
 	access: NotesAccess,
 ): Promise<TextResult> {
 	const { pages } = access;
-	const relative = requireValue(params.path, "path", params.op);
-	const target = await session.read(relative, { scope: params.scope, signal: access.signal });
+	const requested = requireValue(params.path, "path", params.op);
+	const target = await session.read(requested, { scope: params.scope, signal: access.signal });
+	const relative = target.address.path;
 	const path = target.path;
 	const info = statSync(path, { throwIfNoEntry: false });
 	if (info === undefined) {
 		throw new Error(`No note at ${relative}. Use op "list" to see available notes.`);
 	}
 	if (info.isDirectory()) {
-		return listNotes(session, { ...params, scope: scopeDirectory(target.address) }, access);
+		return listNotes(
+			session,
+			{ ...params, path: relative, scope: scopeDirectory(target.address) },
+			access,
+		);
 	}
 	if (await isBinaryFile(path)) {
 		throw new Error(
@@ -283,6 +288,40 @@ function withoutEmptyScope(params: NotesParams): NotesParams {
 	const { scope, ...unscoped } = params;
 	return scope === "" ? unscoped : params;
 }
+const notesParameters = Type.Object({
+	op: Type.Union(
+		[
+			Type.Literal("list"),
+			Type.Literal("read"),
+			Type.Literal("write"),
+			Type.Literal("append"),
+			Type.Literal("search"),
+		],
+		{ description: "Operation to perform" },
+	),
+	path: Type.Optional(
+		Type.String({
+			description:
+				"Note or folder path relative to the notes directory (read also accepts a path in this session's notes directory)",
+		}),
+	),
+	scope: Type.Optional(
+		Type.String({
+			description:
+				"Absolute scope selector from list/search; only for read/list/search. Omit for current notes and project-wide discovery.",
+		}),
+	),
+	content: Type.Optional(
+		Type.String({ description: "Full file content (write) or text to add (append)" }),
+	),
+	query: Type.Optional(Type.String({ description: "Substring to find in notes (search)" })),
+	offset: Type.Optional(
+		Type.Integer({
+			description: "Character offset for list/read/search (default 0)",
+			minimum: 0,
+		}),
+	),
+});
 export function registerNotes(
 	pi: ExtensionAPI,
 	policy: (ctx: ExtensionContext) => PolicyContext,
@@ -297,39 +336,7 @@ export function registerNotes(
 		description:
 			"Durable task notes shared across Git worktrees and context resets; forks get private copies. Ops: list (newest first), read, search (case-insensitive), write (replace; empty clears), append (one record). list/search also cover other sessions' note scopes and show their selectors; pass scope to read, list, or search one of them. list/read/search are paged; continue with the returned offset. A read of a current note returns its file path.",
 		promptSnippet: "save and recall durable state with private notes for forks",
-		parameters: Type.Object({
-			op: Type.Union(
-				[
-					Type.Literal("list"),
-					Type.Literal("read"),
-					Type.Literal("write"),
-					Type.Literal("append"),
-					Type.Literal("search"),
-				],
-				{ description: "Operation to perform" },
-			),
-			path: Type.Optional(
-				Type.String({ description: "Note or folder path relative to the notes directory" }),
-			),
-			scope: Type.Optional(
-				Type.String({
-					description:
-						"Absolute scope selector from list/search; only for read/list/search. Omit for current notes and project-wide discovery.",
-				}),
-			),
-			content: Type.Optional(
-				Type.String({ description: "Full file content (write) or text to add (append)" }),
-			),
-			query: Type.Optional(
-				Type.String({ description: "Substring to find in notes (search)" }),
-			),
-			offset: Type.Optional(
-				Type.Integer({
-					description: "Character offset for list/read/search (default 0)",
-					minimum: 0,
-				}),
-			),
-		}),
+		parameters: notesParameters,
 		async execute(...[_id, received, signal, , ctx]) {
 			const params = withoutEmptyScope(received);
 			// Migrate newly returned legacy package notes without changing this session’s binding.

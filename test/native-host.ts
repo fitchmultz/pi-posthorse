@@ -859,6 +859,142 @@ await test("fork recovery names a note it wrote in another scope by its path", a
 	assert.equal(realpathSync(listed), realpathSync(shared));
 });
 
+await test("notes read accepts an absolute path only inside this session's own notes directory", async (t) => {
+	const parent = await fixture(t);
+	await notesCall(parent, { op: "write", path: "sub/task.md", content: "project checkpoint" });
+	const projectNotes = join(parent.cwd, ".pi", "notes");
+	const aliasRoot = join(dirname(parent.cwd), "notes-alias");
+	symlinkSync(projectNotes, aliasRoot, "dir");
+
+	const expected = await notesCall(parent, { op: "read", path: "sub/task.md" });
+	assert.equal(
+		await notesCall(parent, { op: "read", path: join(projectNotes, "sub", "task.md") }),
+		expected,
+	);
+	assert.equal(
+		await notesCall(parent, {
+			op: "read",
+			path: join(aliasRoot, "sub", "task.md"),
+			scope: "",
+		}),
+		expected,
+	);
+	assert.match(
+		await notesCall(parent, { op: "read", path: join(projectNotes, "sub") }),
+		/sub\/task\.md/u,
+	);
+
+	const missing = await nativeCall(
+		parent,
+		fauxToolCall("notes", { op: "read", path: join(projectNotes, "sub", "missing.md") }),
+	);
+	assert.equal(missing.isError, true);
+	assert.match(textOf(missing), /No note at sub\/missing\.md\./u);
+
+	const outsideFile = join(dirname(parent.cwd), "outside.md");
+	writeFileSync(outsideFile, "outside");
+	const managedFile = join(projectNotes, ".forks", "other", "notes", "secret.md");
+	mkdirSync(dirname(managedFile), { recursive: true });
+	writeFileSync(managedFile, "managed");
+	symlinkSync(managedFile, join(projectNotes, "escape.md"));
+	const escaped = await nativeCall(
+		parent,
+		fauxToolCall("notes", { op: "read", path: join(projectNotes, "escape.md") }),
+	);
+	assert.equal(escaped.isError, true);
+	assert.match(textOf(escaped), /leaves its scope through a filesystem alias/u);
+	unlinkSync(join(projectNotes, "escape.md"));
+	rmSync(join(projectNotes, ".forks", "other"), { recursive: true, force: true });
+
+	for (const rejected of [
+		outsideFile,
+		projectNotes,
+		`${projectNotes}/`,
+		join(projectNotes, "..", "outside.md"),
+		`${projectNotes}/sub/../task.md`,
+		join(projectNotes, ".forks", "other", "notes", "task.md"),
+	]) {
+		const result = await nativeCall(
+			parent,
+			fauxToolCall("notes", { op: "read", path: rejected }),
+		);
+		assert.equal(result.isError, true, rejected);
+		assert.match(textOf(result), /Invalid note path/u);
+	}
+	const withScope = await nativeCall(
+		parent,
+		fauxToolCall("notes", {
+			op: "read",
+			scope: projectNotes,
+			path: join(projectNotes, "sub", "task.md"),
+		}),
+	);
+	assert.equal(withScope.isError, true);
+	assert.match(textOf(withScope), /use a relative path/u);
+
+	for (const op of ["write", "append"] as const) {
+		const writeAttempt = await nativeCall(
+			parent,
+			fauxToolCall("notes", {
+				op,
+				path: join(projectNotes, "sub", "task.md"),
+				content: "mutated",
+			}),
+		);
+		assert.equal(writeAttempt.isError, true, op);
+		assert.match(textOf(writeAttempt), /use a relative path/u);
+	}
+
+	assertStoredNoteLocations(parent.sessionManager);
+	const recordedReads = parent.sessionManager
+		.getBranch()
+		.flatMap((entry) =>
+			entry.type === "custom" &&
+			entry.customType === "posthorse-note-touch" &&
+			"data" in entry &&
+			Array.isArray(record(entry.data).files)
+				? record(entry.data).files
+				: [],
+		)
+		.map(record)
+		.filter((file) => file.kind === "read")
+		.map((file) => file.path);
+	assert.deepEqual(recordedReads, ["sub/task.md", "sub/task.md", "sub/task.md"]);
+
+	const source = requireValue(parent.sessionManager.getSessionFile());
+	const child = await fixture(t, {
+		cwd: parent.cwd,
+		manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
+	});
+	await notesCall(parent, { op: "write", path: "inherited/later.md", content: "later note" });
+	assert.match(
+		await notesCall(child, { op: "read", path: "inherited" }),
+		/inherited\/later\.md/u,
+	);
+	await notesCall(child, { op: "write", path: "sub/task.md", content: "fork checkpoint" });
+	const forkListing = await notesCall(child, { op: "list" });
+	const forkNotes = requireValue(/^Notes directory: ([^\n]+)/u.exec(forkListing)?.[1]);
+	assert.match(
+		await notesCall(child, { op: "read", path: join(forkNotes, "sub", "task.md") }),
+		/fork checkpoint$/u,
+	);
+	symlinkSync(outsideFile, join(forkNotes, "escape.md"));
+	const forkEscaped = await nativeCall(
+		child,
+		fauxToolCall("notes", { op: "read", path: join(forkNotes, "escape.md") }),
+	);
+	assert.equal(forkEscaped.isError, true);
+	assert.match(textOf(forkEscaped), /leaves its scope through a filesystem alias/u);
+	unlinkSync(join(forkNotes, "escape.md"));
+	const parentPathInFork = await nativeCall(
+		child,
+		fauxToolCall("notes", { op: "read", path: join(projectNotes, "sub", "task.md") }),
+	);
+	assert.equal(parentPathInFork.isError, true);
+	assert.match(textOf(parentPathInFork), /use a relative path/u);
+	assertStoredNoteLocations(child.sessionManager, forkNotes);
+});
+
 await test("fork notes associate late cancelled background effects with their launch branch", async (t) => {
 	const started = Promise.withResolvers<null>();
 	const release = Promise.withResolvers<null>();

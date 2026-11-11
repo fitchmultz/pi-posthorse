@@ -23,6 +23,7 @@ import {
 	sameOwner,
 	sameScope,
 	scopeDirectory,
+	scopeNoteRelative,
 	type NoteAddress,
 	type NoteBinding,
 	type NoteScope,
@@ -133,16 +134,24 @@ export class SessionNotes {
 			`Unknown notes scope ${JSON.stringify(selector)}. Omit scope for this session's notes, or copy a scope selector from notes list/search.`,
 		);
 	}
-	async #reference(path: string, signal?: AbortSignal): Promise<NoteAddress | undefined> {
+	async #reference(
+		path: string,
+		options: {
+			readonly includeDirectories?: boolean | undefined;
+			readonly signal?: AbortSignal | undefined;
+		} = {},
+	): Promise<NoteAddress | undefined> {
 		if (this.binding.kind !== "fork" || this.binding.source === null) {
 			return;
 		}
 		const entries = [
 			...this.#manager.getEntries(),
 			...this.#source.entries,
-			...(await sourceEntries(this.#source.file, signal)),
+			...(await sourceEntries(this.#source.file, options.signal)),
 		];
-		return resolveReference(this.binding.source, path, entries);
+		return resolveReference(this.binding.source, path, entries, {
+			includeDirectories: options.includeDirectories,
+		});
 	}
 	async read(
 		path: string,
@@ -151,8 +160,8 @@ export class SessionNotes {
 			readonly signal?: AbortSignal | undefined;
 		} = {},
 	): Promise<NoteRead> {
-		const relative = noteRelative(path);
 		if (options.scope !== undefined) {
+			const relative = noteRelative(path);
 			const scope = await this.selectScope(options.scope);
 			return {
 				address: addressIn(scope, relative),
@@ -160,9 +169,13 @@ export class SessionNotes {
 				writable: sameScope(scope, this.binding),
 			};
 		}
+		const relative = scopeNoteRelative(this.binding, path);
 		const reference = this.owns(relative)
 			? undefined
-			: await this.#reference(relative, options.signal);
+			: await this.#reference(relative, {
+					includeDirectories: true,
+					signal: options.signal,
+				});
 		const address = reference ?? addressIn(this.binding, relative);
 		return { address, path: notePath(address, relative), writable: reference === undefined };
 	}
