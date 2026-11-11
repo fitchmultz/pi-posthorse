@@ -1,10 +1,11 @@
-import { AUTO_HANDOFF_PREFIX, isRecord, type EntryLike, type ProjectedEntry } from "./contracts.ts";
+import { AUTO_HANDOFF_PREFIX, type EntryLike, type ProjectedEntry } from "./contracts.ts";
 import { contextEdits, contextStart, windowHandoff } from "./history-entries.ts";
-import { boundedBlock, excerpt, toolCalls } from "./message-text.ts";
+import { boundedBlock, excerpt } from "./message-text.ts";
+import { automaticChainStart, recoveryInputs } from "./recovery-inputs.ts";
 import {
 	formatRecord,
 	indexLine,
-	recoveryRecord,
+	MAX_RECOVERY_RECORD_CHARS,
 	type RecoveryRecord,
 } from "./recovery-records.ts";
 import type { NotesRecovery } from "./note-evidence.ts";
@@ -16,7 +17,6 @@ import {
 	type RecoveryEntry,
 } from "./recovery-results.ts";
 
-const MAX_RECOVERY_RECORD_CHARS = 4_000;
 const MAX_RECOVERY_RESULT_CHARS = 1_500;
 const HANDOFF_OVERHEAD_RESERVE = 1_000;
 const MAX_NOTES_SECTION_CHARS = 1_200;
@@ -68,142 +68,6 @@ function priorCheckpoint(entry: EntryLike | undefined, limit: number): string | 
 	const id = entry.id?.slice(0, 120) ?? "unknown";
 	const header = `[older checkpoint; possibly stale | context-window entry ${id}]`;
 	return boundedBlock(header, handoff, limit);
-}
-function projectedCurrent(
-	entries: readonly EntryLike[],
-	projected: readonly ProjectedEntry[],
-	current: readonly EntryLike[] = entries.slice(contextStart(entries).start),
-	retained: ReadonlySet<string> = new Set(),
-): EntryLike[] {
-	const edits = contextEdits(entries);
-	const omittedIds = new Set(
-		projected
-			.filter(({ messages }) => messages.length === 0)
-			.map(({ sourceEntry }) => sourceEntry.id),
-	);
-	return current.flatMap((entry) => {
-		const id = entry.id ?? "";
-		if (retained.has(id) || omittedIds.has(id)) {
-			return [];
-		}
-		const edit = edits.get(id);
-		if (edit?.replacement === null) {
-			return [];
-		}
-		if (edit?.replacement === undefined) {
-			return [entry];
-		}
-		if (entry.type === "message") {
-			return [
-				{
-					...entry,
-					id: edit.id,
-					message: { ...entry.message, content: edit.replacement.content },
-				},
-			];
-		}
-		if (entry.type === "custom_message") {
-			return [{ ...entry, id: edit.id, content: edit.replacement.content }];
-		}
-		return [entry];
-	});
-}
-function ownerRecords(
-	entries: readonly EntryLike[],
-	projected: readonly ProjectedEntry[],
-	ownerQuestionRegistered: boolean,
-): RecoveryRecord[] {
-	const calls = new Map(
-		projected.flatMap(({ messages }) =>
-			messages.flatMap((message) =>
-				message.role === "assistant"
-					? toolCalls(message.content).map((call) => [call.id, call] as const)
-					: [],
-			),
-		),
-	);
-	return entries.flatMap((entry) => {
-		const call = calls.get(entry.message?.toolCallId);
-		const record = recoveryRecord(
-			entry,
-			ownerQuestionRegistered &&
-				call?.name === "ask_question" &&
-				call.namespace === undefined,
-		);
-		return record === undefined ? [] : [record];
-	});
-}
-function anchors(records: readonly RecoveryRecord[]): {
-	fixed: RecoveryRecord[];
-	others: RecoveryRecord[];
-} {
-	const firstOwner = records.find((record) => record.label === "owner input") ?? records[0];
-	const latestOwner = [...records].reverse().find((record) => record.kind === "owner");
-	const latestOverall = records.at(-1);
-	const selected = new Set([firstOwner, latestOwner, latestOverall]);
-	return {
-		fixed: records.filter((record) => selected.has(record)),
-		others: records.filter((record) => !selected.has(record)),
-	};
-}
-function automaticBoundary(entry: EntryLike | undefined): boolean {
-	if (
-		entry === undefined ||
-		windowHandoff(entry)?.trim().startsWith(AUTO_HANDOFF_PREFIX) !== true
-	) {
-		return false;
-	}
-	return (
-		entry.type === "context_window" ||
-		(isRecord(entry.details) &&
-			entry.details.posthorse === 1 &&
-			(entry.details.reason === "threshold" || entry.details.reason === "overflow"))
-	);
-}
-function automaticChainStart(entries: readonly EntryLike[]): number {
-	let prefix = entries;
-	let window = contextStart(prefix);
-	while (automaticBoundary(window.boundary) && window.boundary !== undefined) {
-		prefix = prefix.slice(0, prefix.indexOf(window.boundary));
-		window = contextStart(prefix);
-	}
-	return window.start;
-}
-function recoveryAncestry(
-	entries: readonly EntryLike[],
-	projected: readonly ProjectedEntry[],
-	ownerQuestionRegistered: boolean,
-	retained: ReadonlySet<string>,
-): {
-	readonly checkpoint?: EntryLike | undefined;
-	readonly carried: readonly RecoveryRecord[];
-	readonly skipped: readonly string[];
-} {
-	let prefix = entries;
-	let boundary = contextStart(prefix).boundary;
-	const skipped: string[] = [];
-	while (automaticBoundary(boundary) && boundary !== undefined) {
-		skipped.push(boundary.id?.slice(0, 120) ?? "unknown");
-		prefix = prefix.slice(0, prefix.indexOf(boundary));
-		const window = contextStart(prefix);
-		const restored = projectedCurrent(entries, projected, prefix.slice(window.start));
-		const historical = restored.map((sourceEntry) => ({
-			sourceEntry,
-			messages: sourceEntry.message === undefined ? [] : [sourceEntry.message],
-		}));
-		const owners = ownerRecords(restored, historical, ownerQuestionRegistered).filter(
-			(record) => record.kind === "owner",
-		);
-		if (owners.length > 0) {
-			return {
-				checkpoint: automaticBoundary(window.boundary) ? undefined : window.boundary,
-				carried: anchors(owners.filter((record) => !retained.has(record.id))).fixed,
-				skipped,
-			};
-		}
-		boundary = window.boundary;
-	}
-	return { checkpoint: boundary, carried: [], skipped };
 }
 function skippedRecords(ids: readonly string[], limit: number): string | undefined {
 	const remaining = ids.values();
@@ -346,34 +210,20 @@ function renderIndex(records: readonly RecoveryRecord[], available: number): str
 		...listed,
 	].join("\n");
 }
-function selectedInputs(
-	entries: readonly EntryLike[],
-	projected: readonly ProjectedEntry[],
-	options: {
-		readonly ownerQuestionRegistered: boolean;
-		readonly retained: ReadonlySet<string>;
-		readonly carried: readonly RecoveryRecord[];
-	},
-): { readonly fixed: readonly RecoveryRecord[]; readonly others: readonly RecoveryRecord[] } {
-	const { ownerQuestionRegistered, retained, carried } = options;
-	const current = projectedCurrent(entries, projected);
-	const allRecords = ownerRecords(current, projected, ownerQuestionRegistered);
-	const records = ownerRecords(
-		projectedCurrent(entries, projected, undefined, retained),
-		projected,
-		ownerQuestionRegistered,
-	);
-	const { fixed, others } = anchors(records);
-	if (!allRecords.some((record) => record.kind === "owner")) {
-		fixed.unshift(
-			...carried.map((record) =>
-				Object.assign({}, record, {
-					label: `${record.label}; carried from an earlier window, possibly already handled; not current progress`,
-				}),
-			),
-		);
+/** The per-block limit at which the blocks fit the budget together; short blocks leave room to long ones. */
+function sharedLimit(lengths: readonly number[], budget: number): number {
+	let remaining = budget;
+	const ascending = lengths
+		.map((length) => Math.min(length, MAX_RECOVERY_RECORD_CHARS))
+		.toSorted((a, b) => a - b);
+	for (const [index, length] of ascending.entries()) {
+		const share = Math.floor(remaining / (ascending.length - index));
+		if (length > share) {
+			return share;
+		}
+		remaining -= length;
 	}
-	return { fixed, others };
+	return MAX_RECOVERY_RECORD_CHARS;
 }
 function rolloverPreambleWithNotes(
 	entries: readonly EntryLike[],
@@ -431,13 +281,12 @@ export function buildAutoHandoff(
 	},
 ): string {
 	const { ownerQuestionRegistered, retainedEntryIds: retained = new Set<string>() } = options;
-	const history = recoveryAncestry(entries, projected, ownerQuestionRegistered, retained);
-	const priorWindow = history.checkpoint;
-	const { fixed, others } = selectedInputs(entries, projected, {
+	const { fixed, others, ...history } = recoveryInputs(entries, projected, {
 		ownerQuestionRegistered,
 		retained,
-		carried: history.carried,
+		maxChars,
 	});
+	const priorWindow = history.checkpoint;
 	const emptyInputHeader =
 		retained.size > 0
 			? "No discarded owner or visible coordination inputs were selected for this recovery record."
@@ -467,19 +316,18 @@ export function buildAutoHandoff(
 		header,
 		Math.max(0, maxChars - joined(minimum).length - HANDOFF_OVERHEAD_RESERVE),
 	);
-	const handoff = windowHandoff(priorWindow)?.trim();
-	const count =
-		fixed.length +
-		(handoff === undefined || handoff === "" ? 0 : 1) +
-		(history.skipped.length > 0 ? 1 : 0);
 	const fixedBudget = Math.max(
 		0,
 		maxChars - joined([preamble, inputHeader, plan.bare]).length - HANDOFF_OVERHEAD_RESERVE,
 	);
-	const fixedLimit =
-		count > 0
-			? Math.min(MAX_RECOVERY_RECORD_CHARS, Math.floor(fixedBudget / count))
-			: MAX_RECOVERY_RECORD_CHARS;
+	const fixedLimit = sharedLimit(
+		[
+			...fixed.map((record) => formatRecord(record, Number.MAX_SAFE_INTEGER)),
+			priorCheckpoint(priorWindow, Number.MAX_SAFE_INTEGER),
+			skippedRecords(history.skipped, Number.MAX_SAFE_INTEGER),
+		].flatMap((block) => (block === undefined ? [] : [block.length])),
+		fixedBudget,
+	);
 	const prior = joined([
 		priorCheckpoint(priorWindow, fixedLimit),
 		skippedRecords(history.skipped, fixedLimit),

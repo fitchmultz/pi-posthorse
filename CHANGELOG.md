@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+## 0.10.20 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+
+- With a forced system prompt, the hidden guidance message now follows every leading system message. It stood at index 1, between the prompt and the tool update that the Pi fork keeps as a second leading system message after a compaction.
+
+<!-- npm-release:unreleased:end -->
+
+- fix: put forced-prompt guidance after every leading system message (#167) ([5229911](https://github.com/fitchmultz/pi-posthorse/commit/522991124286e8d60ce1bc66d0b89ff541e2a7f6))
+
+### What's Changed
+
+- fix: put forced-prompt guidance after every leading system message by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/167
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.19...v0.10.20
+
+## 0.10.19 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+
+- Keep the task in the recovery record after a short owner follow-up. A record took inputs from earlier windows only when its own window had no owner input, and only from the nearest earlier window that had one. After one "Continue." every later record held that word, or no owner input, and the task with its rules was gone from the model's context (#163). A record now carries the owner's most recent inputs from earlier windows, newest first, until they fill the room of one input (4,000 characters); owner text of the current window counts against that room, so a long new request still stands alone. Short inputs also leave their unused room in the record to long ones.
+
+<!-- npm-release:unreleased:end -->
+
+- fix: keep the task in the recovery record after a short owner follow-up (#164) ([6bf67f7](https://github.com/fitchmultz/pi-posthorse/commit/6bf67f70e9dbdd373091195827954b08a2325ecb))
+
+### What's Changed
+
+- fix: keep the task in the recovery record after a short owner follow-up by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/164
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.18...v0.10.19
+
 ## 0.10.18 - 2026-11-10
 
 <!-- npm-release:unreleased:start -->
