@@ -1,4 +1,4 @@
-import type { EntryLike } from "./contracts.ts";
+import type { EntryLike, MessageLike } from "./contracts.ts";
 
 /**
  * What a rollover retains: where Pi keeps the tail, which entries it holds, and how it must start.
@@ -53,4 +53,56 @@ export function retainedSpan(
 	const firstId = list[0]?.id?.slice(0, 120);
 	const lastId = list.at(-1)?.id?.slice(0, 120);
 	return firstId === undefined || lastId === undefined ? undefined : { firstId, lastId };
+}
+
+/**
+ * Where the retained tail ends in a provider message list: the position after the last message
+ * that is the journal's next retained message, in order. A message another handler interleaves
+ * inside the tail is skipped, so the record still lands after the whole retained tail. Returns
+ * undefined when the whole tail cannot be certified, so callers fall back to counting positions.
+ */
+export function retainedTailEnd(
+	messages: readonly MessageLike[],
+	summaryIndex: number,
+	retained: readonly MessageLike[],
+): number | undefined {
+	if (retained.length === 0) {
+		return summaryIndex + 1;
+	}
+	let expected = 0;
+	let end: number | undefined;
+	for (
+		let index = summaryIndex + 1;
+		index < messages.length && expected < retained.length;
+		index++
+	) {
+		const message = messages.at(index);
+		const journal = retained.at(expected);
+		if (
+			message !== undefined &&
+			journal !== undefined &&
+			sameRetainedMessage(journal, message)
+		) {
+			expected += 1;
+			end = index + 1;
+		}
+	}
+	return expected === retained.length ? end : undefined;
+}
+
+/**
+ * Identity of a retained message as the provider context carries it: same custom type, same
+ * content and details, and a role an earlier handler may only present as `system`. Journal and
+ * provider messages are clones of each other, so identity is structural, never object equality.
+ */
+export function sameRetainedMessage(journal: MessageLike, event: MessageLike): boolean {
+	// Cloned structures compare by serialized content; null normalizes an absent field.
+	const sameJson = (left: unknown, right: unknown): boolean =>
+		JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+	return (
+		(journal.customType ?? null) === (event.customType ?? null) &&
+		(event.role === "system" || journal.role === event.role) &&
+		sameJson(journal.content, event.content) &&
+		sameJson(journal.details, event.details)
+	);
 }
