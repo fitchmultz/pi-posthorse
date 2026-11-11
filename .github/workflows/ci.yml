@@ -3,9 +3,6 @@ name: Pi
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
-
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -43,7 +40,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+  PI_AUTOMATION_REF: f407404914bf6d048e4d952c62711df5103cc7ef # main
 
 jobs:
   quality:
@@ -53,9 +50,9 @@ jobs:
       source-ref: ${{ inputs.source-ref || github.sha }}
 
   resolve:
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@f407404914bf6d048e4d952c62711df5103cc7ef # main
     with:
-      automation-ref: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+      automation-ref: f407404914bf6d048e4d952c62711df5103cc7ef # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
