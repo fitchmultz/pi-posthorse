@@ -9,12 +9,9 @@ import type {
 import { activeBoundaryIndex } from "./boundary.ts";
 import { budgetFor, freshPayloadChars } from "./budget.ts";
 import {
-	isRecord,
-	isReminderType,
 	REMINDER_TYPE,
 	type PolicyContext,
 	type ProjectedEntry,
-	type ReminderFingerprint,
 	type SnapshotReader,
 } from "./contracts.ts";
 import { registerContextTools } from "./context-tools.ts";
@@ -39,7 +36,7 @@ import {
 	countRetainedMessages,
 	createReminderLookup,
 	reminderDecision,
-	reminderMatches,
+	staleReminderPredicate,
 	type ReminderLookup,
 	type StaleReminderPredicate,
 } from "./reminders.ts";
@@ -79,47 +76,6 @@ function explicitReset(
 		],
 		continue: true,
 	};
-}
-const NO_STALE_REMINDER: StaleReminderPredicate = () => false;
-function staleReminderPredicate(
-	messages: readonly {
-		readonly role: string;
-		readonly customType?: string | undefined;
-		readonly details?: unknown;
-	}[],
-	ctx: ExtensionContext,
-	policy: SnapshotReader,
-	reminders: ReminderLookup,
-): StaleReminderPredicate {
-	if (
-		!messages.some((message) => message.role === "custom" && isReminderType(message.customType))
-	) {
-		return NO_STALE_REMINDER;
-	}
-	const marker = messages.find(
-		(message) => message.role === "custom" && message.customType === "context-window",
-	);
-	let windowId: unknown;
-	if (marker?.role === "custom") {
-		windowId = isRecord(marker.details) ? marker.details.windowId : undefined;
-	} else {
-		windowId = reminders.read(ctx).windowId;
-	}
-	if (typeof windowId !== "string") {
-		return NO_STALE_REMINDER;
-	}
-	const host = policy(ctx);
-	const budget = budgetFor(host);
-	const fingerprint: ReminderFingerprint = {
-		windowId,
-		contextWindow: budget?.contextWindow,
-		reserveTokens: budget?.reserveTokens,
-	};
-	const enabled = host.getCompactionSettings().enabled;
-	return (message) =>
-		message.role === "custom" &&
-		isReminderType(message.customType) &&
-		(!enabled || !reminderMatches(message.details, fingerprint));
 }
 function chronologicalRetainedTail(
 	messages: ContextWithSystemEvent["messages"],
@@ -164,7 +120,7 @@ function registerReminderFilter(
 	reminders: ReminderLookup,
 ): void {
 	pi.on("context_with_system", (event, ctx) => {
-		const stale = staleReminderPredicate(event.messages, ctx, policy, reminders);
+		const stale = staleReminderPredicate(event.messages, ctx, policy(ctx), reminders);
 		const held = messagesHeldByProviderSummary(event.messages);
 		const removable = (message: (typeof event.messages)[number], index: number) =>
 			index >= held && stale(message);
