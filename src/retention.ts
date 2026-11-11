@@ -6,6 +6,7 @@ import {
 	type SessionEntry,
 	type SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
+import { activeBoundaryIndex } from "./boundary.ts";
 import { freshPayloadChars } from "./budget.ts";
 import {
 	MAX_HANDOFF_CHARS,
@@ -188,9 +189,7 @@ function retainedTail(
 	if (!Number.isFinite(keep) || keep <= 0 || maxTokens <= 0) {
 		return { ids: new Set() };
 	}
-	const boundary = projected.findIndex(
-		(entry) => entry.sourceEntry.type === "compaction" && entry.messages.length > 0,
-	);
+	const boundary = activeBoundaryIndex(projected);
 	const entries = projected.slice(boundary + 1);
 	if (entries.length === 0) {
 		return { ids: new Set() };

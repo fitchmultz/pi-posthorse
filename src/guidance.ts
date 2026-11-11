@@ -7,7 +7,8 @@ import {
 	buildGuidance,
 	type GuidanceTools,
 } from "./budget.ts";
-import { isRecord, type EntryLike, type PolicyContext, type SnapshotReader } from "./contracts.ts";
+import type { EntryLike, PolicyContext, SnapshotReader } from "./contracts.ts";
+import { startsFreshGuidanceEpoch } from "./boundary.ts";
 import { createEpochCache, type EpochValue } from "./epoch-cache.ts";
 import { sessionEntry, toolFacts, type SessionHost, type SessionIdentity } from "./host.ts";
 
@@ -43,19 +44,6 @@ export function activeGuidanceTools(pi: ExtensionAPI): GuidanceTools {
 		newContext: activeUnnamespaced.has("new_context"),
 		getContextRemaining: activeUnnamespaced.has("get_context_remaining"),
 	};
-}
-/**
- * A compaction with a provider summary block carries forward the previous window's leading system
- * message unchanged, so its guidance section must stay locked to that earlier epoch too.
- */
-function startsFreshGuidanceEpoch(entry: EntryLike): boolean {
-	if (entry.type === "context_window") {
-		return true;
-	}
-	return (
-		entry.type === "compaction" &&
-		!(isRecord(entry.providerSummary) && isRecord(entry.providerSummary.block))
-	);
 }
 function collectGuidanceEntries(
 	entries: readonly EntryLike[],

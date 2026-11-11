@@ -1,5 +1,4 @@
 import {
-	isRecord,
 	isReminderType,
 	unknownArray,
 	type EntryLike,
@@ -7,6 +6,7 @@ import {
 	type MessageLike,
 	type WindowedEntry,
 } from "./contracts.ts";
+import { isWindow } from "./boundary.ts";
 import {
 	assistantFailure,
 	excerptAround,
@@ -20,32 +20,6 @@ import {
 	toolIdentity,
 } from "./message-text.ts";
 
-export function isWindow(entry: EntryLike): boolean {
-	return (
-		entry.type === "context_window" ||
-		(entry.type === "compaction" && isRecord(entry.details) && entry.details.posthorse === 1)
-	);
-}
-export function windowHandoff(entry: EntryLike | undefined): string | undefined {
-	return entry?.type === "compaction" ? entry.summary : entry?.handoff;
-}
-/** First active branch entry, including tails retained by Pi's own /compact. */
-export function contextStart(entries: readonly EntryLike[]): {
-	start: number;
-	boundary?: EntryLike;
-} {
-	for (let i = entries.length - 1; i >= 0; i--) {
-		const entry = entries[i];
-		if (entry?.type === "context_window") {
-			return { start: i + 1, boundary: entry };
-		}
-		if (entry?.type === "compaction") {
-			const kept = entries.findIndex((candidate) => candidate.id === entry.firstKeptEntryId);
-			return { start: kept >= 0 ? kept : i + 1, boundary: entry };
-		}
-	}
-	return { start: 0 };
-}
 export function contextEdits(entries: readonly EntryLike[]): Map<string, EntryLike> {
 	return new Map(
 		entries.flatMap((entry) =>
