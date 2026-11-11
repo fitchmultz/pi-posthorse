@@ -966,6 +966,11 @@ await test("notes read accepts an absolute path only inside this session's own n
 		cwd: parent.cwd,
 		manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
 	});
+	await notesCall(parent, { op: "write", path: "inherited/later.md", content: "later note" });
+	assert.match(
+		await notesCall(child, { op: "read", path: "inherited" }),
+		/inherited\/later\.md/u,
+	);
 	await notesCall(child, { op: "write", path: "sub/task.md", content: "fork checkpoint" });
 	const forkListing = await notesCall(child, { op: "list" });
 	const forkNotes = requireValue(/^Notes directory: ([^\n]+)/u.exec(forkListing)?.[1]);
