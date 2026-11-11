@@ -1,0 +1,7 @@
+                                                           stock                     Posthorse
+before any boundary                    75% (100 of 138, 19 runs)      58% (82 of 196, 22 runs)
+after 1 or more boundaries                85% (16 of 20, 8 runs)     79% (127 of 159, 19 runs)
+after 3 or more boundaries                                     -       84% (75 of 85, 12 runs)
+whole run                              74% (116 of 158, 20 runs)     62% (209 of 355, 23 runs)
+stock: 24 runs, test files changed in 0, commits 175, well formed 138
+Posthorse: 24 runs, test files changed in 0, commits 255, well formed 239

@@ -4,6 +4,23 @@
 
 - Keep Claude's reasoning in the retained replies across an automatic rollover on [fitchmultz/pi](https://github.com/fitchmultz/pi). Claude drops that reasoning when the messages before it change, and every rollover changes them. Posthorse now asks the fork for a provider summary block: one more request to the session's model, answered with one line that points to the task note. The block stands where the older messages stood, so the retained replies keep their reasoning. The notes, the recovery record and the retained messages still hold the task state, and the block holds none. This applies to Claude models of the `anthropic` and `cloudflare-ai-gateway` providers. Official Pi and other models send no request and are unchanged. See [Claude reasoning in the retained tail](docs/context-recovery.md#claude-reasoning-in-the-retained-tail).
 
+## 0.10.21 - 2026-11-11
+
+<!-- npm-release:unreleased:start -->
+
+- Add a [controlled comparison](docs/controlled-comparison.md) of Posthorse and stock Pi compaction: 144 unattended two-hour coding sessions on two models, scored for tests passing, stops with work left, kept rules, wait time, and cost. The harness, the tables, and the stop labels are under `ARTIFACTS/controlled-comparison/` (#140).
+
+<!-- npm-release:unreleased:end -->
+
+- Wake the version workflow only for release events (#170) ([6618510](https://github.com/fitchmultz/pi-posthorse/commit/6618510e89a15dfbb88cda8ba9479a7b24712f48))
+
+### What's Changed
+
+- Wake the version workflow only for release events by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/170
+- docs: add controlled comparison with stock compaction by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/169
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.20...v0.10.21
+
 ## 0.10.20 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->

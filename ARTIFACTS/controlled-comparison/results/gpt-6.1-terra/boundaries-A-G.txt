@@ -1,0 +1,23 @@
+                                                         stockstock + paragraph
+Boundaries                                                  11              17
+Seconds blocked per boundary, median                      31.1            25.9
+Seconds blocked per boundary, mean                        34.3            26.9
+Seconds blocked, largest                                  54.8            41.2
+Hours blocked, all runs                                   0.10            0.13
+Context before a boundary, median                      111,924         111,988
+Context after a boundary, median                        23,597          23,317
+Summary request cost per boundary, mean              0.062 USD       0.061 USD
+Summary request input tokens, mean                      57,058          55,145
+Summary request output tokens, mean                      1,037           1,098
+File reads in the 10 replies after, mean                  3.18            3.29
+  of files already seen (after)                           1.64            2.76
+  of files already seen (10 replies before)               1.18            1.59
+Tests gained in the 10 min after, mean                       -               -
+Replies that only updated notes, per run                   0.0             0.0
+  their share of the run's cost                           0.0%            0.0%
+Notes tool calls per run                                   0.0             0.0
+History tool calls per run                                 0.0             0.0
+
+Seconds blocked by position of the boundary in its session (mean, count):
+  stock: #1 35 s (n=10), #2 31 s (n=1)
+  stock + paragraph: #1 26 s (n=11), #2 28 s (n=6)

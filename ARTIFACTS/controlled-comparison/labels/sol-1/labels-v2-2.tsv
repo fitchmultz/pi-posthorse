@@ -1,0 +1,44 @@
+a001	cannot	unchanged test defects or missing Swift prerequisites
+a002	remains	Incomplete
+a003	cannot	all attributable to prohibited test-helper repairs or unavailable Swift infrastructure
+a004	remains	incomplete
+a005	cannot	Fixing the test helpers would violate your no-test-edits rule.
+a006	remains	incomplete
+a007	documented	unchanged blockers, individually documented
+a008	remains	missing application bootstrap methods
+a009	cannot	require a running OpenStack Swift service and credentials
+a010	remains	Incomplete
+a011	remains	753 failed, 21 errors
+a012	remains	Incomplete
+a013	documented	Every remaining failure is documented
+a014	cannot	No further compliant fix is available
+a015	remains	incomplete
+a016	remains	the compiler serializes ASTs for interpretation rather than emitting those source patterns
+a017	documented	Every remaining blocker is documented
+a018	remains	incomplete
+a019	remains	missing application initialization APIs
+a020	cannot	cannot be changed under your rules
+a021	remains	Partial implementation
+a022	cannot	require an unavailable Swift service and configuration
+a023	remains	incomplete
+a024	documented	All 998 remaining failures/errors are documented
+a025	documented	Remaining blockers are documented individually
+a026	documented	Every remaining failure is documented
+a027	remains	not yet passing
+a028	remains	still not passing
+a029	cannot	all remaining outcomes blocked by immutable test defects or missing Swift configuration
+a030	remains	683 failed, 21 errors
+a031	remains	incomplete
+a032	cannot	Further fixes require changing the no-test-edits constraint or supplying Swift infrastructure.
+a033	cannot	Remaining failures require restoring prohibited test fixtures/teardown or supplying an external Swift service and credentials.
+a034	cannot	Stripped immutable test helpers
+a035	remains	Incomplete
+a036	remains	unfinished builders/transforms
+a037	remains	Incomplete
+a038	cannot	stripped test infrastructure and unavailable Swift service configuration
+a039	remains	Core directives and domain APIs remain major blockers
+a040	remains	Incomplete
+a041	remains	not yet passing
+a042	cannot	All remaining failures are Swift integration tests requiring external OpenStack Swift configuration.
+a043	documented	All remaining failures/errors are explained
+a044	cannot	blocked by the original constraints

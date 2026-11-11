@@ -1,0 +1,7 @@
+                                                           stock             stock + paragraph
+before any boundary                    75% (100 of 138, 19 runs)      66% (86 of 152, 23 runs)
+after 1 or more boundaries                85% (16 of 20, 8 runs)        98% (36 of 37, 9 runs)
+after 3 or more boundaries                                     -                             -
+whole run                              74% (116 of 158, 20 runs)     69% (122 of 189, 23 runs)
+stock: 24 runs, test files changed in 0, commits 175, well formed 138
+stock + paragraph: 24 runs, test files changed in 0, commits 166, well formed 136

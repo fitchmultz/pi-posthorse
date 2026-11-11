@@ -1,0 +1,44 @@
+a001	cannot	from unchanged test defects or missing Swift prerequisites
+a002	remains	Remaining failures still require implementation
+a003	cannot	all attributable to prohibited test-helper repairs or unavailable Swift infrastructure
+a004	remains	Work remains incomplete
+a005	cannot	Fixing the test helpers would violate your no-test-edits rule
+a006	remains	The implementation remains incomplete
+a007	documented	unchanged blockers, individually documented
+a008	remains	Main blocker: missing application bootstrap methods
+a009	cannot	9 externally blocked failures
+a010	remains	other library implementations also remain unfinished
+a011	remains	687 passed, 753 failed, 21 errors
+a012	remains	these are not established as unfixable
+a013	documented	Every remaining failure is documented
+a014	cannot	No further compliant fix is available for these failures
+a015	remains	Full suite remains incomplete
+a016	documented	These fail because the compiler serializes ASTs for interpretation
+a017	documented	Every remaining blocker is documented
+a018	remains	The task remains incomplete
+a019	remains	missing application initialization APIs
+a020	cannot	cannot be changed under your rules
+a021	remains	Partial implementation
+a022	cannot	Repair requires changing a prohibited test file
+a023	remains	Suite remains incomplete
+a024	documented	remaining failures/errors are documented
+a025	documented	Remaining blockers are documented individually
+a026	documented	Every remaining failure is documented
+a027	remains	The suite is not yet passing
+a028	remains	The suite is still not passing
+a029	cannot	blocked by immutable test defects or missing Swift configuration
+a030	remains	757 passed, 683 failed, 21 errors
+a031	remains	the suite remains incomplete
+a032	cannot	Further fixes require changing the no-test-edits constraint or supplying Swift infrastructure
+a033	cannot	require restoring prohibited test fixtures/teardown or supplying an external Swift service
+a034	cannot	Stripped immutable test helpers
+a035	remains	substantial implementation remains
+a036	remains	unfinished builders/transforms
+a037	remains	Incomplete
+a038	cannot	stripped test infrastructure and unavailable Swift service configuration
+a039	remains	Core directives and domain APIs remain major blockers
+a040	remains	I could not finish that reconstruction in this run
+a041	remains	The suite is not yet passing
+a042	cannot	requiring external OpenStack Swift configuration
+a043	documented	All remaining failures/errors are explained
+a044	cannot	blocked by the original constraints

@@ -7,7 +7,8 @@ Pi compaction?
 
 The study is observational. It is not a controlled comparison on matched tasks, and it does not
 measure whether the work after a rollover was correct. [Limits](#limits) lists what the numbers
-cannot show.
+cannot show. The [controlled comparison](controlled-comparison.md) runs matched tasks on both
+designs.
 
 ## What the study covers
 
@@ -204,8 +205,8 @@ requests within 5 replies of a Posthorse boundary, and all 9 trace to those two 
 - _During a tool loop_ means that the last message before the boundary was a tool result or an
   assistant message that requested a tool.
 
-## What comes next
+## The controlled comparison
 
-A controlled comparison is still missing: the same tasks, run with stock compaction and with
-Posthorse, scored for completion, recovery of constraints, repeated work, time, and tokens.
-[Issue #140](https://github.com/fitchmultz/pi-posthorse/issues/140) tracks it.
+The [controlled comparison](controlled-comparison.md) runs the same tasks with stock compaction
+and with Posthorse. It scores the tests passing, the stops with work left, the rules that
+survive a boundary, repeated reads, time, and tokens.

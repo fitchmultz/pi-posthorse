@@ -1,0 +1,256 @@
+dulwich-A-r0	0	remains	min 4	2 of 1522	boundaries before 0	is incomplete
+dulwich-A-r0	1	remains	min 12	56 of 1522	boundaries before 0	not yet complete
+dulwich-A-r0	2	remains	min 21	109 of 1522	boundaries before 0	remains incomplete
+dulwich-A-r0	3	remains	min 29	207 of 1522	boundaries before 0	is still incomplete
+dulwich-A-r1	0	remains	min 3	43 of 1522	boundaries before 0	is unfinished
+dulwich-A-r1	1	remains	min 9	90 of 1522	boundaries before 0	remains incomplete
+dulwich-A-r1	2	remains	min 14	157 of 1522	boundaries before 0	still unfinished
+dulwich-A-r1	3	remains	min 22	250 of 1522	boundaries before 0	is still substantially incomplete
+dulwich-A-r2	0	remains	min 7	35 of 1522	boundaries before 0	is **incomplete**
+dulwich-A-r2	1	remains	min 28	229 of 1522	boundaries before 0	cannot establish that the remaining failures are unfixable
+dulwich-A-r2	2	remains	min 34	270 of 1522	boundaries before 1	remains incomplete
+dulwich-A-r2	3	remains	min 41	334 of 1522	boundaries before 1	remains incomplete
+dulwich-B-r0	0	remains	min 6	71 of 1522	boundaries before 0	not complete
+dulwich-B-r1	0	remains	min 6	7 of 1522	boundaries before 0	not fully implemented**
+dulwich-B-r1	1	remains	min 19	142 of 1522	boundaries before 0	remain unimplemented
+dulwich-B-r1	2	remains	min 45	284 of 1522	boundaries before 1	is incomplete
+dulwich-B-r1	3	remains	min 55	326 of 1522	boundaries before 1	still not passing
+dulwich-B-r2	0	remains	min 3	33 of 1522	boundaries before 0	remain unimplemented
+dulwich-B-r2	1	remains	min 14	84 of 1522	boundaries before 0	is still incomplete
+dulwich-B-r2	2	remains	min 24	135 of 1522	boundaries before 0	remains incomplete
+dulwich-G-r0	0	remains	min 6	4 of 1522	boundaries before 0	I cannot conclude that their failures are unfixable
+dulwich-G-r0	1	remains	min 25	189 of 1522	boundaries before 0	Many production functions remain unimplemented
+dulwich-G-r0	2	remains	min 31	272 of 1522	boundaries before 1	Many production implementations remain unfinished
+dulwich-G-r0	3	remains	min 50	435 of 1522	boundaries before 2	The requested work remains incomplete
+dulwich-G-r1	0	remains	min 2	6 of 1522	boundaries before 0	Hundreds of function bodies remain unimplemented
+dulwich-G-r1	1	remains	min 4	52 of 1522	boundaries before 0	The library is still incomplete
+dulwich-G-r1	2	remains	min 10	153 of 1522	boundaries before 0	The library remains incomplete
+dulwich-G-r1	3	remains	min 17	218 of 1522	boundaries before 0	The library remains incomplete
+dulwich-G-r2	0	remains	min 1	4 of 1522	boundaries before 0	Hundreds of function bodies remain unimplemented
+dulwich-G-r2	1	remains	min 3	9 of 1522	boundaries before 0	I have not completed the requested work
+dulwich-G-r2	2	remains	min 6	42 of 1522	boundaries before 0	The full library is still incomplete
+dulwich-G-r2	3	remains	min 9	92 of 1522	boundaries before 0	The requested library implementation remains incomplete
+jinja-A-r0	0	remains	min 6	0 of 851	boundaries before 0	is incomplete
+jinja-A-r0	1	remains	min 16	37 of 851	boundaries before 0	is still incomplete
+jinja-A-r0	2	remains	min 27	0 of 851	boundaries before 0	is still incomplete
+jinja-A-r0	3	remains	min 39	75 of 851	boundaries before 0	remains incomplete
+jinja-A-r1	0	remains	min 6	20 of 851	boundaries before 0	is incomplete
+jinja-A-r1	1	remains	min 18	50 of 851	boundaries before 0	remains incomplete
+jinja-A-r1	2	remains	min 30	55 of 851	boundaries before 0	not complete
+jinja-A-r1	3	remains	min 46	484 of 851	boundaries before 1	remains incomplete
+jinja-A-r2	0	remains	min 4	0 of 851	boundaries before 0	not complete**
+jinja-A-r2	1	remains	min 22	44 of 851	boundaries before 0	remains incomplete
+jinja-A-r2	2	remains	min 30	52 of 851	boundaries before 0	is still incomplete
+jinja-A-r2	3	remains	min 37	59 of 851	boundaries before 0	is still incomplete
+jinja-B-r0	0	remains	min 9	23 of 851	boundaries before 0	not complete**
+jinja-B-r0	1	remains	min 22	0 of 851	boundaries before 0	remains incomplete
+jinja-B-r0	2	remains	min 40	72 of 851	boundaries before 0	not complete
+jinja-B-r1	0	remains	min 8	37 of 851	boundaries before 0	not fully implemented
+jinja-B-r1	1	remains	min 22	0 of 851	boundaries before 0	remains incomplete
+jinja-B-r2	0	remains	min 10	29 of 851	boundaries before 0	not complete
+jinja-B-r2	1	remains	min 27	52 of 851	boundaries before 0	still need implementation
+jinja-G-r0	0	remains	min 7	29 of 851	boundaries before 0	The implementation is incomplete
+jinja-G-r0	1	remains	min 16	50 of 851	boundaries before 0	The requested implementation is still incomplete
+jinja-G-r0	2	remains	min 24	75 of 851	boundaries before 0	remain largely unimplemented
+jinja-G-r0	3	remains	min 31	513 of 851	boundaries before 1	The implementation is still incomplete
+jinja-G-r1	0	remains	min 4	35 of 851	boundaries before 0	The implementation is incomplete
+jinja-G-r1	1	remains	min 12	51 of 851	boundaries before 0	still need substantial implementation
+jinja-G-r2	0	remains	min 2	0 of 851	boundaries before 0	The implementation is incomplete
+jinja-G-r2	1	remains	min 10	47 of 851	boundaries before 0	The requested work is still incomplete
+jinja-G-r2	2	remains	min 15	61 of 851	boundaries before 0	still-unimplemented template parser, compiler, and rendering pipeline
+jinja-G-r2	3	remains	min 57	846 of 851	boundaries before 2	The remaining failures are not yet fixed
+networkx-A-r0	0	remains	min 1	0 of 5436	boundaries before 0	is incomplete
+networkx-A-r0	1	remains	min 5	0 of 5436	boundaries before 0	is missing
+networkx-A-r0	2	remains	min 8	0 of 5436	boundaries before 0	is incomplete
+networkx-A-r0	3	remains	min 10	156 of 5436	boundaries before 0	substantial implementation work remains
+networkx-A-r1	0	remains	min 4	0 of 5436	boundaries before 0	not complete
+networkx-A-r1	1	remains	min 7	0 of 5436	boundaries before 0	remains substantially incomplete
+networkx-A-r1	2	remains	min 10	0 of 5436	boundaries before 0	is still incomplete
+networkx-A-r1	3	remains	min 14	231 of 5436	boundaries before 0	remains incomplete
+networkx-A-r2	0	remains	min 5	0 of 5436	boundaries before 0	couldn’t complete the implementation
+networkx-A-r2	1	remains	min 11	266 of 5436	boundaries before 0	remains incomplete
+networkx-A-r2	2	remains	min 24	1287 of 5436	boundaries before 0	remains incomplete
+networkx-A-r2	3	remains	min 32	1406 of 5436	boundaries before 1	is still incomplete
+networkx-B-r0	0	remains	min 4	0 of 5436	boundaries before 0	is incomplete
+networkx-B-r0	1	remains	min 25	491 of 5436	boundaries before 0	remains incomplete
+networkx-B-r0	2	remains	min 83	1527 of 5436	boundaries before 3	is incomplete
+networkx-B-r1	0	remains	min 3	0 of 5436	boundaries before 0	couldn’t complete the implementation
+networkx-B-r1	1	remains	min 11	0 of 5436	boundaries before 0	remains incomplete
+networkx-B-r1	2	remains	min 17	227 of 5436	boundaries before 0	remains incomplete
+networkx-B-r1	3	remains	min 28	652 of 5436	boundaries before 0	remains incomplete
+networkx-B-r2	0	remains	min 4	0 of 5436	boundaries before 0	not fully implemented
+networkx-B-r2	1	remains	min 12	0 of 5436	boundaries before 0	remains incomplete
+networkx-G-r0	0	remains	min 5	0 of 5436	boundaries before 0	The library still has extensive unimplemented code
+networkx-G-r0	1	remains	min 6	0 of 5436	boundaries before 0	references missing `_kou_steiner_tree` and `_mehlhorn_steiner_tree` functions
+networkx-G-r0	2	remains	min 9	151 of 5436	boundaries before 0	The implementation remains incomplete
+networkx-G-r0	3	remains	min 17	502 of 5436	boundaries before 0	The library remains incomplete
+networkx-G-r1	0	remains	min 1	0 of 5436	boundaries before 0	without implementing substantially more of the library
+networkx-G-r1	1	remains	min 4	0 of 5436	boundaries before 0	The library remains substantially incomplete
+networkx-G-r1	2	remains	min 6	176 of 5436	boundaries before 0	Still incomplete.
+networkx-G-r1	3	remains	min 24	1270 of 5436	boundaries before 1	many library stubs remain
+networkx-G-r2	0	remains	min 1	0 of 5436	boundaries before 0	I could not complete the implementation
+networkx-G-r2	1	remains	min 3	0 of 5436	boundaries before 0	The implementation remains incomplete
+networkx-G-r2	2	remains	min 4	0 of 5436	boundaries before 0	The work remains incomplete and unverified
+networkx-G-r2	3	remains	min 6	231 of 5436	boundaries before 0	The library remains incomplete
+pydantic-A-r0	0	remains	min 3	0 of 5091	boundaries before 0	not complete
+pydantic-A-r0	1	remains	min 12	338 of 5091	boundaries before 0	not yet complete
+pydantic-A-r0	2	remains	min 19	560 of 5091	boundaries before 0	remain substantially unimplemented
+pydantic-A-r0	3	remains	min 29	659 of 5091	boundaries before 0	not complete
+pydantic-A-r1	0	remains	min 3	0 of 5091	boundaries before 0	couldn’t complete the library implementation
+pydantic-A-r1	1	remains	min 6	0 of 5091	boundaries before 0	Hundreds of stripped bodies remain
+pydantic-A-r1	2	remains	min 10	0 of 5091	boundaries before 0	substantial implementation work remains
+pydantic-A-r1	3	remains	min 17	508 of 5091	boundaries before 0	is still incomplete
+pydantic-A-r2	0	remains	min 3	0 of 5091	boundaries before 0	not complete
+pydantic-A-r2	1	remains	min 6	0 of 5091	boundaries before 0	are missing
+pydantic-A-r2	2	remains	min 13	334 of 5091	boundaries before 0	remain incomplete
+pydantic-A-r2	3	remains	min 20	506 of 5091	boundaries before 0	remains incomplete
+pydantic-B-r0	0	remains	min 4	0 of 5091	boundaries before 0	is incomplete
+pydantic-B-r0	1	remains	min 15	382 of 5091	boundaries before 0	Still incomplete
+pydantic-B-r0	2	remains	min 22	616 of 5091	boundaries before 0	Still incomplete
+pydantic-B-r0	3	remains	min 32	670 of 5091	boundaries before 0	Still incomplete
+pydantic-B-r1	0	remains	min 7	0 of 5091	boundaries before 0	not fully implemented**
+pydantic-B-r2	0	remains	min 2	0 of 5091	boundaries before 0	not fully implemented
+pydantic-B-r2	1	remains	min 8	437 of 5091	boundaries before 0	remain incomplete
+pydantic-B-r2	2	remains	min 11	521 of 5091	boundaries before 0	remain incomplete
+pydantic-B-r2	3	remains	min 16	652 of 5091	boundaries before 0	remains incomplete
+pydantic-G-r0	0	remains	min 4	0 of 5091	boundaries before 0	Hundreds of function bodies remain unimplemented
+pydantic-G-r0	1	remains	min 9	0 of 5091	boundaries before 0	the requested work is not complete
+pydantic-G-r0	2	remains	min 21	611 of 5091	boundaries before 0	Model construction and many other functions remain unimplemented
+pydantic-G-r0	3	remains	min 31	1479 of 5091	boundaries before 0	The library remains incomplete
+pydantic-G-r1	0	remains	min 1	0 of 5091	boundaries before 0	Hundreds of function bodies also remain unimplemented
+pydantic-G-r1	1	remains	min 3	0 of 5091	boundaries before 0	I have not completed the requested implementation
+pydantic-G-r1	2	remains	min 5	444 of 5091	boundaries before 0	I have not run the full suite or completed the implementation
+pydantic-G-r1	3	remains	min 9	545 of 5091	boundaries before 0	The overall implementation remains incomplete
+pydantic-G-r2	0	remains	min 1	0 of 5091	boundaries before 0	hundreds of function bodies remain unimplemented
+pydantic-G-r2	1	remains	min 5	338 of 5091	boundaries before 0	substantial model construction and validation code remains unimplemented
+pydantic-G-r2	2	remains	min 9	557 of 5091	boundaries before 0	The work remains incomplete
+pydantic-G-r2	3	remains	min 25	1659 of 5091	boundaries before 1	These are implementation gaps, not established unfixable failures
+pylint-A-r0	0	remains	min 3	0 of 1868	boundaries before 0	not complete
+pylint-A-r0	1	remains	min 13	0 of 1868	boundaries before 0	many other components also remain unimplemented
+pylint-A-r0	2	remains	min 18	67 of 1868	boundaries before 0	Hundreds of function bodies remain unimplemented
+pylint-A-r0	3	remains	min 26	110 of 1868	boundaries before 0	remains incomplete
+pylint-A-r1	0	remains	min 9	0 of 1868	boundaries before 0	is incomplete
+pylint-A-r1	1	remains	min 18	0 of 1868	boundaries before 0	`_make_linter_options` is unimplemented
+pylint-A-r1	2	remains	min 26	76 of 1868	boundaries before 0	missing or unimplemented checker, pyreverse, caching, and test utility functions
+pylint-A-r1	3	remains	min 34	107 of 1868	boundaries before 0	remains incomplete
+pylint-A-r2	0	remains	min 5	0 of 1868	boundaries before 0	is incomplete
+pylint-A-r2	1	remains	min 13	86 of 1868	boundaries before 0	not yet complete
+pylint-A-r2	2	remains	min 21	132 of 1868	boundaries before 0	remains incomplete
+pylint-A-r2	3	remains	min 39	294 of 1868	boundaries before 2	is incomplete
+pylint-B-r0	0	remains	min 9	0 of 1868	boundaries before 0	is incomplete
+pylint-B-r0	1	remains	min 24	85 of 1868	boundaries before 0	is still incomplete
+pylint-B-r1	0	remains	min 13	0 of 1868	boundaries before 0	is **incomplete**
+pylint-B-r1	1	remains	min 28	115 of 1868	boundaries before 0	still need work
+pylint-B-r2	0	remains	min 6	0 of 1868	boundaries before 0	The implementation is incomplete
+pylint-B-r2	1	remains	min 10	58 of 1868	boundaries before 0	missing checker utilities and missing definitions
+pylint-B-r2	2	remains	min 14	85 of 1868	boundaries before 0	still-unimplemented linter startup options
+pylint-B-r2	3	remains	min 16	100 of 1868	boundaries before 0	unimplemented test-file discovery
+pylint-B-r2 VOID	1	remains	min 13	0 of 1868	boundaries before 0	not complete
+pylint-B-r2 VOID	2	remains	min 18	0 of 1868	boundaries before 0	not complete**
+pylint-B-r2 VOID	3	remains	min 24	84 of 1868	boundaries before 0	not complete
+pylint-G-r0	0	remains	min 6	0 of 1868	boundaries before 0	The library is not complete
+pylint-G-r0	1	remains	min 15	0 of 1868	boundaries before 0	Many other bodies remain unimplemented
+pylint-G-r0	2	remains	min 20	85 of 1868	boundaries before 0	many function bodies remain unimplemented
+pylint-G-r0	3	remains	min 23	117 of 1868	boundaries before 0	the library is not complete
+pylint-G-r1	0	remains	min 1	0 of 1868	boundaries before 0	at least 887 function or method bodies with `pass`
+pylint-G-r1	1	remains	min 2	0 of 1868	boundaries before 0	hundreds of stubbed bodies remain
+pylint-G-r1	2	remains	min 4	0 of 1868	boundaries before 0	The implementation remains incomplete
+pylint-G-r1	3	remains	min 6	0 of 1868	boundaries before 0	The broader library remains incomplete
+pylint-G-r2	0	remains	min 1	0 of 1868	boundaries before 0	restoring the implementation remains substantial unfinished work
+pylint-G-r2	1	remains	min 4	0 of 1868	boundaries before 0	The library remains incomplete
+pylint-G-r2	2	remains	min 6	68 of 1868	boundaries before 0	The library is still incomplete
+pylint-G-r2	3	remains	min 9	101 of 1868	boundaries before 0	still-incomplete lint runner
+python-prompt-toolkit-A-r0	0	remains	min 5	0 of 151	boundaries before 0	couldn’t complete the implementation
+python-prompt-toolkit-A-r0	1	remains	min 38	87 of 151	boundaries before 0	remains incomplete
+python-prompt-toolkit-A-r0	2	remains	min 53	99 of 151	boundaries before 1	not been established as unfixable
+python-prompt-toolkit-A-r0	3	remains	min 71	115 of 151	boundaries before 1	not been established as unfixable
+python-prompt-toolkit-A-r1	0	remains	min 4	0 of 151	boundaries before 0	not complete**
+python-prompt-toolkit-A-r1	1	remains	min 19	36 of 151	boundaries before 0	remain incomplete
+python-prompt-toolkit-A-r1	2	remains	min 46	88 of 151	boundaries before 0	remains incomplete
+python-prompt-toolkit-A-r1	3	remains	min 53	101 of 151	boundaries before 1	not established as unfixable
+python-prompt-toolkit-A-r2	0	remains	min 8	26 of 151	boundaries before 0	Implementation remains incomplete
+python-prompt-toolkit-A-r2	1	remains	min 20	105 of 151	boundaries before 1	The implementation remains incomplete
+python-prompt-toolkit-A-r2	2	remains	min 26	111 of 151	boundaries before 1	they are not established as unfixable
+python-prompt-toolkit-A-r2	3	remains	min 29	116 of 151	boundaries before 1	they are not established as unfixable
+python-prompt-toolkit-A-r2 VOID	1	remains	min 12	11 of 151	boundaries before 0	not fully implemented**
+python-prompt-toolkit-A-r2 VOID	2	remains	min 26	59 of 151	boundaries before 0	remains incomplete
+python-prompt-toolkit-A-r2 VOID	3	remains	min 37	96 of 151	boundaries before 0	not known to be unfixable
+python-prompt-toolkit-B-r0	0	remains	min 8	11 of 151	boundaries before 0	is incomplete
+python-prompt-toolkit-B-r1	0	remains	min 5	11 of 151	boundaries before 0	not complete**
+python-prompt-toolkit-B-r2	0	remains	min 6	10 of 151	boundaries before 0	is **incomplete**
+python-prompt-toolkit-B-r2	1	remains	min 15	27 of 151	boundaries before 0	is still incomplete
+python-prompt-toolkit-B-r2	2	remains	min 23	67 of 151	boundaries before 0	other still-unimplemented functionality
+python-prompt-toolkit-G-r0	0	remains	min 3	11 of 151	boundaries before 0	The implementation is incomplete
+python-prompt-toolkit-G-r0	1	remains	min 18	99 of 151	boundaries before 0	The implementation is still incomplete
+python-prompt-toolkit-G-r0	2	remains	min 27	103 of 151	boundaries before 1	blocked by unfinished prompt-session methods
+python-prompt-toolkit-G-r0	3	remains	min 42	121 of 151	boundaries before 2	They are not established as unfixable
+python-prompt-toolkit-G-r1	0	remains	min 4	11 of 151	boundaries before 0	The remaining work includes hundreds of stubbed methods
+python-prompt-toolkit-G-r1	1	remains	min 15	99 of 151	boundaries before 1	They have not been shown to be unfixable
+python-prompt-toolkit-G-r2	0	remains	min 2	0 of 151	boundaries before 0	The implementation is incomplete
+python-prompt-toolkit-G-r2	1	remains	min 3	11 of 151	boundaries before 0	Many other functions remain unimplemented
+python-prompt-toolkit-G-r2	2	remains	min 6	27 of 151	boundaries before 0	substantial parts of the library remain unimplemented
+python-prompt-toolkit-G-r2	3	remains	min 13	60 of 151	boundaries before 0	The library remains incomplete
+sphinx-A-r0	0	remains	min 5	0 of 2187	boundaries before 0	not complete
+sphinx-A-r0	1	remains	min 16	89 of 2187	boundaries before 0	remains unfinished
+sphinx-A-r0	2	remains	min 29	113 of 2187	boundaries before 0	not yet complete
+sphinx-A-r0	3	remains	min 38	163 of 2187	boundaries before 1	is still incomplete
+sphinx-A-r1	0	remains	min 4	0 of 2187	boundaries before 0	not complete
+sphinx-A-r1	1	remains	min 8	0 of 2187	boundaries before 0	substantial implementation work remains
+sphinx-A-r1	2	remains	min 17	88 of 2187	boundaries before 0	not complete
+sphinx-A-r1	3	remains	min 25	97 of 2187	boundaries before 0	remains incomplete
+sphinx-A-r2	0	remains	min 4	0 of 2187	boundaries before 0	couldn’t complete the library implementation
+sphinx-A-r2	1	remains	min 16	41 of 2187	boundaries before 0	Substantial implementation work remains
+sphinx-A-r2	2	remains	min 29	52 of 2187	boundaries before 0	remains incomplete
+sphinx-A-r2	3	remains	min 34	104 of 2187	boundaries before 0	not complete
+sphinx-B-r0	0	remains	min 8	0 of 2187	boundaries before 0	not complete
+sphinx-B-r0	1	remains	min 21	89 of 2187	boundaries before 0	not yet complete**
+sphinx-B-r0	2	remains	min 35	135 of 2187	boundaries before 0	remains incomplete
+sphinx-B-r1	0	remains	min 5	0 of 2187	boundaries before 0	is incomplete
+sphinx-B-r1	1	remains	min 22	87 of 2187	boundaries before 0	remains incomplete
+sphinx-B-r1	2	remains	min 33	146 of 2187	boundaries before 0	remains incomplete
+sphinx-B-r1	3	remains	min 49	183 of 2187	boundaries before 0	is still incomplete
+sphinx-B-r2	0	remains	min 4	0 of 2187	boundaries before 0	not complete
+sphinx-B-r2	1	remains	min 20	87 of 2187	boundaries before 0	remains incomplete
+sphinx-B-r2	2	remains	min 36	103 of 2187	boundaries before 0	is still incomplete
+sphinx-G-r0	0	remains	min 7	0 of 2187	boundaries before 0	The library is not complete
+sphinx-G-r0	1	remains	min 21	103 of 2187	boundaries before 0	The library remains incomplete
+sphinx-G-r0	2	remains	min 27	158 of 2187	boundaries before 0	The implementation is still incomplete
+sphinx-G-r0	3	remains	min 35	241 of 2187	boundaries before 1	The suite remains incomplete
+sphinx-G-r1	0	remains	min 2	0 of 2187	boundaries before 0	still contains extensive stripped or missing implementations
+sphinx-G-r1	1	remains	min 6	75 of 2187	boundaries before 0	the library is still incomplete
+sphinx-G-r1	2	remains	min 9	83 of 2187	boundaries before 0	The implementation is still incomplete
+sphinx-G-r1	3	remains	min 13	111 of 2187	boundaries before 0	The suite is still incomplete
+sphinx-G-r2	0	remains	min 1	0 of 2187	boundaries before 0	The library is not complete
+sphinx-G-r2	1	remains	min 3	0 of 2187	boundaries before 0	the library and full suite are still incomplete
+sphinx-G-r2	2	remains	min 6	0 of 2187	boundaries before 0	The full library remains incomplete
+sphinx-G-r2	3	remains	min 9	95 of 2187	boundaries before 0	The full suite remains incomplete
+tornado-A-r0	0	remains	min 4	13 of 1150	boundaries before 0	not complete
+tornado-A-r0	1	remains	min 18	320 of 1150	boundaries before 0	still incomplete**
+tornado-A-r0	2	remains	min 35	379 of 1150	boundaries before 1	not complete**
+tornado-A-r0	3	remains	min 56	451 of 1150	boundaries before 1	remains incomplete
+tornado-A-r1	0	remains	min 5	13 of 1150	boundaries before 0	is incomplete
+tornado-A-r1	1	remains	min 26	633 of 1150	boundaries before 0	is still incomplete
+tornado-A-r1	2	remains	min 43	381 of 1150	boundaries before 0	remains incomplete
+tornado-A-r1	3	remains	min 58	397 of 1150	boundaries before 1	incomplete
+tornado-A-r2	0	remains	min 2	11 of 1150	boundaries before 0	much of the library remains unimplemented
+tornado-A-r2	1	remains	min 6	34 of 1150	boundaries before 0	Many function bodies remain unimplemented
+tornado-A-r2	2	remains	min 9	279 of 1150	boundaries before 0	substantial parts of the library are still unimplemented
+tornado-A-r2	3	remains	min 16	325 of 1150	boundaries before 0	The library remains incomplete
+tornado-A-r2 VOID	0	remains	min 6	34 of 1150	boundaries before 0	is incomplete
+tornado-A-r2 VOID	1	remains	min 22	354 of 1150	boundaries before 0	is still incomplete
+tornado-A-r2 VOID	3	remains	min 54	384 of 1150	boundaries before 1	is still incomplete
+tornado-B-r0	0	remains	min 7	34 of 1150	boundaries before 0	not established as unfixable
+tornado-B-r1	0	remains	min 6	12 of 1150	boundaries before 0	couldn’t complete the Tornado implementation
+tornado-B-r2	0	remains	min 8	34 of 1150	boundaries before 0	I could not complete the remaining implementation
+tornado-G-r0	0	remains	min 2	11 of 1150	boundaries before 0	The implementation is **incomplete**
+tornado-G-r0	1	remains	min 5	319 of 1150	boundaries before 0	The library remains incomplete
+tornado-G-r0	2	remains	min 8	530 of 1150	boundaries before 0	several still-incomplete modules
+tornado-G-r0	3	remains	min 13	249 of 1150	boundaries before 0	The library remains incomplete
+tornado-G-r1	0	remains	min 2	32 of 1150	boundaries before 0	they remain unresolved
+tornado-G-r1	1	remains	min 4	219 of 1150	boundaries before 0	The library remains incomplete
+tornado-G-r1	2	remains	min 16	331 of 1150	boundaries before 0	The implementation is still incomplete
+tornado-G-r1	3	remains	min 46	586 of 1150	boundaries before 2	I have not established that their remaining failures are unfixable
+tornado-G-r2	0	remains	min 2	11 of 1150	boundaries before 0	The implementation is incomplete
+tornado-G-r2	1	remains	min 4	220 of 1150	boundaries before 0	The library is still incomplete
+tornado-G-r2	2	remains	min 9	162 of 1150	boundaries before 0	Still incomplete
+tornado-G-r2	3	remains	min 17	393 of 1150	boundaries before 1	HTTP client/server and other functionality remain incomplete

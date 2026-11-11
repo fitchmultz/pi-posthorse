@@ -37,6 +37,8 @@ Recoverable history is not guaranteed model recall. See the [practical guarantee
 
 The [field study](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/field-study.md) measures what agents did around 24,940 context boundaries in daily use: note and history use, repeated work, stops, wait time, and cost. It is observational, not a controlled comparison with stock compaction.
 
+The [controlled comparison](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/controlled-comparison.md) runs the same two-hour coding tasks with stock compaction and with Posthorse on two models. It reports how often the agent stopped with work left, the tests passing, the wait at boundaries, and the cost. It covers one benchmark family and two models of one provider.
+
 ## Tools
 
 These tools are available to the model:

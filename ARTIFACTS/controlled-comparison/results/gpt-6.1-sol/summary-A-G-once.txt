@@ -1,0 +1,47 @@
+Runs ended: 48 (stock 24, stock + paragraph 24); still running: 0
+Not counted: pylint-A-r1 (stock): the agent copied a finished copy of pylint from repo/build/lib (leftover in the benchmark image) at minute 17; repeated as pylint-A-r1 without the copy
+Not counted: sphinx-A-r0 (stock): ended at 102 of 120 minutes by a harness fault (patch read as UTF-8); repeated as sphinx-A-r0
+Graded with every test run once: 6 runs (networkx); the other runs have the official grade, which runs each test once
+
+## Per side (every library counts the same)
+                                                               stock       stock + paragraph
+Finished within the limit                                    9 of 24                 8 of 24
+Finished without a 'Continue.'                               8 of 24                 8 of 24
+Runs where the agent quit unfinished                        10 of 24                 8 of 24
+Times the agent quit unfinished                                   26                      20
+Turns ended by a provider error                                    1                       0
+Tests passing when the agent first stopped                     72.9%                   75.3%
+Minutes until the agent first stopped                           61.7                    72.7
+Tests passing at the end                                       83.0%                   79.8%
+Minutes per run, to finish or to the end                        87.1                    87.4
+Replies per run                                                  496                     489
+Context boundaries per run                                       3.9                     3.9
+Seconds blocked at boundaries per run                          196.3                   196.8
+Output tokens per run                                         121472                  121169
+Fresh input tokens per run                                    542334                  537468
+Cached input tokens per run                                 30512507                30508971
+List-price cost per run                                     5.77 USD                5.79 USD
+  of which summary requests                                 0.51 USD                0.51 USD
+List-price cost billed, all runs                          142.26 USD              140.17 USD
+
+## Runs that finished on both sides of a pair (same library, same repetition)
+Minutes to finish: 8 pairs. stock mean 37.0, median 24.8; stock + paragraph mean 33.4, median 23.0; stock + paragraph lower in 6 of 8
+List-price cost to finish: 8 pairs. stock mean 2.50 USD, median 1.72 USD; stock + paragraph mean 2.16 USD, median 1.52 USD; stock + paragraph lower in 6 of 8
+Output tokens to finish: 8 pairs. stock mean 61888, median 49075; stock + paragraph mean 52822, median 42446; stock + paragraph lower in 5 of 8
+
+## Difference, stock + paragraph minus stock, over pairs
+Tests passing when the agent first stopped: +2.4 points (95% interval -8.4 to +12.9; 8 libraries, 24 pairs; stock + paragraph higher in 9, lower in 8, equal in 7)
+Tests passing at the end: -3.2 points (95% interval -10.4 to +2.2; 8 libraries, 24 pairs; stock + paragraph higher in 5, lower in 11, equal in 8)
+Minutes, to finish or to the end: +0.3 min (95% interval -7.3 to +6.8; 8 libraries, 24 pairs; stock + paragraph higher in 6, lower in 9, equal in 9)
+List-price cost: +0.0 USD (95% interval -0.4 to +0.4; 8 libraries, 24 pairs; stock + paragraph higher in 11, lower in 13, equal in 0)
+
+## Per library (mean of the repetitions that ended): stock | stock + paragraph
+library                     runs  finished    quit        first stop        at min               end           min           USD    bound.      wait s
+dulwich                      3|3       0|0     3|3       42.6%|72.5%    52.6|104.3       72.5%|72.5%   101.3|115.5     6.50|7.47   5.0|5.0     259|247
+jinja                        3|3       3|3     1|0      99.8%|100.0%     24.9|19.9     100.0%|100.0%     25.5|19.9     1.66|1.34   1.0|1.0       24|30
+networkx                     3|3       0|0     0|0       87.1%|85.8%   120.0|120.0       87.1%|85.8%   120.0|120.0     6.05|6.71   4.0|4.3     198|221
+pydantic                     3|3       0|0     1|1       95.4%|66.6%    103.0|95.0       97.9%|72.7%   120.0|120.0     8.84|8.33   5.7|5.7     296|311
+pylint                       3|3       0|0     2|2       40.4%|46.2%     63.1|70.3       61.8%|54.3%    117.1|94.5     8.35|7.36   5.3|5.0     292|282
+python-prompt-toolkit        3|3       3|3     0|0     100.0%|100.0%     20.5|23.0     100.0%|100.0%     20.5|23.0     1.66|1.67   1.0|1.0       31|28
+sphinx                       3|3       0|0     3|2       17.7%|31.9%     33.4|63.0       44.5%|53.4%   115.7|120.0     8.15|8.67   5.0|5.7     287|312
+tornado                      3|3       3|2     0|0      100.0%|99.3%     76.6|86.3      100.0%|99.3%     76.6|86.3     4.92|4.73   4.0|3.3     183|144

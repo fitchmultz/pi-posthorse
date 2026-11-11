@@ -1,0 +1,50 @@
+dulwich-A-r0                       (no line states rule 2)
+dulwich-A-r1                       (no line states rule 2)
+dulwich-A-r2                       - Write the implementation independently; do not install dulwich or copy its code.
+dulwich-G-r0                       - Write the implementation independently; do not install dulwich or copy its code. No network access.
+dulwich-G-r1                       (no line states rule 2)
+dulwich-G-r2                       (no line states rule 2)
+jinja-A-r0                         (no line states rule 2)
+jinja-A-r1                         - Write the implementation independently. Do not install Jinja or copy its code.
+jinja-A-r2                         (no line states rule 2)
+jinja-G-r0                         - Write the implementation independently; do not install Jinja or copy its code.
+jinja-G-r1                         - Write the implementation independently; do not install Jinja or copy its code.
+jinja-G-r2                         - Implement independently; do not install Jinja or copy its code. No network access. | - Write the implementation independently. Do not install Jinja or copy its code from anywhere.
+networkx-A-r0                      (no line states rule 2)
+networkx-A-r1                      (no line states rule 2)
+networkx-A-r2                      - Write the implementation independently; do not install NetworkX or copy its code.
+networkx-G-r0                      (no line states rule 2)
+networkx-G-r1                      - Write the implementation independently; do not install NetworkX or copy its code.
+networkx-G-r2                      (no line states rule 2)
+pydantic-A-r0                      (no line states rule 2)
+pydantic-A-r1                      (no line states rule 2)
+pydantic-A-r2                      (no line states rule 2)
+pydantic-G-r0                      (no line states rule 2)
+pydantic-G-r1                      (no line states rule 2)
+pydantic-G-r2                      - Write the implementation independently; do not install Pydantic or copy its code. No network access.
+pylint-A-r0                        (no line states rule 2)
+pylint-A-r1                        (no line states rule 2)
+pylint-A-r2                        - Write the implementation independently; do not install pylint or copy its code.
+pylint-G-r0                        (no line states rule 2)
+pylint-G-r1                        (no line states rule 2)
+pylint-G-r2                        (no line states rule 2)
+python-prompt-toolkit-A-r0         - Write the implementation independently; do not install or copy the library. No network access.
+python-prompt-toolkit-A-r1         - Write the implementation independently; do not install or copy the library. No network access.
+python-prompt-toolkit-A-r2         - Write the implementation independently; do not install the library or copy its code.
+python-prompt-toolkit-A-r2-providererror (no line states rule 2)
+python-prompt-toolkit-G-r0         - Write the implementation independently; do not install the library or copy its code.
+python-prompt-toolkit-G-r1         - Write the implementation independently; do not install or copy the library. No network access is available.
+python-prompt-toolkit-G-r2         (no line states rule 2)
+sphinx-A-r0                        - Write the implementation independently; do not install Sphinx or copy its code. No network access.
+sphinx-A-r1                        (no line states rule 2)
+sphinx-A-r2                        (no line states rule 2)
+sphinx-G-r0                        - Write the implementation independently; do not install Sphinx or copy its code.
+sphinx-G-r1                        (no line states rule 2)
+sphinx-G-r2                        (no line states rule 2)
+tornado-A-r0                       - Implement the library independently; do not install Tornado or copy its code.
+tornado-A-r1                       - Write the implementation independently; do not install Tornado or copy its code.
+tornado-A-r2                       (no line states rule 2)
+tornado-A-r2-providererror         - Write the implementation independently; do not install Tornado or copy its code. No network access.
+tornado-G-r0                       (no line states rule 2)
+tornado-G-r1                       - Write the implementation independently; do not install Tornado or copy its code. No network access.
+tornado-G-r2                       - Write the implementation independently; do not install Tornado or copy its code.

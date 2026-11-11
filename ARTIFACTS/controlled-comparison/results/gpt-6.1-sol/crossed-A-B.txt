@@ -1,0 +1,26 @@
+## stock: 24 sessions
+with one or more boundaries: 24 sessions; finished 9, time limit 12, nudges used up 3; minutes 89.0; tests passing at the end 78.0%; times the agent quit unfinished 26
+with no boundary: 0 sessions
+first quit after a boundary: in 10 of the 24 sessions with a boundary
+    dulwich-A-r0                   stop 0, after boundary 5: 10.2 min, 63 replies later
+    dulwich-A-r1                   stop 0, after boundary 1: 13.4 min, 64 replies later
+    dulwich-A-r2                   stop 0, after boundary 1: 7.1 min, 48 replies later
+    jinja-A-r1                     stop 0, after boundary 1: 7.6 min, 70 replies later
+    pydantic-A-r0                  stop 0, after boundary 2: 23.1 min, 94 replies later
+    pylint-A-r1                    stop 0, after boundary 2: 3.0 min, 23 replies later
+    pylint-A-r2                    stop 0, after boundary 1: 12.2 min, 96 replies later
+    sphinx-A-r0                    stop 0, after boundary 2: 0.2 min, 2 replies later
+    sphinx-A-r1                    stop 1, after boundary 2: 12.3 min, 96 replies later
+    sphinx-A-r2                    stop 0, after boundary 2: 10.7 min, 60 replies later
+no quit after a boundary: jinja-A-r0 (finished), jinja-A-r2 (finished), networkx-A-r0 (time limit), networkx-A-r1 (time limit), networkx-A-r2 (time limit), pydantic-A-r1 (time limit), pydantic-A-r2 (time limit), pylint-A-r0 (time limit), python-prompt-toolkit-A-r0 (finished), python-prompt-toolkit-A-r1 (finished), python-prompt-toolkit-A-r2 (finished), tornado-A-r0 (finished), tornado-A-r1 (finished), tornado-A-r2 (finished)
+
+## Posthorse: 24 sessions
+with one or more boundaries: 24 sessions; finished 10, time limit 11, nudges used up 3; minutes 89.8; tests passing at the end 85.3%; times the agent quit unfinished 13
+with no boundary: 0 sessions
+first quit after a boundary: in 4 of the 24 sessions with a boundary
+    dulwich-B-r0                   stop 0, after boundary 4: 22.7 min, 101 replies later
+    dulwich-B-r1                   stop 0, after boundary 5: 2.8 min, 16 replies later
+    dulwich-B-r2                   stop 0, after boundary 4: 16.3 min, 103 replies later
+    sphinx-B-r0                    stop 0, after boundary 2: 14.5 min, 92 replies later
+no quit after a boundary: jinja-B-r0 (finished), jinja-B-r1 (finished), jinja-B-r2 (finished), networkx-B-r0 (time limit), networkx-B-r1 (time limit), networkx-B-r2 (time limit), pydantic-B-r0 (finished), pydantic-B-r1 (finished), pydantic-B-r2 (time limit), pylint-B-r0 (time limit), pylint-B-r1 (time limit), pylint-B-r2 (time limit), python-prompt-toolkit-B-r0 (finished), python-prompt-toolkit-B-r1 (time limit), python-prompt-toolkit-B-r2 (finished), sphinx-B-r1 (time limit), sphinx-B-r2 (time limit), tornado-B-r0 (finished), tornado-B-r1 (finished), tornado-B-r2 (finished)
+

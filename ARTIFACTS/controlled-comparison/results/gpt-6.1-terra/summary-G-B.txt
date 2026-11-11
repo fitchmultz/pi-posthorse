@@ -1,0 +1,45 @@
+Runs ended: 48 (stock + paragraph 24, Posthorse 24); still running: 0
+Not counted: pylint-B-r2 (Posthorse): a provider error ended one turn and used up a 'Continue.', so the session ended one turn early; repeated under the same name
+
+## Per side (every library counts the same)
+                                                   stock + paragraph               Posthorse
+Finished within the limit                                    2 of 24                 5 of 24
+Finished without a 'Continue.'                               0 of 24                 0 of 24
+Runs where the agent quit unfinished                        24 of 24                24 of 24
+Times the agent quit unfinished                                   92                      59
+Turns ended by a provider error                                    0                       2
+Tests passing when the agent first stopped                      1.2%                    1.9%
+Minutes until the agent first stopped                            2.7                     6.3
+Tests passing at the end                                       32.4%                   58.2%
+Minutes per run, to finish or to the end                        23.5                    86.5
+Replies per run                                                  179                     484
+Context boundaries per run                                       0.7                     2.9
+Seconds blocked at boundaries per run                           19.0                     0.1
+Output tokens per run                                          34309                   87688
+Fresh input tokens per run                                    197294                  425819
+Cached input tokens per run                                  8393504                29087787
+List-price cost per run                                     0.82 USD                2.32 USD
+  of which summary requests                                 0.04 USD                0.00 USD
+List-price cost billed, all runs                           19.71 USD               55.70 USD
+
+## Runs that finished on both sides of a pair (same library, same repetition)
+Minutes to finish: 2 pairs. stock + paragraph mean 47.0, median 47.0; Posthorse mean 58.5, median 58.5; Posthorse lower in 1 of 2
+List-price cost to finish: 2 pairs. stock + paragraph mean 1.90 USD, median 1.90 USD; Posthorse mean 1.65 USD, median 1.65 USD; Posthorse lower in 2 of 2
+Output tokens to finish: 2 pairs. stock + paragraph mean 82146, median 82146; Posthorse mean 70516, median 70516; Posthorse lower in 2 of 2
+
+## Difference, Posthorse minus stock + paragraph, over pairs
+Tests passing when the agent first stopped: +0.8 points (95% interval +0.2 to +1.4; 8 libraries, 24 pairs; Posthorse higher in 8, lower in 2, equal in 14)
+Tests passing at the end: +25.8 points (95% interval +16.6 to +37.9; 8 libraries, 24 pairs; Posthorse higher in 18, lower in 4, equal in 2)
+Minutes, to finish or to the end: +63.0 min (95% interval +46.5 to +78.6; 8 libraries, 24 pairs; Posthorse higher in 22, lower in 2, equal in 0)
+List-price cost: +1.5 USD (95% interval +0.9 to +2.1; 8 libraries, 24 pairs; Posthorse higher in 18, lower in 6, equal in 0)
+
+## Per library (mean of the repetitions that ended): stock + paragraph | Posthorse
+library                     runs  finished    quit        first stop        at min               end           min           USD    bound.      wait s
+dulwich                      3|3       0|0     3|3         0.3%|2.4%       3.0|5.4       16.3%|48.9%     24.6|98.0     0.80|2.55   0.7|4.0        17|0
+jinja                        3|3       1|3     3|3         2.5%|3.5%       4.2|9.0      86.6%|100.0%     42.0|75.4     1.45|1.62   1.7|2.0        41|0
+networkx                     3|3       0|0     3|3         0.0%|0.0%       2.1|3.6       12.3%|33.6%     13.5|88.6     0.47|2.71   0.3|3.7         8|0
+pydantic                     3|3       0|0     3|3         0.0%|0.0%       2.1|4.6       24.1%|35.7%     19.1|54.9     0.61|1.38   0.3|1.3        14|0
+pylint                       3|3       0|0     3|3         0.0%|0.0%       2.5|9.1        3.9%|35.0%     12.7|85.2     0.32|2.31   0.0|2.7         0|0
+python-prompt-toolkit        3|3       1|2     3|3         4.9%|7.1%       2.9|6.3       73.3%|95.6%     36.0|73.9     1.39|1.78   1.3|2.0        36|0
+sphinx                       3|3       0|0     3|3         0.0%|0.0%       3.3|5.5        6.8%|19.7%     18.7|96.1     0.63|2.79   0.3|3.0         9|0
+tornado                      3|3       0|0     3|3         1.6%|2.3%       1.6|6.8       35.6%|97.2%    21.4|120.0     0.89|3.41   1.0|4.7        27|0

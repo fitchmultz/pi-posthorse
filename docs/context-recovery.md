@@ -31,7 +31,9 @@ and a best-effort checkpoint nudge. The automatic record is assembled from selec
 evidence and history pointers; it is **not an automatic narrative summary of completed work**.
 The model still needs to read notes or history and check live state. There is no universal claim
 that this policy is better than stock compaction for every task. The [field study](field-study.md)
-reports how agents used the notes, the history tool and the record in one user's sessions.
+reports how agents used the notes, the history tool and the record in one user's sessions. The
+[controlled comparison](controlled-comparison.md) runs the same long coding tasks with stock
+compaction and with Posthorse on two models.
 
 See the [reference](reference.md#how-it-works) for record selection, provenance and budget details,
 and Pi's [compaction reference](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/compaction.md)
