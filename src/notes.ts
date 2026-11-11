@@ -93,7 +93,11 @@ async function readNote(
 ): Promise<TextResult> {
 	const { pages } = access;
 	const requested = requireValue(params.path, "path", params.op);
-	const target = await session.read(requested, { scope: params.scope, signal: access.signal });
+	const target = await session.access(requested, {
+		scope: params.scope,
+		includeDirectories: true,
+		signal: access.signal,
+	});
 	const relative = target.address.path;
 	const path = target.path;
 	const info = statSync(path, { throwIfNoEntry: false });
@@ -117,9 +121,10 @@ async function readNote(
 	if (offset > 0 && offset >= text.length) {
 		throw new Error(`Offset ${offset} is past the end of ${relative} (${text.length} chars).`);
 	}
-	const header = target.writable
-		? `File: ${path}\n`
-		: `Read-only live reference: notes read ${JSON.stringify({ scope: scopeDirectory(target.address), path: target.address.path })}\n`;
+	const header =
+		target.kind === "own"
+			? `File: ${path}\n`
+			: `Read-only live reference: notes read ${JSON.stringify({ scope: scopeDirectory(target.address), path: target.address.path })}\n`;
 	const end = Math.min(
 		text.length,
 		offset + pages.size(access.host(), { headerChars: header.length }),

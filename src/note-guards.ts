@@ -76,8 +76,11 @@ async function prepareOperation(operation: NoteOperation, captured: CapturedCall
 	if (address === undefined || !sameScope(address, session.binding)) {
 		return;
 	}
-	if (existingEdit(tool, operation) && !session.owns(address.path)) {
-		await withFileMutationQueue(path, () => session.adopt(address.path, call));
+	if (existingEdit(tool, operation)) {
+		const access = await session.access(address.path, { includeDirectories: false });
+		if (access.kind === "inherited") {
+			await withFileMutationQueue(path, () => session.adopt(address.path, call));
+		}
 	}
 	await session.prepareWrite();
 }
