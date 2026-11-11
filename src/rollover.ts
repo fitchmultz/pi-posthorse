@@ -90,8 +90,8 @@ function chronologicalRetainedTail(
 	if (first?.role === "compactionSummary" && hasRetainedRolloverMarker(first.summary)) {
 		// Pi projects no system messages into the retained tail, but an earlier handler can
 		// present a retained message as one (pi-change-working-dir's directory snapshots) or
-		// interleave a new message. Certify the tail by journal identity when the projection
-		// can, so the record never lands inside the next tool batch; count positions otherwise.
+		// interleave a new message. Match the projected journal tail before reordering it;
+		// count positions only on a host without a projection.
 		const { count, end } = retainedTailSliceEnd(messages, summaryIndex, ctx, stale);
 		if (count > 0 && end !== undefined) {
 			const prefix = messages.slice(0, summaryIndex);
@@ -118,7 +118,7 @@ function chronologicalRetainedTail(
 	return messages;
 }
 
-/** The tail's extent: journal identity when it certifies the tail, counted positions otherwise. */
+/** An unmatched projection must not silently become a positional match. */
 function retainedTailSliceEnd(
 	messages: ContextWithSystemEvent["messages"],
 	summaryIndex: number,
@@ -130,9 +130,12 @@ function retainedTailSliceEnd(
 	if (count === 0) {
 		return { count, end: undefined };
 	}
-	const end =
-		(retained !== undefined ? retainedTailEnd(messages, summaryIndex, retained) : undefined) ??
-		(summaryIndex + 1 + count <= messages.length ? summaryIndex + 1 + count : undefined);
+	let end: number | undefined;
+	if (retained !== undefined) {
+		end = retainedTailEnd(messages, summaryIndex, retained);
+	} else if (summaryIndex + 1 + count <= messages.length) {
+		end = summaryIndex + 1 + count;
+	}
 	return { count, end };
 }
 function registerReminderFilter(

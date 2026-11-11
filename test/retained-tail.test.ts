@@ -71,6 +71,36 @@ await test("a retained message keeps its identity under a system-role presentati
 	assert.ok(!sameRetainedMessage(reminder, { ...reminder, details: { windowId: "w2" } }));
 });
 
+await test("same-content receipts still belong to their own tool calls and outcomes", () => {
+	const receipt = {
+		role: "toolResult",
+		toolCallId: "retained-call",
+		toolName: "read",
+		content: [{ type: "text", text: "same output" }],
+		isError: false,
+	};
+	for (const changed of [
+		{ toolCallId: "other-call" },
+		{ toolName: "write" },
+		{ namespace: "other" },
+		{ isError: true },
+	]) {
+		assert.equal(sameRetainedMessage(receipt, { ...receipt, ...changed }), false);
+	}
+	assert.equal(
+		retainedTailEnd(
+			[
+				{ role: "compactionSummary", summary: "record" },
+				{ ...receipt, toolCallId: "other-call" },
+				receipt,
+			],
+			0,
+			[receipt],
+		),
+		3,
+	);
+});
+
 await test("the tail end lands after the last certified retained message", () => {
 	const record = { role: "compactionSummary", summary: "record" };
 	const first = { role: "user", content: [{ type: "text", text: "First." }] };
@@ -101,24 +131,26 @@ await test("an interleaved message does not move the record inside the retained 
 	assert.equal(retainedTailEnd(remapped, 0, [first, second]), 3);
 });
 
-await test("an opaque system patch of a retained custom message is paired in journal order", () => {
+await test("an opaque system patch preserves its timestamp and journal order", () => {
 	const record = { role: "compactionSummary", summary: "record" };
 	const snapshot = {
 		role: "custom",
 		customType: "change-working-dir:context",
 		content: "notice",
 		details: { cwd: "/w", notice: "notice" },
+		timestamp: 123,
 	};
 	const user = { role: "user", content: [{ type: "text", text: "Continue." }] };
-	// The presenter keeps none of the snapshot's identity: no custom type, details, or content.
+	// The presenter keeps the timestamp but replaces custom type, details, and content.
 	const patch = {
 		role: "system",
 		content: "",
 		sections: { cwd: "/w", "change-working-dir": "x" },
+		timestamp: 123,
 	};
 	assert.ok(!sameRetainedMessage(snapshot, patch));
 	// The retained tail is [snapshot, user]; a foreign system message is interleaved between
-	// their presentations. The patch is consumed positionally, the foreign message is skipped,
+	// their presentations. The patch matches its timestamp, the foreign message is skipped,
 	// and the record lands after the whole tail.
 	const messages = [
 		record,
@@ -128,6 +160,19 @@ await test("an opaque system patch of a retained custom message is paired in jou
 		{ role: "user", content: "Newer." },
 	];
 	assert.equal(retainedTailEnd(messages, 0, [snapshot, user]), 4);
+	// An unrelated system message before the final retained patch must not consume it.
+	assert.equal(
+		retainedTailEnd(
+			[record, user, { role: "system", content: "foreign", timestamp: 123 }, patch],
+			0,
+			[user, snapshot],
+		),
+		4,
+	);
+	assert.equal(
+		retainedTailEnd([record, { role: "system", content: "foreign" }], 0, [snapshot]),
+		undefined,
+	);
 });
 
 await test("a tail that cannot be certified by identity reports no end", () => {
