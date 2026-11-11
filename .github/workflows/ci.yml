@@ -5,7 +5,6 @@ on:
     branches: [main]
   push:
     branches: [main]
-
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -43,7 +42,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+  PI_AUTOMATION_REF: 508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
 
 jobs:
   quality:
@@ -53,9 +52,9 @@ jobs:
       source-ref: ${{ inputs.source-ref || github.sha }}
 
   resolve:
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
     with:
-      automation-ref: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+      automation-ref: 508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 

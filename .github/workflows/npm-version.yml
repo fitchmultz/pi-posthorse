@@ -13,6 +13,17 @@ on:
   schedule:
     - cron: "17 12 * * *"
   workflow_dispatch:
+    inputs:
+      supersede-version:
+        description: Failed unpublished automatic version
+        required: false
+        type: string
+        default: ""
+      supersede-source:
+        description: Failed automatic version merge SHA
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -37,11 +48,13 @@ jobs:
         (github.event.issue.pull_request != null && github.event.issue.user.login == 'pi-durable[bot]')) &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.event != 'push' ||
         startsWith(github.event.workflow_run.head_commit.message, 'chore(release): '))
-    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+    uses: fitchmultz/.github/.github/workflows/npm-release-bump.yml@508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
     with:
-      automation-ref: 85d05a42febdf1418bfa8b42842a8485aade10c1 # main
+      automation-ref: 508d2e23c75cab8fdd28bc62fc7fed2a9a0d1cca # main
       app-client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
       package-qualified: true
+      supersede-version: ${{ inputs.supersede-version || '' }}
+      supersede-source: ${{ inputs.supersede-source || '' }}
     secrets:
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       PI_DURABLE_ACCESS_TOKEN: ${{ secrets.PI_DURABLE_ACCESS_TOKEN }}
