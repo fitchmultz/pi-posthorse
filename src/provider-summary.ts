@@ -35,7 +35,9 @@ type MessageLike = { readonly role: string };
 /**
  * How many leading messages Pi sends exactly as the provider last saw them. With a block, those
  * are the leading system message and the retained tail up to the record; changing, removing or
- * reordering one makes the provider drop the reasoning of every reply after it.
+ * reordering one makes the provider drop the reasoning of every reply after it. A tail that
+ * reaches back across an earlier rollover holds that rollover's record too, so the boundary is
+ * the last record.
  */
 export function messagesHeldByProviderSummary(messages: readonly MessageLike[]): number {
 	const [first] = messages;
@@ -46,6 +48,6 @@ export function messagesHeldByProviderSummary(messages: readonly MessageLike[]):
 	) {
 		return 0;
 	}
-	const record = messages.findIndex((message) => message.role === "compactionSummary");
+	const record = messages.findLastIndex((message) => message.role === "compactionSummary");
 	return record < 0 ? messages.length : record;
 }
