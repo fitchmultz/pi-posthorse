@@ -1689,6 +1689,28 @@ await test("note publication retains symlinks/modes, serializes write+append, an
 	await h.session.prompt("Search notes.");
 	assert.doesNotMatch(textOf(toolResult(h, "notes")), /unpublished checkpoint/);
 	assert.match(textOf(toolResult(h, "notes")), /user checkpoint/);
+	h.faux.setResponses([
+		toolTurn(
+			fauxToolCall("notes", {
+				op: "list",
+				path: ".posthorse-98acee24-244c-44d8-b63e-5bc0a66ee690.tmp",
+			}),
+		),
+		fauxAssistantMessage("Listed selected file."),
+	]);
+	await h.session.prompt("List the selected temporary file.");
+	assert.match(textOf(toolResult(h, "notes")), /\(no notes in .*\)$/);
+	h.faux.setResponses([
+		toolTurn(
+			fauxToolCall("notes", {
+				op: "read",
+				path: ".posthorse-98acee24-244c-44d8-b63e-5bc0a66ee690.tmp",
+			}),
+		),
+		fauxAssistantMessage("Inspected leftover."),
+	]);
+	await h.session.prompt("Inspect the leftover explicitly.");
+	assert.match(textOf(toolResult(h, "notes")), /unpublished checkpoint/);
 	assert.equal(readFileSync(temporary, "utf8"), "unpublished checkpoint");
 });
 
