@@ -1,6 +1,6 @@
 import { readdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { isRecord } from "./contracts.ts";
+import { isRecord, presentText } from "./contracts.ts";
 import {
 	canonicalPath,
 	inside,
@@ -94,10 +94,11 @@ export async function notesUnder(
 	folder: string | undefined,
 	options: { readonly signal: AbortSignal | undefined; readonly notice: (text: string) => void },
 ): Promise<NoteFile[]> {
+	const requested = presentText(folder);
 	const target =
-		folder === undefined || folder === "" || folder === "."
+		requested === undefined || requested === "."
 			? scopeDirectory(scope)
-			: notePath(scope, folder);
+			: notePath(scope, requested);
 	const info = await statIfPresent(target);
 	options.signal?.throwIfAborted();
 	if (info === undefined) {

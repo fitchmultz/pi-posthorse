@@ -1,6 +1,7 @@
 import {
 	isRecord,
 	optionalString,
+	presentText,
 	type EntryLike,
 	type MessageLike,
 	type ToolCallLike,
@@ -275,8 +276,7 @@ function notesToolTouches(
 	const parsed = resultText === undefined ? undefined : extractNotesResultTarget(resultText);
 	const kind = notesCallKind(args) ?? parsed?.kind;
 	const path = optionalString(args.path);
-	// An empty scope counts as omitted, as it does when the tool runs.
-	const scope = args.scope === "" ? undefined : optionalString(args.scope);
+	const scope = presentText(args.scope);
 	const scopedPath = scope !== undefined && path !== undefined ? `${scope}/${path}` : path;
 	const callTarget = resolveNoteTarget(scopedPath, context.knownDirs, true);
 	const resTarget = resolveNoteTarget(parsed?.rawPath, context.knownDirs, true);
