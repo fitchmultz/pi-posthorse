@@ -10,7 +10,7 @@ import {
 } from "./contracts.ts";
 import { contextStart, isWindow } from "./boundary.ts";
 import { contextEdits } from "./history-entries.ts";
-import { createEpochCache, type EpochValue } from "./epoch-cache.ts";
+import { createEpochCache, type EpochValue, type SessionContext } from "./epoch-cache.ts";
 import { sessionBranch, sessionEntry, sessionProjection, type SessionHost } from "./host.ts";
 import { journalRetainedIds } from "./retained-tail.ts";
 
@@ -20,13 +20,14 @@ type ReminderFacts = {
 };
 export type ReminderLookup = {
 	readonly reset: () => void;
-	readonly read: (ctx: ExtensionContext) => ReminderFacts;
+	readonly read: (ctx: SessionContext) => ReminderFacts;
 };
-export type StaleReminderPredicate = (message: {
+export type ContextMessage = {
 	readonly role: string;
 	readonly customType?: string | undefined;
 	readonly details?: unknown;
-}) => boolean;
+};
+export type StaleReminderPredicate = (message: ContextMessage) => boolean;
 
 export function reminderMatches(details: unknown, fingerprint: ReminderFingerprint): boolean {
 	if (!isRecord(details)) {
@@ -48,6 +49,64 @@ export function hasReminder(
 			isReminderType(entry.customType) &&
 			reminderMatches(entry.details, fingerprint),
 	);
+}
+function isReminderMessage(message: ContextMessage): boolean {
+	return message.role === "custom" && isReminderType(message.customType);
+}
+/** A host may project a legacy fork's display marker; its window id outranks the journal scan. */
+function contextMarker(messages: readonly ContextMessage[]): {
+	readonly present: boolean;
+	readonly windowId: unknown;
+} {
+	const marker = messages.find((message) => message.customType === "context-window");
+	if (marker === undefined) {
+		return { present: false, windowId: undefined };
+	}
+	const details = isRecord(marker.details) ? marker.details : undefined;
+	return { present: true, windowId: details?.windowId };
+}
+function fingerprintOf(windowId: string, host: PolicyContext): ReminderFingerprint {
+	const budget = budgetFor(host);
+	return {
+		windowId,
+		contextWindow: budget?.contextWindow,
+		reserveTokens: budget?.reserveTokens,
+	};
+}
+/** A reminder belongs to one window and budget; undefined when no window id names it. */
+export function reminderFingerprint(
+	ctx: SessionContext,
+	host: PolicyContext,
+	reminders: ReminderLookup,
+	messages: readonly ContextMessage[] = [],
+): ReminderFingerprint | undefined {
+	const marker = contextMarker(messages);
+	const windowId = marker.present ? marker.windowId : reminders.read(ctx).windowId;
+	return typeof windowId === "string" ? fingerprintOf(windowId, host) : undefined;
+}
+/**
+ * Reminders that no longer describe this window or budget leave the context. When Pi compaction is
+ * off, no reminder can fire again, so every reminder is stale.
+ */
+export function staleReminderPredicate(
+	messages: readonly ContextMessage[],
+	ctx: SessionContext,
+	host: PolicyContext,
+	reminders: ReminderLookup,
+): StaleReminderPredicate {
+	if (!messages.some(isReminderMessage)) {
+		return () => false;
+	}
+	const budget = budgetFor(host);
+	const compactionDisabled =
+		budget === undefined ? !host.getCompactionSettings().enabled : budget.state === "disabled";
+	const fingerprint = reminderFingerprint(ctx, host, reminders, messages);
+	if (fingerprint === undefined) {
+		return () => false;
+	}
+	return (message) =>
+		isReminderMessage(message) &&
+		(compactionDisabled || !reminderMatches(message.details, fingerprint));
 }
 const REMINDER_BUFFER_TOKENS = 32_000;
 type ReminderDecision =
@@ -101,13 +160,8 @@ export function reminderDecision(
 	if (available.kind === "skip") {
 		return available;
 	}
-	const { budget } = available;
 	const state = reminders.read(ctx);
-	const fingerprint: ReminderFingerprint = {
-		windowId: state.windowId,
-		contextWindow: budget.contextWindow,
-		reserveTokens: budget.reserveTokens,
-	};
+	const fingerprint = fingerprintOf(state.windowId, host);
 	if (
 		hasReminder(state.reminders, fingerprint) ||
 		event.context.pendingMessages.some(
