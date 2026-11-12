@@ -25,6 +25,7 @@ export type NoteTarget = {
 export type NoteTouch = NoteTarget & {
 	readonly entryId: string;
 	readonly receiptId?: string | undefined;
+	readonly toolCallId?: string | undefined;
 	readonly owner?: NoteOwner | undefined;
 } & (
 		| { readonly kind: ContentTouchKind; readonly inRetained: boolean }
@@ -344,7 +345,8 @@ function touchesFromNested(message: MessageLike, context: TouchContext): NoteTou
 					touch.kind === "read" || touch.kind === "clear" ? touch.kind : "observed-write",
 				inRetained: false,
 				receiptId: context.sourceId,
-			} satisfies Pick<NoteTouch, "kind" | "inRetained" | "receiptId">),
+				toolCallId: optionalString(raw.id),
+			} satisfies Pick<NoteTouch, "kind" | "inRetained" | "receiptId" | "toolCallId">),
 		);
 	});
 }
@@ -368,7 +370,9 @@ function touchesFromAssistantCall(
 			: fileToolTouches(tool, args, res, context);
 	return {
 		consumedCallId,
-		touches: touches.map((touch) => Object.assign({}, touch, { receiptId: res.sourceId })),
+		touches: touches.map((touch) =>
+			Object.assign({}, touch, { receiptId: res.sourceId, toolCallId: callId }),
+		),
 	};
 }
 
@@ -385,7 +389,10 @@ function touchesFromToolResult(
 		!handledResultIds.has(callId) && bareToolName(msg.toolName) === "notes"
 			? notesToolTouches({}, textOf(msg), context)
 			: [];
-	return [...direct, ...touchesFromNested(msg, context)];
+	return [
+		...direct.map((touch) => Object.assign({}, touch, { toolCallId: callId })),
+		...touchesFromNested(msg, context),
+	];
 }
 
 export function collectTouches(

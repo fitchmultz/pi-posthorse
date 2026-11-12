@@ -74,15 +74,12 @@ function recordedTouches(
 ): NoteTouch[] {
 	const receipts = effectReceipts(evidence.branch);
 	const shown = new Map(visible.map((item) => [item.entry.id, item]));
-	const seen = new Set<string>();
-	return touchRecords(evidence.allEntries).flatMap((record) => {
+	const touches = touchRecords(evidence.allEntries).flatMap((record) => {
 		const receipt = receipts.get(record.rootToolCallId);
 		const item = shown.get(receipt?.id);
-		const key = `${record.owner.id}\0${record.owner.timestamp}\0${record.toolCallId}`;
-		if (item === undefined || seen.has(key)) {
+		if (item === undefined) {
 			return [];
 		}
-		seen.add(key);
 		return record.files.map((file): NoteTouch => {
 			let kind: NoteTouch["kind"] = "observed-write";
 			if (file.kind === "read") {
@@ -96,14 +93,39 @@ function recordedTouches(
 				kind,
 				entryId: item.entryId,
 				receiptId: item.entry.id ?? item.entryId,
+				toolCallId: record.toolCallId,
 				inRetained: false,
 				owner: record.owner,
 			};
 		});
 	});
+	const latest = new Map<string, NoteTouch>();
+	for (const touch of touches) {
+		const key = JSON.stringify([touch.owner?.id, touch.owner?.timestamp, touchKey(touch)]);
+		// Adoption and completion can record the same file in one call. Keep its final effect
+		// at its final position without discarding other files adopted by that call.
+		latest.delete(key);
+		latest.set(key, touch);
+	}
+	return [...latest.values()];
 }
 function touchKey(touch: NoteTouch): string {
-	return JSON.stringify([touch.receiptId ?? touch.entryId, touch.absPath ?? touch.notePath]);
+	return JSON.stringify([
+		touch.receiptId ?? touch.entryId,
+		touch.toolCallId,
+		touch.absPath ?? touch.notePath,
+	]);
+}
+function reconcileTouch(recorded: NoteTouch, inferred: NoteTouch | undefined): NoteTouch {
+	if (
+		inferred !== undefined &&
+		((recorded.kind === "read" && inferred.kind === "read") ||
+			(recorded.kind === "observed-write" &&
+				(inferred.kind === "full-write" || inferred.kind === "partial-write")))
+	) {
+		return { ...inferred, owner: recorded.owner };
+	}
+	return recorded;
 }
 export function sessionNoteTouches(evidence: NoteEvidence): {
 	readonly touches: readonly NoteTouch[];
@@ -117,14 +139,12 @@ export function sessionNoteTouches(evidence: NoteEvidence): {
 	]);
 	const legacy = collectTouches(visible, directories);
 	const recorded = recordedTouches(evidence, visible);
-	const recordedByReceipt = new Map(recorded.map((touch) => [touchKey(touch), touch]));
-	const covered = new Set<string>();
-	const identified = legacy.touches.map((touch) => {
-		const key = touchKey(touch);
-		covered.add(key);
-		return { ...touch, owner: recordedByReceipt.get(key)?.owner };
-	});
-	const touches = [...identified, ...recorded.filter((touch) => !covered.has(touchKey(touch)))];
+	const inferredByCall = new Map(legacy.touches.map((touch) => [touchKey(touch), touch]));
+	const covered = new Set(recorded.map(touchKey));
+	const touches = [
+		...legacy.touches.filter((touch) => !covered.has(touchKey(touch))),
+		...recorded.map((touch) => reconcileTouch(touch, inferredByCall.get(touchKey(touch)))),
+	];
 	const order = new Map(visible.map((entry, index) => [entry.entry.id ?? entry.entryId, index]));
 	touches.sort(
 		(a, b) =>

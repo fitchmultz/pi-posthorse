@@ -53,6 +53,10 @@ the extension API; it never rewrites a journal file.
 - Note-touch paths are normalized before ownership is updated or journaled. Readers normalize
   accepted relative aliases from older journals too, so deleting a private `./task.md` does not
   restore an inherited `task.md`.
+- Each tool call can record adoption and then its completed effects for several files. Recovery
+  keeps the last effect per owner, receipt, call, and path, in final-effect order. Verified effects
+  determine clear and delete state. Compatible receipt content can still prove a retained full
+  write or partial edit; an inferred edit cannot override a verified clear.
 - Reminders belong to a window and budget. Old reminders remain in history but leave model input,
   except inside the unchanged prefix protected by a provider summary block.
 - A cancelled compaction can leave an inert `posthorse-boundary` marker. Only the compaction entry
