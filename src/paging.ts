@@ -1,12 +1,11 @@
-import type { PosthorseDisplay } from "../ui.ts";
 import { pageCapacity } from "./budget.ts";
+import { textOf } from "./message-text.ts";
 import {
 	ESTIMATED_IMAGE_CHARS,
 	MAX_PAGE_CHARS,
 	MIN_PAGE_CHARS,
 	PAGE_MARGIN_TOKENS,
 	textResult,
-	type ImageLike,
 	type PolicyContext,
 	type TextResult,
 } from "./contracts.ts";
@@ -26,11 +25,11 @@ export type NotesPage = {
 	readonly more?: boolean;
 };
 export type PageAccess = {
-	readonly size: (ctx: PolicyContext, request?: PageRequest) => number;
-	readonly result: (
-		text: string,
-		images: readonly ImageLike[],
-		display: PosthorseDisplay,
+	/** Reconcile, build synchronously, and reserve before another page can be admitted. */
+	readonly deliver: (
+		ctx: PolicyContext,
+		request: PageRequest,
+		build: (chars: number) => TextResult,
 	) => TextResult;
 	readonly error: (ctx: PolicyContext, message: string) => never;
 	readonly notes: (ctx: PolicyContext, page: NotesPage) => TextResult;
@@ -74,7 +73,7 @@ export class PageReservations {
 	 * Body characters for the next page. Near the rollover line pages shrink to MIN_PAGE_CHARS
 	 * instead of refusing, so reading keeps making progress; Pi's rollover handles the overshoot.
 	 */
-	size(ctx: PolicyContext, request: PageRequest = {}): number {
+	private size(ctx: PolicyContext, request: PageRequest): number {
 		this.settle(ctx);
 		const remaining = pageCapacity(ctx, this.toolTokens) - this.accounting.tokens;
 		const budget = Math.min(
@@ -95,9 +94,14 @@ export class PageReservations {
 				imageCount * (ESTIMATED_IMAGE_CHARS / 4),
 		);
 	}
-	result(text: string, images: readonly ImageLike[], display: PosthorseDisplay): TextResult {
-		this.reserve(text, images.length);
-		return textResult(text, images, display);
+	deliver(
+		ctx: PolicyContext,
+		request: PageRequest,
+		build: (chars: number) => TextResult,
+	): TextResult {
+		const result = build(this.size(ctx, request));
+		this.reserve(textOf(result), result.content.filter((part) => part.type === "image").length);
+		return result;
 	}
 	error(ctx: PolicyContext, message: string): never {
 		this.settle(ctx);
@@ -107,32 +111,33 @@ export class PageReservations {
 	notes(ctx: PolicyContext, page: NotesPage): TextResult {
 		const { rows, offset, kind, empty, header = "", more } = page;
 		const text = rows.length > 0 ? rows.join("\n") : empty;
-		const chars = this.size(ctx, { headerChars: header.length });
-		const footer = (end: number) =>
-			`\n[chars ${offset}-${end}${more === true ? "; more matches follow" : ` of ${text.length}`}; continue with offset ${end}]`;
-		if (offset > 0 && offset >= text.length) {
-			this.error(ctx, "Offset is past the end; restart with offset 0.");
-		}
-		const range = notesRange(rows, {
-			offset,
-			end: Math.min(text.length, offset + chars),
-			maxRows: kind === "notes-search" ? 20 : 100,
+		return this.deliver(ctx, { headerChars: header.length }, (chars) => {
+			const footer = (end: number) =>
+				`\n[chars ${offset}-${end}${more === true ? "; more matches follow" : ` of ${text.length}`}; continue with offset ${end}]`;
+			if (offset > 0 && offset >= text.length) {
+				this.error(ctx, "Offset is past the end; restart with offset 0.");
+			}
+			const range = notesRange(rows, {
+				offset,
+				end: Math.min(text.length, offset + chars),
+				maxRows: kind === "notes-search" ? 20 : 100,
+			});
+			const end =
+				range.end < text.length
+					? Math.min(range.end, offset + chars - footer(text.length).length)
+					: range.end;
+			return textResult(
+				header + text.slice(offset, end) + (end < text.length ? footer(end) : ""),
+				[],
+				{
+					kind,
+					headerLength: header.length,
+					count: range.starts.filter((start) => start < end).length,
+					page: { offset, end, total: text.length },
+					...(more === true ? { more } : {}),
+				},
+			);
 		});
-		const end =
-			range.end < text.length
-				? Math.min(range.end, offset + chars - footer(text.length).length)
-				: range.end;
-		return this.result(
-			header + text.slice(offset, end) + (end < text.length ? footer(end) : ""),
-			[],
-			{
-				kind,
-				headerLength: header.length,
-				count: range.starts.filter((start) => start < end).length,
-				page: { offset, end, total: text.length },
-				...(more === true ? { more } : {}),
-			},
-		);
 	}
 }
 function notesRange(

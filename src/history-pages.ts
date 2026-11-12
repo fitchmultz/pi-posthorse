@@ -1,6 +1,7 @@
 import {
 	MIN_PAGE_CHARS,
 	ESTIMATED_IMAGE_CHARS,
+	textResult,
 	type HistoryHit,
 	type PolicyContext,
 	type TextResult,
@@ -80,34 +81,35 @@ export function searchPage(
 	host: PolicyContext,
 	pages: PageAccess,
 ): TextResult {
-	const chars = pages.size(host);
-	const reserve = Math.max(
-		0,
-		...matches.hits.map(
-			(hit) => searchFooter(cursorAt(matches.key, hit, hit.text.length)).length,
-		),
-	);
-	if (reserve >= chars) {
-		pages.error(host, "History entry id is too large for pagination.");
-	}
-	const skippedNote =
-		matches.skipped > 0 && (params.cursor === undefined || params.cursor === "")
-			? `\n[Skipped ${matches.skipped} match${matches.skipped === 1 ? "" : "es"} already in your active context.]`
-			: "";
-	const page = searchParts(matches, chars - reserve - skippedNote.length);
-	const body =
-		page.parts.length > 0
-			? page.parts.join("\n")
-			: `No history matches "${excerpt(params.query ?? "", 200)}".`;
-	const tail =
-		skippedNote +
-		(page.continuation.kind === "more" ? searchFooter(page.continuation.next) : "");
-	return pages.result(body + tail, [], {
-		kind: "history-search",
-		entries: [...page.spans],
-		footerLength: tail.length,
-		more: page.continuation.kind === "more",
-		skipped: matches.skipped,
+	return pages.deliver(host, {}, (chars) => {
+		const reserve = Math.max(
+			0,
+			...matches.hits.map(
+				(hit) => searchFooter(cursorAt(matches.key, hit, hit.text.length)).length,
+			),
+		);
+		if (reserve >= chars) {
+			pages.error(host, "History entry id is too large for pagination.");
+		}
+		const skippedNote =
+			matches.skipped > 0 && (params.cursor === undefined || params.cursor === "")
+				? `\n[Skipped ${matches.skipped} match${matches.skipped === 1 ? "" : "es"} already in your active context.]`
+				: "";
+		const page = searchParts(matches, chars - reserve - skippedNote.length);
+		const body =
+			page.parts.length > 0
+				? page.parts.join("\n")
+				: `No history matches "${excerpt(params.query ?? "", 200)}".`;
+		const tail =
+			skippedNote +
+			(page.continuation.kind === "more" ? searchFooter(page.continuation.next) : "");
+		return textResult(body + tail, [], {
+			kind: "history-search",
+			entries: [...page.spans],
+			footerLength: tail.length,
+			more: page.continuation.kind === "more",
+			skipped: matches.skipped,
+		});
 	});
 }
 function readOffsets(
@@ -144,33 +146,37 @@ export function historyReadPage(
 	const shownId = shownEntryId(item, params.id, source);
 	const { offset, imageOffset } = readOffsets(item, params);
 	const firstImage = imageOffset < item.images.length ? 1 : 0;
-	const chars = access.pages.size(access.host, { imageCount: firstImage });
-	const imageEnd = Math.min(
-		item.images.length,
-		imageOffset + firstImage + Math.floor((chars - MIN_PAGE_CHARS) / ESTIMATED_IMAGE_CHARS),
-	);
-	const images = item.images.slice(imageOffset, imageEnd);
-	const end = Math.min(
-		item.text.length,
-		offset + chars - (images.length - firstImage) * ESTIMATED_IMAGE_CHARS,
-	);
-	const continuation: Continuation<{ readonly offset: number; readonly imageOffset: number }> =
-		end < item.text.length || imageEnd < item.images.length
-			? { kind: "more", next: { offset: end, imageOffset: imageEnd } }
-			: { kind: "complete" };
-	const more =
-		continuation.kind === "more"
-			? `\nMore remains; call history read with id "${shownId}" and offset ${continuation.next.offset}${item.images.length > 0 ? ` and imageOffset ${continuation.next.imageOffset}` : ""}.`
-			: "";
-	const header = `${item.entry.timestamp ?? ""}${sourceTag(source)} [window ${item.windowId}] [${shownId}] [chars ${offset}-${end} of ${item.text.length}] `;
-	return access.pages.result(`${header}${item.text.slice(offset, end)}${more}`, images, {
-		kind: "history-read",
-		headerLength: header.length,
-		offset,
-		end,
-		total: item.text.length,
-		imageOffset,
-		imageEnd,
-		imageTotal: item.images.length,
+	return access.pages.deliver(access.host, { imageCount: firstImage }, (chars) => {
+		const imageEnd = Math.min(
+			item.images.length,
+			imageOffset + firstImage + Math.floor((chars - MIN_PAGE_CHARS) / ESTIMATED_IMAGE_CHARS),
+		);
+		const images = item.images.slice(imageOffset, imageEnd);
+		const end = Math.min(
+			item.text.length,
+			offset + chars - (images.length - firstImage) * ESTIMATED_IMAGE_CHARS,
+		);
+		const continuation: Continuation<{
+			readonly offset: number;
+			readonly imageOffset: number;
+		}> =
+			end < item.text.length || imageEnd < item.images.length
+				? { kind: "more", next: { offset: end, imageOffset: imageEnd } }
+				: { kind: "complete" };
+		const more =
+			continuation.kind === "more"
+				? `\nMore remains; call history read with id "${shownId}" and offset ${continuation.next.offset}${item.images.length > 0 ? ` and imageOffset ${continuation.next.imageOffset}` : ""}.`
+				: "";
+		const header = `${item.entry.timestamp ?? ""}${sourceTag(source)} [window ${item.windowId}] [${shownId}] [chars ${offset}-${end} of ${item.text.length}] `;
+		return textResult(`${header}${item.text.slice(offset, end)}${more}`, images, {
+			kind: "history-read",
+			headerLength: header.length,
+			offset,
+			end,
+			total: item.text.length,
+			imageOffset,
+			imageEnd,
+			imageTotal: item.images.length,
+		});
 	});
 }
