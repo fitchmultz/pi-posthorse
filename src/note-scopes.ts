@@ -239,12 +239,18 @@ export function touchRecords(entries: readonly EntryLike[]): NoteTouchRecord[] {
 		}
 		try {
 			return entry.data.files.every(
-				(file) =>
-					validScope(file) &&
-					noteRelative(file.path) === file.path &&
-					(file.seed === undefined || validSeed(file.seed)),
+				(file) => validScope(file) && (file.seed === undefined || validSeed(file.seed)),
 			)
-				? [entry.data]
+				? [
+						{
+							...entry.data,
+							// Earlier writers stored accepted aliases such as ./task.md verbatim.
+							files: entry.data.files.map((file) => ({
+								...file,
+								path: noteRelative(file.path),
+							})),
+						},
+					]
 				: [];
 		} catch {
 			return [];

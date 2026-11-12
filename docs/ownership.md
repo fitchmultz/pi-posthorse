@@ -45,6 +45,9 @@ the extension API; it never rewrites a journal file.
   manifest owner after a failure between those operations.
 - Note-touch entries can precede their receipts. Recovery uses them only when the corresponding
   root receipt is visible; a touch without a visible receipt is not evidence delivered to the model.
+- Note-touch paths are normalized before ownership is updated or journaled. Readers normalize
+  accepted relative aliases from older journals too, so deleting a private `./task.md` does not
+  restore an inherited `task.md`.
 - Reminders belong to a window and budget. Old reminders remain in history but leave model input,
   except inside the unchanged prefix protected by a provider summary block.
 - A cancelled compaction can leave an inert `posthorse-boundary` marker. Only the compaction entry

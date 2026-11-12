@@ -103,7 +103,8 @@ export class SessionNotes {
 		if (files.length === 0) {
 			return;
 		}
-		for (const file of files) {
+		const normalized = files.map((file) => ({ ...file, path: noteRelative(file.path) }));
+		for (const file of normalized) {
 			if (file.kind !== "read" && sameScope(file, this.binding)) {
 				this.#owned.add(file.path);
 				const path = canonicalPath(notePath(file, file.path));
@@ -116,7 +117,7 @@ export class SessionNotes {
 			scope: { root: this.binding.root, scope: this.binding.scope },
 			rootToolCallId: call.rootId,
 			toolCallId: call.id,
-			files,
+			files: normalized,
 		} satisfies NoteTouchRecord);
 	}
 	async selectScope(selector: string): Promise<NoteScope> {

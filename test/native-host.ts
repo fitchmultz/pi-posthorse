@@ -599,6 +599,9 @@ await test("fork notes keep ownership across tree navigation, adoption, deletion
 		content: "original reference",
 	});
 	await notesCall(parent, { op: "write", path: "append.md", content: "inherited prefix" });
+	for (const path of ["write-alias.md", "append-alias.md", "legacy-alias.md"]) {
+		await notesCall(parent, { op: "write", path, content: "parent alias reference" });
+	}
 	const otherBranch = requireValue(parent.sessionManager.getLeafId());
 	const source = requireValue(parent.sessionManager.getSessionFile());
 	const child = await fixture(t, {
@@ -679,6 +682,33 @@ await test("fork notes keep ownership across tree navigation, adoption, deletion
 	);
 	assert.equal(deleted.isError, true);
 	assert.match(textOf(deleted), /No note/u);
+	for (const op of ["write", "append"] as const) {
+		const path = `${op}-alias.md`;
+		await notesCall(child, { op, path: `./${path}`, content: "private alias content" });
+		unlinkSync(join(childDirectory, path));
+		const missing = await nativeCall(child, fauxToolCall("notes", { op: "read", path }));
+		assert.equal(missing.isError, true, `${op} must record normalized ownership`);
+		assert.match(textOf(missing), /No note/u);
+	}
+	const header = requireValue(child.sessionManager.getHeader());
+	child.sessionManager.appendCustomEntry("posthorse-note-touch", {
+		version: 1,
+		owner: { id: header.id, timestamp: header.timestamp },
+		scope: {
+			root: join(parent.cwd, ".pi", "notes"),
+			scope: relative(join(parent.cwd, ".pi", "notes"), childDirectory),
+		},
+		rootToolCallId: "legacy-write",
+		toolCallId: "legacy-write",
+		files: [
+			{
+				root: join(parent.cwd, ".pi", "notes"),
+				scope: relative(join(parent.cwd, ".pi", "notes"), childDirectory),
+				path: "./legacy-alias.md",
+				kind: "write",
+			},
+		],
+	});
 	const stored = assertStoredNoteLocations(child.sessionManager, childDirectory);
 	assert.ok(stored.files >= 5, `file-tool and notes-tool touches: ${stored.files}`);
 	assert.ok(stored.seeds >= 3, `fork and adoption seeds: ${stored.seeds}`);
@@ -693,6 +723,11 @@ await test("fork notes keep ownership across tree navigation, adoption, deletion
 	);
 	assert.equal(stillDeleted.isError, true);
 	assert.match(textOf(stillDeleted), /No note/u);
+	for (const path of ["write-alias.md", "append-alias.md", "legacy-alias.md"]) {
+		const missing = await nativeCall(resumed, fauxToolCall("notes", { op: "read", path }));
+		assert.equal(missing.isError, true, `resume must preserve ownership of ${path}`);
+		assert.match(textOf(missing), /No note/u);
+	}
 });
 
 await test("fork adoption reports a private copy left by failed source verification", async (t) => {
