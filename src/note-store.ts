@@ -255,6 +255,7 @@ type SessionState =
 	| { readonly kind: "ready"; readonly value: SessionNotes };
 export function createNotesStore(pi: NotesApi): NotesStore {
 	const sessions = new Map<string, SessionState>();
+
 	const get = (ctx: ExtensionContext): Promise<SessionNotes> => {
 		const key = sessionKey(ctx);
 		const existing = sessions.get(key);

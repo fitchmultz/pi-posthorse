@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { isRecord } from "./contracts.ts";
+import { isPublicationTemporaryName } from "./files.ts";
 import { sessionNoteTouches } from "./note-evidence.ts";
 import { notesUnder, type NoteFile } from "./note-inventory.ts";
 import {
@@ -118,6 +119,9 @@ async function readReference(
 	path: string,
 	signal: AbortSignal | undefined,
 ): Promise<DiscoveredNote | undefined> {
+	if (isPublicationTemporaryName(basename(path))) {
+		return;
+	}
 	const target = await session.access(path, { signal });
 	if (target.kind === "own") {
 		return;

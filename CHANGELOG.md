@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep recovery after the retained journal tail when another extension interleaves messages, without confusing identical output from different tool calls.
+- Hide reserved atomic-publication temporary files from notes list and search without deleting leftover data.
+
 ## 0.10.25 - 2026-11-11
 
 <!-- npm-release:unreleased:start -->

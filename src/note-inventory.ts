@@ -1,6 +1,7 @@
 import { readdir, realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { isRecord, presentText } from "./contracts.ts";
+import { isPublicationTemporaryName } from "./files.ts";
 import {
 	canonicalPath,
 	inside,
@@ -26,7 +27,9 @@ async function statIfPresent(path: string) {
 }
 /** Preserve depth-first listing order and recheck later entries after visiting each folder. */
 async function* folderEntries(directory: string, signal: AbortSignal | undefined) {
-	const entries = await readdir(directory, { withFileTypes: true });
+	const entries = (await readdir(directory, { withFileTypes: true })).filter(
+		(entry) => !isPublicationTemporaryName(entry.name),
+	);
 	let start = 0;
 	while (start < entries.length) {
 		signal?.throwIfAborted();
@@ -99,6 +102,9 @@ export async function notesUnder(
 		requested === undefined || requested === "."
 			? scopeDirectory(scope)
 			: notePath(scope, requested);
+	if (isPublicationTemporaryName(basename(target))) {
+		return [];
+	}
 	const info = await statIfPresent(target);
 	options.signal?.throwIfAborted();
 	if (info === undefined) {

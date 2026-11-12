@@ -52,6 +52,20 @@ the extension API; it never rewrites a journal file.
 - Entry types, version markers, and receipt wording are storage formats. Changing their producers
   requires preserving readers for journals written by previous releases.
 
+Guidance delivered by the request hook is journaled before that request is sent. On the fork,
+the provider-summary request can run the hook during compaction; its entries remain in the
+journal. A summary block keeps the previous guidance anchor and its exact delivered bytes.
+Without that retained anchor, a new epoch retires the old in-memory delivery state. Tree
+navigation resets the cache and reconstructs the selected branch from the journal.
+
+Retained-tail matching compares the projected journal payload, including tool-call linkage and
+outcome, in journal order. An opaque custom-message presentation as an empty system-section
+patch must preserve its timestamp and order. Timestamps are correlation values, not globally
+unique IDs; presenters must not replace one retained message with another message's patch.
+If a projected tail cannot be matched, Posthorse leaves its order unchanged. A host without
+session projection retains the positional contract: preceding handlers must preserve the
+retained message count and order. Provider-summary-held prefixes are never reordered.
+
 Turn-end boundary drafts see the preview available when their handler runs. Later editors must
 replace or remove a draft if they change its evidence. The native compaction hook runs after
 turn-end handlers; the eager threshold fallback does not.
@@ -74,6 +88,19 @@ The manifest records adopted files; the journal records later writes and deletio
 both preserves provenance. Removing a parent's journal can lose deletion evidence even when
 its manifest survives.
 
+The notes binding stores an absolute root for the session. Changing the working directory,
+including entering another repository, does not rebind it. Moving a project does not relocate
+an existing binding automatically: preserve the bound location when resuming that session.
+Do not infer a relocation mapping from the current working directory or rewrite ancestry roots
+that may belong to other projects.
+
+Snapshot creation owns its `.staging-*` folder until publication and cleans it on a handled
+failure. Discovery ignores staging folders, including crash leftovers. Atomic note publication
+reserves filenames `.posthorse-<lowercase UUID v4>.tmp`. Notes list and search omit these
+temporary names, including a directly selected temporary file. They are not deleted by
+inventory, session shutdown, journal removal, or an age-based sweep. Explicit reads remain
+available for inspecting a leftover file. Other `.tmp` filenames remain ordinary notes.
+
 Adoption is performed while holding the destination file's native mutation queue. It does not
 acquire that queue recursively. Manifest updates acquire a different queue after the note queue;
 no path acquires those locks in reverse order.
@@ -81,11 +108,19 @@ no path acquires those locks in reverse order.
 `notesDir()` can migrate package-checkout notes and create a compatibility link. It is not a pure
 path lookup. Migration preserves existing destination data rather than replacing it.
 
+Notes read, list, and search offsets refer to live content, not a frozen snapshot. Each call
+reads current data; edits between pages can shift content or ordering. Start again at offset
+zero after a change when a consistent traversal matters. Independent callers do not share a
+path-keyed paging lease.
+
 Journal-line readers own their open handle until the async iteration finishes. `line.text()` uses
 positioned reads, so advancing the iterator does not invalidate it; exhausting or returning from
 the iterator closes the handle. Consume callbacks while that iterator remains open. File handles
 and streams close when their owning operation exits. Archive search subprocesses receive the tool's abort
-signal; cancellation and completion remain owned by the native process API.
+signal; cancellation and completion remain owned by the native process API. Archive prefilter
+groups launch concurrently, with a 64 MiB output bound per subprocess rather than a global
+process or memory cap. If filtering fails without cancellation, the full candidate set remains
+eligible for the regular history reader.
 
 ## Borrowed tool contracts
 

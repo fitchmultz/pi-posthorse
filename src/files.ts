@@ -86,6 +86,12 @@ async function existingNote(target: string) {
 	}
 	return previous;
 }
+/** Reserved by publishFile; inventories hide these names without deleting their contents. */
+export function isPublicationTemporaryName(name: string): boolean {
+	return /^\.posthorse-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/.test(
+		name,
+	);
+}
 /** Same-directory replacement; pre-rename failures preserve the old note and its metadata. */
 export async function publishFile(
 	path: string,
