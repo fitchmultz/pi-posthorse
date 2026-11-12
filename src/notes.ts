@@ -130,21 +130,20 @@ async function readNote(
 		target.kind === "own"
 			? noteReadHeader(path)
 			: `Read-only live reference: notes read ${JSON.stringify({ scope: scopeDirectory(target.address), path: target.address.path })}\n`;
-	const end = Math.min(
-		text.length,
-		offset + pages.size(access.host(), { headerChars: header.length }),
-	);
-	const more =
-		end < text.length
-			? `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]`
-			: "";
-	session.record([{ ...target.address, kind: "read" }], access.call);
-	return pages.result(`${header}${text.slice(offset, end)}${more}`, [], {
-		kind: "note-read",
-		headerLength: header.length,
-		offset,
-		end,
-		total: text.length,
+	return pages.deliver(access.host(), { headerChars: header.length }, (chars) => {
+		const end = Math.min(text.length, offset + chars);
+		const more =
+			end < text.length
+				? `\n[chars ${offset}-${end} of ${text.length}; continue with offset ${end}]`
+				: "";
+		session.record([{ ...target.address, kind: "read" }], access.call);
+		return textResult(`${header}${text.slice(offset, end)}${more}`, [], {
+			kind: "note-read",
+			headerLength: header.length,
+			offset,
+			end,
+			total: text.length,
+		});
 	});
 }
 async function writeNote(

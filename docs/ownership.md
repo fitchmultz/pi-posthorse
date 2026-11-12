@@ -36,6 +36,11 @@ It must never edit the session journal's message objects. Pi passes those edits 
 and returns the resulting messages to the provider. Forced prompts are handled separately by
 request-local guidance because the host applies forced text after that hook.
 
+Paged output uses `PageAccess.deliver`: it reconciles usage, calls a synchronous page builder,
+and reserves the returned text and images before returning. Callers finish their asynchronous
+reads before entering this operation. Page sizing is private, so a caller cannot hold an
+unreserved size across an await or forget to reserve the completed result.
+
 ## Journal ownership
 
 Pi alone appends, reparents, and persists session entries. Posthorse appends custom entries through
