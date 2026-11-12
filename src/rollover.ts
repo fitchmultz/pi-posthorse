@@ -40,10 +40,12 @@ import {
 	countRetainedMessages,
 	createReminderLookup,
 	reminderDecision,
+	retainedTailMessages,
 	staleReminderPredicate,
 	type ReminderLookup,
 	type StaleReminderPredicate,
 } from "./reminders.ts";
+import { retainedTailEnd } from "./retained-tail.ts";
 
 function explicitReset(
 	event: TurnEndEvent,
@@ -87,11 +89,11 @@ function chronologicalRetainedTail(
 	const first = messages[summaryIndex];
 	if (first?.role === "compactionSummary" && hasRetainedRolloverMarker(first.summary)) {
 		// Pi projects no system messages into the retained tail, but an earlier handler can
-		// present a retained message as one (pi-change-working-dir's directory snapshots).
-		// Count positions, not roles, so the record never lands inside the next tool batch.
-		const count = countRetainedMessages(ctx, stale);
-		const end = summaryIndex + 1 + count;
-		if (count > 0 && end <= messages.length) {
+		// present a retained message as one (pi-change-working-dir's directory snapshots) or
+		// interleave a new message. Match the projected journal tail before reordering it;
+		// count positions only on a host without a projection.
+		const { count, end } = retainedTailSliceEnd(messages, summaryIndex, ctx, stale);
+		if (count > 0 && end !== undefined) {
 			const prefix = messages.slice(0, summaryIndex);
 			const retainedSlice = messages.slice(summaryIndex + 1, end);
 			const afterSlice = messages.slice(end);
@@ -114,6 +116,27 @@ function chronologicalRetainedTail(
 		}
 	}
 	return messages;
+}
+
+/** An unmatched projection must not silently become a positional match. */
+function retainedTailSliceEnd(
+	messages: ContextWithSystemEvent["messages"],
+	summaryIndex: number,
+	ctx: ExtensionContext,
+	stale: StaleReminderPredicate,
+): { readonly count: number; readonly end: number | undefined } {
+	const retained = retainedTailMessages(ctx, stale);
+	const count = retained?.length ?? countRetainedMessages(ctx, stale);
+	if (count === 0) {
+		return { count, end: undefined };
+	}
+	let end: number | undefined;
+	if (retained !== undefined) {
+		end = retainedTailEnd(messages, summaryIndex, retained);
+	} else if (summaryIndex + 1 + count <= messages.length) {
+		end = summaryIndex + 1 + count;
+	}
+	return { count, end };
 }
 function registerReminderFilter(
 	pi: ExtensionAPI,

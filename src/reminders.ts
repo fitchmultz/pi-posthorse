@@ -4,6 +4,7 @@ import {
 	LEGACY_WINDOW_TYPE,
 	isRecord,
 	isReminderType,
+	type MessageLike,
 	type EntryLike,
 	type PolicyContext,
 	type ProjectedEntry,
@@ -236,12 +237,12 @@ export function createReminderLookup(): ReminderLookup {
 	return { reset: cache.reset, read: cache.read };
 }
 
-function countRetainedFromProjected(
+function retainedProjectedMessages(
 	projected: readonly ProjectedEntry[],
 	retainedIds: ReadonlySet<string>,
 	stale: StaleReminderPredicate,
-): number {
-	let count = 0;
+): MessageLike[] {
+	const retained: MessageLike[] = [];
 	for (const item of projected) {
 		if (!retainedIds.has(item.sourceEntry.id ?? "")) {
 			continue;
@@ -250,11 +251,11 @@ function countRetainedFromProjected(
 			if (
 				!stale({ role: msg.role ?? "", customType: msg.customType, details: msg.details })
 			) {
-				count += 1;
+				retained.push(msg);
 			}
 		}
 	}
-	return count;
+	return retained;
 }
 
 function entryProducesRetainedMessage(
@@ -285,11 +286,32 @@ export function countRetainedMessages(
 	}
 	const projection = sessionProjection(ctx.sessionManager);
 	if (projection !== undefined) {
-		return countRetainedFromProjected(projection, retainedIds, stale);
+		return retainedProjectedMessages(projection, retainedIds, stale).length;
 	}
 	const edits = contextEdits(branch);
 	return branch.filter(
 		(entry) =>
 			retainedIds.has(entry.id ?? "") && entryProducesRetainedMessage(entry, edits, stale),
 	).length;
+}
+
+/**
+ * The retained tail's messages, in journal order, as the session projection carries them.
+ * Stale reminders leave the list exactly as the provider filter removes them. Undefined when
+ * the journal names no tail or the host has no session projection, so callers cannot certify
+ * the tail by identity and must count positions instead.
+ */
+export function retainedTailMessages(
+	ctx: ExtensionContext,
+	stale: StaleReminderPredicate,
+): readonly MessageLike[] | undefined {
+	const branch = sessionBranch(ctx.sessionManager) ?? [];
+	const retainedIds = journalRetainedIds(branch);
+	if (retainedIds === undefined) {
+		return undefined;
+	}
+	const projection = sessionProjection(ctx.sessionManager);
+	return projection === undefined
+		? undefined
+		: retainedProjectedMessages(projection, retainedIds, stale);
 }

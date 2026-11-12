@@ -40,6 +40,8 @@ export type ToolCallLike = {
 };
 export type MessageLike = {
 	readonly role?: string | undefined;
+	readonly timestamp?: number | undefined;
+	readonly sections?: unknown;
 	readonly stopReason?: string | undefined;
 	readonly errorMessage?: string | undefined;
 	readonly content?: unknown;
