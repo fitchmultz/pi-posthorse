@@ -45,6 +45,10 @@ receipt in that order is the latest one. Timestamps are display data, not a repl
 key. `HistorySource.branch`, `contextEdits`, `windowProjection`, `NoteEvidence`, and
 `recoveryInputs` state this contract where callers supply those arrays.
 
+Evidence reconciliation and note-state replay use the same normalized lexical file identity.
+A file-tool path containing `/./` and its normalized notes-tool path name one note. Historical
+paths are not resolved against the current filesystem merely to compare journal evidence.
+
 | Contracts | Current guarantee and owner                                                                                                                                                                                                                           | Behavioral coverage                                                   |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | H1        | Window labels are projected forward through all ancestry metadata before results are reversed or nonmatching content is discarded. Each traversal owns its projection state.                                                                          | Window-label and skipped-archive-entry cases                          |

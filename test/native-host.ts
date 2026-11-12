@@ -31,6 +31,7 @@ import { fixtureDisplay, fixtureResult } from "./results.ts";
 type TranscriptMessages = NativeAi.TranscriptContext["messages"];
 import type { HistoryParams } from "../src/history-search.ts";
 import type { NotesParams } from "../src/notes.ts";
+import { renderSessionNotes } from "../src/recovery-notes.ts";
 import { retainFile, retainSession } from "./fixture-files.ts";
 
 const {
@@ -867,6 +868,32 @@ await test("fork notes recover metadata-only nested writes through edited receip
 		false,
 		"an explicitly deleted causal receipt cannot seed a fork",
 	);
+});
+
+await test("recovery clears a file-tool note written through a dot-segment alias", async (t) => {
+	const h = await fixture(t, {
+		fileTools: true,
+		extension: noteRecoveryTools,
+		contextWindow: 128_000,
+	});
+	const path = `${join(h.cwd, ".pi", "notes")}/./task.md`;
+	const written = await nativeCall(h, fauxToolCall("write", { path, content: "checkpoint" }));
+	assert.equal(written.isError, false, textOf(written));
+	await notesCall(h, { op: "write", path: "task.md", content: "" });
+	assert.equal(readFileSync(path, "utf8"), "");
+	assert.equal(
+		renderSessionNotes(
+			h.sessionManager.getBranch(),
+			h.sessionManager.getEntries(),
+			h.sessionManager.buildSessionProjection().entries,
+			{ retained: new Set(), span: undefined, maxChars: 10_000 },
+		),
+		undefined,
+		"a cleared note must not survive through a file-tool alias",
+	);
+	await nativeCall(h, fauxToolCall("dump", {}));
+	const recovery = requireValue(posthorseBoundaries(h.sessionManager).at(-1)).summary;
+	assert.doesNotMatch(recovery, /Active note \(written\): [^\n]*task\.md/u);
 });
 
 await test("fork recovery names a note it wrote in another scope by its path", async (t) => {

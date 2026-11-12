@@ -60,6 +60,9 @@ the extension API; it never rewrites a journal file.
   keeps the last effect per owner, receipt, call, and path, in final-effect order. Verified effects
   determine clear and delete state. Compatible receipt content can still prove a retained full
   write or partial edit; an inferred edit cannot override a verified clear.
+- Evidence reconciliation and note-state replay share a lexical path key. Dot segments and
+  separator spelling do not split a file's effects into different notes. This key does not resolve
+  old journal paths against the current filesystem.
 - Reminders belong to a window and budget. Old reminders remain in history but leave model input,
   except inside the unchanged prefix protected by a provider summary block.
 - A cancelled compaction can leave an inert `posthorse-boundary` marker. Only the compaction entry

@@ -1,7 +1,12 @@
 import { join } from "node:path";
 import { isRecord, optionalString, type EntryLike, type ProjectedEntry } from "./contracts.ts";
 import { contextEdits } from "./history-entries.ts";
-import { collectTouches, type NoteTouch, type ScannedNoteEntry } from "./recovery-note-touches.ts";
+import {
+	collectTouches,
+	noteTargetKey,
+	type NoteTouch,
+	type ScannedNoteEntry,
+} from "./recovery-note-touches.ts";
 import {
 	addressOf,
 	bindingsOf,
@@ -115,7 +120,7 @@ function touchKey(touch: NoteTouch): string {
 	return JSON.stringify([
 		touch.receiptId ?? touch.entryId,
 		touch.toolCallId,
-		touch.absPath ?? touch.notePath,
+		noteTargetKey(touch),
 	]);
 }
 function reconcileTouch(recorded: NoteTouch, inferred: NoteTouch | undefined): NoteTouch {
