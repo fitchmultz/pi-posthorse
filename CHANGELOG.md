@@ -2,8 +2,26 @@
 
 ## Unreleased
 
+## 0.10.26 - 2026-11-12
+
+<!-- npm-release:unreleased:start -->
+
 - Keep recovery after the retained journal tail when another extension interleaves messages, without confusing identical output from different tool calls.
 - Hide reserved atomic-publication temporary files from notes list and search without deleting leftover data.
+
+<!-- npm-release:unreleased:end -->
+
+- contracts: own the journal vocabulary (#198) ([5c0b4a9](https://github.com/fitchmultz/pi-posthorse/commit/5c0b4a9fa67855f930ddf7999381c7ff654647da))
+
+### What's Changed
+
+- contracts: own the journal vocabulary (1/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/198
+- recovery: match the retained tail by journal identity (2/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/199
+- guidance: certify delivery durability and trim retired epochs (3/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/201
+- lifetime: preserve final receipts and specify runtime ownership (4/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/202
+- notes: hide publication temporaries and specify storage ownership (5/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/203
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.25...v0.10.26
 
 ## 0.10.25 - 2026-11-11
 
