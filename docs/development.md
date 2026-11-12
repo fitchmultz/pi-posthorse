@@ -37,7 +37,7 @@ For focused SDK diagnostics, run `npm run test:native` against the installed SDK
 
 ## Requirements
 
-- Node `>=24.12.0`.
+- Node `^24.22.3 || >=26.13.1`.
 - Pi `>=1.5.0`, official (`@earendil-works/pi-coding-agent`) or the maintained [fitchmultz/pi](https://github.com/fitchmultz/pi) fork with the same public compaction and custom-run preparation contracts. Both use the same package identities; optional coding-agent and TUI peer ranges declare the `>=1.5.0` floor to package managers. These ranges are not a runtime guard: Pi can load an extension independently of npm peer resolution. No checkpoint, metadata iterator, or native context-window API is required.
 
 Required qualification targets: latest stable official Pi and latest maintained fork `main`, resolved once per workflow run and retained with exact SDK/CLI identity evidence. Locked development dependencies are reproducible build snapshots, not validation targets. Historical official Pi `1.0.0` ([source `a13d35a`](https://github.com/earendil-works/pi/commit/a13d35a742c6ef8462812a28fbe1d8c8b7431c32)), TypeBox `1.3.27` and Node `24.21.0` evidence does not certify newer hosts. Qualification does not install, activate, or restart the live runtime.
