@@ -37,15 +37,18 @@ async function* folderEntries(directory: string, signal: AbortSignal | undefined
 		const firstFolder = batch.findIndex(
 			(entry) => entry.isDirectory() || entry.isSymbolicLink(),
 		);
-		const paths = batch
-			.slice(0, firstFolder === -1 ? batch.length : firstFolder + 1)
-			.map((entry) => join(directory, entry.name));
-		const infos = await Promise.all(paths.map(statIfPresent));
-		for (const [index, path] of paths.entries()) {
+		const listed = await Promise.all(
+			batch
+				.slice(0, firstFolder === -1 ? batch.length : firstFolder + 1)
+				.map(async (entry) => {
+					const path = join(directory, entry.name);
+					return { path, info: await statIfPresent(path), alias: entry.isSymbolicLink() };
+				}),
+		);
+		for (const { path, info, alias } of listed) {
 			start += 1;
-			const info = infos[index];
 			if (info !== undefined) {
-				yield { path, info, alias: batch[index]?.isSymbolicLink() === true };
+				yield { path, info, alias };
 			}
 			if (info?.isDirectory() === true) {
 				break;

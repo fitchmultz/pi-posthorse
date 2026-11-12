@@ -31,6 +31,7 @@ export type HistorySource = {
 	readonly dir: string;
 	readonly cwd: string;
 	readonly currentFile?: string | undefined;
+	/** Pi's parent-before-child branch order, not message timestamp order. */
 	readonly branch: () => readonly EntryLike[];
 	readonly projection: () => readonly ProjectedEntry[];
 };

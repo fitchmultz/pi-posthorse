@@ -20,6 +20,7 @@ import {
 	toolIdentity,
 } from "./message-text.ts";
 
+/** Native journal order is oldest first; the last edit of a target wins, regardless of timestamp. */
 export function contextEdits(entries: readonly EntryLike[]): Map<string, EntryLike> {
 	return new Map(
 		entries.flatMap((entry) =>
@@ -186,7 +187,10 @@ export function toWindowedEntry(
 		images: imagesOf(entryContent(entry)),
 	};
 }
-/** Window ancestry is metadata-only; extracting text/images is a separate operation. */
+/**
+ * Feed parents before children, including entries that do not match a search. Labels follow
+ * ancestry, not timestamps. A fresh projection belongs to one forward journal traversal.
+ */
 export function windowProjection(): (entry: EntryLike) => string {
 	const windows = new Map<string, string>();
 	return (entry) => {

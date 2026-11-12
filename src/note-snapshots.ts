@@ -91,6 +91,7 @@ export type SnapshotNote = {
 	readonly anchors: readonly string[];
 };
 const NOTE_IO_BATCH = 16;
+/** Results retain input order. A failed batch settles all launched work before propagating failure. */
 export async function mapBatch<Input, Output>(
 	items: readonly Input[],
 	fn: (item: Input) => Promise<Output>,
