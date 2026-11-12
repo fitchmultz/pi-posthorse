@@ -7,9 +7,12 @@ official Pi and to the maintained fork.
 ## Runtime and request state
 
 Pi creates an extension instance for one session runtime. New, resumed, forked, and reloaded
-sessions get new instances. `session_shutdown` ends the old instance; its handlers clear the
-notes store, captured tool calls, reset requests, page reservations, reminder cache, guidance
-cache, and request prompt options. Shutdown does not delete journal entries or notes.
+sessions get new instances. Pi owns teardown and releases the old instance's notes store,
+captured calls, reset requests, page reservations, caches, and prompt options with the runtime.
+Posthorse does not clear them at `session_shutdown`: the maintained fork can dispatch that
+event while an interrupted turn is still settling and saving its final tool receipts.
+Captured calls remain available through `tool_execution_end`, including during shutdown.
+Shutdown does not delete journal entries or notes.
 
 | State               | Owner and validity                                                                                                                                                                                                                               |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

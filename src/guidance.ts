@@ -226,10 +226,6 @@ export function registerGuidance(
 		// Prompt options belong to one run, never to later idle context evaluation.
 		promptOptions = undefined;
 	});
-	pi.on("session_shutdown", () => {
-		// A shutdown ends the run that owns the options.
-		promptOptions = undefined;
-	});
 	pi.on("context_with_system", (event, ctx) => {
 		const guidance = windowGuidance.deliver(ctx, policy(ctx));
 		const system =

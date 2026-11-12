@@ -995,6 +995,38 @@ await test("notes read accepts an absolute path only inside this session's own n
 	assertStoredNoteLocations(child.sessionManager, forkNotes);
 });
 
+await test("notes keep captured file effects when shutdown precedes the final receipt", async (t) => {
+	async function shutdown(): Promise<void> {
+		await h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+	}
+	const h = await fixture(t, {
+		fileTools: true,
+		extension(pi) {
+			pi.on("tool_result", async (event) => {
+				if (event.toolName === "write") {
+					await shutdown();
+				}
+			});
+		},
+	});
+	const path = join(h.cwd, ".pi", "notes", "final.md");
+	const result = await nativeCall(
+		h,
+		fauxToolCall("write", { path, content: "final checkpoint" }),
+	);
+	assert.equal(result.isError, false, textOf(result));
+	assert.equal(readFileSync(path, "utf8"), "final checkpoint");
+	const touched = h.sessionManager
+		.getBranch()
+		.some(
+			(entry) =>
+				entry.type === "custom" &&
+				entry.customType === "posthorse-note-touch" &&
+				JSON.stringify(entry.data).includes("final.md"),
+		);
+	assert.equal(touched, true, "shutdown must not discard the final file receipt's capture");
+});
+
 await test("fork notes associate late cancelled background effects with their launch branch", async (t) => {
 	const started = Promise.withResolvers<null>();
 	const release = Promise.withResolvers<null>();

@@ -32,8 +32,8 @@ import {
 import type { NotesRecovery } from "./note-evidence.ts";
 
 type NotesManager = ExtensionContext["sessionManager"];
-/** The journal and event members the notes store borrows; the host's full API satisfies these. */
-type NotesApi = Pick<ExtensionAPI, "appendEntry" | "on">;
+/** The journal member the notes store borrows; the host's full API satisfies this. */
+type NotesApi = Pick<ExtensionAPI, "appendEntry">;
 export type NoteCall = { readonly id: string; readonly rootId: string };
 type Adoption = "owned" | "adopted";
 /**
@@ -249,20 +249,12 @@ function sessionKey(ctx: ExtensionContext): string {
 export type NotesStore = {
 	readonly get: (ctx: ExtensionContext) => Promise<SessionNotes>;
 	readonly recovery: (ctx: ExtensionContext) => NotesRecovery | undefined;
-	/** Clears the per-session state; a shutdown runtime never sees another event. */
-	readonly dispose: () => void;
 };
 type SessionState =
 	| { readonly kind: "initializing"; readonly value: Promise<SessionNotes> }
 	| { readonly kind: "ready"; readonly value: SessionNotes };
 export function createNotesStore(pi: NotesApi): NotesStore {
 	const sessions = new Map<string, SessionState>();
-	const dispose = (): void => {
-		sessions.clear();
-	};
-	// One instance serves one session runtime, which Pi tears down on /new, /resume, /fork,
-	// /reload, and quit. Clear what this instance owns in case a host ever reuses a runtime.
-	pi.on("session_shutdown", dispose);
 	const get = (ctx: ExtensionContext): Promise<SessionNotes> => {
 		const key = sessionKey(ctx);
 		const existing = sessions.get(key);
@@ -298,6 +290,5 @@ export function createNotesStore(pi: NotesApi): NotesStore {
 			const state = sessions.get(sessionKey(ctx));
 			return state?.kind === "ready" ? state.value.recovery : undefined;
 		},
-		dispose,
 	};
 }
