@@ -55,12 +55,14 @@ async function projectScopes(
 		throw error;
 	});
 	const candidates = entries.filter((entry) => !entry.name.startsWith(".staging-"));
-	const manifests = await mapBatch(candidates, async (entry) =>
-		entry.isDirectory() ? readManifest(join(directory, entry.name, "notes")) : undefined,
-	);
-	for (const [index, entry] of candidates.entries()) {
+	const manifests = await mapBatch(candidates, async (entry) => ({
+		entry,
+		manifest: entry.isDirectory()
+			? await readManifest(join(directory, entry.name, "notes"))
+			: undefined,
+	}));
+	for (const { entry, manifest } of manifests) {
 		const path = join(directory, entry.name);
-		const manifest = manifests[index];
 		if (manifest === undefined || manifest.root !== session.binding.root) {
 			notice(`Not indexed: unmanaged or incomplete notes data at ${path}.`);
 		} else {

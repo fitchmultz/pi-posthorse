@@ -4,6 +4,9 @@ Posthorse owns recovery policy and note provenance. Pi owns the agent loop, tool
 session journal, context projection, and file-tool mutation queues. These boundaries apply to
 official Pi and to the maintained fork.
 
+The [ordering contracts](ordering.md) identify event, replay, publication, and lookup precedence
+at those boundaries, with their implementation owners and behavioral coverage.
+
 ## Runtime and request state
 
 Pi creates an extension instance for one session runtime. New, resumed, forked, and reloaded

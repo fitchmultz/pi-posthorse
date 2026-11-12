@@ -218,6 +218,7 @@ export function parseBinding(value: unknown): NoteBinding | undefined {
 	}
 	return value;
 }
+/** Preserve the caller's journal precedence; consumers select the last matching binding. */
 export function bindingsOf(entries: readonly EntryLike[]): NoteBinding[] {
 	return entries.flatMap((entry) => {
 		const binding =
@@ -257,6 +258,7 @@ export function touchRecords(entries: readonly EntryLike[]): NoteTouchRecord[] {
 		}
 	});
 }
+/** Replay journal effects oldest first so later same-path adoption seeds replace earlier ones. */
 export function seedsOf(binding: NoteBinding, entries: readonly EntryLike[]): readonly NoteSeed[] {
 	const seeds = new Map(
 		binding.kind === "fork" ? binding.seeds.map((seed) => [seed.path, seed]) : [],

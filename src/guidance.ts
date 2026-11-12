@@ -52,6 +52,7 @@ export function activeGuidanceTools(pi: ToolRegistry): GuidanceTools {
 		getContextRemaining: activeUnnamespaced.has("get_context_remaining"),
 	};
 }
+/** Replay oldest first: the last text per budget wins, while the first record fixes epoch tools. */
 function collectGuidanceEntries(
 	entries: readonly EntryLike[],
 	baseByBudget?: ReadonlyMap<string, string>,

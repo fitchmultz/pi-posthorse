@@ -20,7 +20,9 @@ export type NotesRecovery = {
 };
 
 export type NoteEvidence = {
+	/** Active branch in native journal order; later edits and receipts supersede earlier ones. */
 	readonly branch: readonly EntryLike[];
+	/** Keep each source journal's effect order when combining durable provenance. */
 	readonly allEntries: readonly EntryLike[];
 	readonly projected: readonly ProjectedEntry[];
 	readonly retained: ReadonlySet<string>;

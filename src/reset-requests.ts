@@ -63,6 +63,7 @@ export class ResetRequests {
 			root.state = { ...root.state, kind: "settled" };
 		}
 	}
+	/** The first request within one foreground root owns its handoff. */
 	request(id: string, handoff: string): void {
 		const root = this.#active.get(id);
 		if (root === undefined || !this.#active.has(root.id)) {
@@ -75,6 +76,7 @@ export class ResetRequests {
 	/**
 	 * Settles the whole foreground batch. Any failed receipt cancels the reset, an aborted turn
 	 * keeps its context, and the first settled receipt that carries a handoff is honored.
+	 * Results use host batch order, not completion order; settling consumes all requests.
 	 */
 	settle(
 		results: TurnEndEvent["toolResults"],

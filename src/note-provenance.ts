@@ -235,13 +235,13 @@ async function forkBinding(
 	const entries = [...manager.getEntries(), ...source.entries];
 	const files: SnapshotNote[] = [];
 	const absent: string[] = [];
-	const addresses = await mapBatch(candidates, (candidate) =>
-		resolveReference(scope ?? candidate.source, candidate.path, entries),
-	);
-	for (const [index, candidate] of candidates.entries()) {
+	const addressed = await mapBatch(candidates, async (candidate) => ({
+		candidate,
+		address: await resolveReference(scope ?? candidate.source, candidate.path, entries),
+	}));
+	for (const { candidate, address } of addressed) {
 		// Resolve against the immediate parent's files, not a historical ancestor's version.
 		// A missing source note is not copied; a known source scope still resolves it later.
-		const address = addresses[index];
 		if (address !== undefined) {
 			files.push({
 				path: candidate.path,

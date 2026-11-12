@@ -202,7 +202,10 @@ function recoveryAncestry(
 		skipped: skipped.map((boundary) => boundary.id?.slice(0, 120) ?? "unknown"),
 	};
 }
-/** The inputs a record quotes in full (oldest first), the ones it only lists, and where its walk back ended. */
+/**
+ * Entries use native branch order. First/latest owner anchors depend on that order, not timestamps.
+ * Returns the inputs quoted in full (oldest first), those only listed, and where ancestry ended.
+ */
 export function recoveryInputs(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
