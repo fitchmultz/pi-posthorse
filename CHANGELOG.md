@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.28 - 2026-11-12
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- fix: require patched Node security releases (#212) ([65518ab](https://github.com/fitchmultz/pi-posthorse/commit/65518ab0f7cac2f56096d047d805a4e15e7efa35))
+
+### What's Changed
+
+- fix: require patched Node security releases by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/212
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.27...v0.10.28
+
 ## 0.10.27 - 2026-11-12
 
 <!-- npm-release:unreleased:start -->
