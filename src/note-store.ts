@@ -32,6 +32,8 @@ import {
 import type { NotesRecovery } from "./note-evidence.ts";
 
 type NotesManager = ExtensionContext["sessionManager"];
+/** The journal member the notes store borrows; the host's full API satisfies this. */
+type NotesApi = Pick<ExtensionAPI, "appendEntry">;
 export type NoteCall = { readonly id: string; readonly rootId: string };
 type Adoption = "owned" | "adopted";
 /**
@@ -42,7 +44,7 @@ export type NoteAccess =
 	| { readonly kind: "own"; readonly address: NoteAddress; readonly path: string }
 	| { readonly kind: "inherited"; readonly address: NoteAddress; readonly path: string };
 export class SessionNotes {
-	readonly #pi: ExtensionAPI;
+	readonly #pi: NotesApi;
 	readonly binding: NoteBinding;
 	readonly #manager: NotesManager;
 	readonly #source: NoteSource;
@@ -50,7 +52,7 @@ export class SessionNotes {
 	readonly scopes: readonly NoteScope[];
 	readonly #calls = new Map<string, string>();
 	readonly #revisions = new Map<string, number>();
-	constructor(pi: ExtensionAPI, binding: NoteBinding, manager: NotesManager, source: NoteSource) {
+	constructor(pi: NotesApi, binding: NoteBinding, manager: NotesManager, source: NoteSource) {
 		this.#pi = pi;
 		this.binding = binding;
 		this.#manager = manager;
@@ -251,7 +253,7 @@ export type NotesStore = {
 type SessionState =
 	| { readonly kind: "initializing"; readonly value: Promise<SessionNotes> }
 	| { readonly kind: "ready"; readonly value: SessionNotes };
-export function createNotesStore(pi: ExtensionAPI): NotesStore {
+export function createNotesStore(pi: NotesApi): NotesStore {
 	const sessions = new Map<string, SessionState>();
 	const get = (ctx: ExtensionContext): Promise<SessionNotes> => {
 		const key = sessionKey(ctx);
