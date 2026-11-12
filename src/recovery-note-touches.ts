@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import {
 	NOTE_RECEIPT,
 	isRecord,
@@ -22,6 +23,14 @@ export type NoteTarget = {
 	readonly absPath?: string | undefined;
 	readonly referenceScope?: string | undefined;
 };
+/** Normalize journal path spelling without resolving archived evidence against today's filesystem. */
+export function noteTargetKey(target: NoteTarget): string {
+	const location = target.referenceScope ?? target.absPath ?? "";
+	return JSON.stringify([
+		posix.normalize(location.replaceAll("\\", "/")),
+		posix.normalize(target.notePath.replaceAll("\\", "/")),
+	]);
+}
 export type NoteTouch = NoteTarget & {
 	readonly entryId: string;
 	readonly receiptId?: string | undefined;

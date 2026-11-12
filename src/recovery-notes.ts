@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { EntryLike, ProjectedEntry } from "./contracts.ts";
 import { sessionNoteTouches, scopeRecoveryTouches, type NotesRecovery } from "./note-evidence.ts";
 import { scopeDirectory } from "./note-scopes.ts";
-import type { NoteTarget, NoteTouch } from "./recovery-note-touches.ts";
+import { noteTargetKey, type NoteTarget, type NoteTouch } from "./recovery-note-touches.ts";
 import type { RetainedSpan } from "./retained-tail.ts";
 
 const MAX_WRITTEN_NOTES = 4;
@@ -162,7 +162,7 @@ function trackedNotes(
 			rawTouch.absPath === undefined && defaultDir !== undefined
 				? { ...rawTouch, absPath: `${defaultDir}/${rawTouch.notePath}` }
 				: rawTouch;
-		const key = `${touch.referenceScope ?? touch.absPath ?? ""}\0${touch.notePath}`;
+		const key = noteTargetKey(touch);
 		const next = applyTouch(tracked.get(key), touch, order);
 		if (next === undefined) {
 			tracked.delete(key);
