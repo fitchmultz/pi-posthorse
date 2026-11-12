@@ -323,6 +323,23 @@ await test("fork notes start without a missing source note and reference it once
 		/\/\.forks\/[^/]+\/notes\/task\.md\nrestored checkpoint\nchild progress\n$/u,
 	);
 	assert.equal(readFileSync(source, "utf8"), "restored checkpoint");
+	const temporaryName = ".posthorse-98acee24-244c-44d8-b63e-5bc0a66ee690.tmp";
+	const temporary = join(parent.cwd, ".pi", "notes", temporaryName);
+	writeFileSync(temporary, "unpublished checkpoint");
+	assert.match(
+		await notesCall(child, { op: "read", path: temporaryName }),
+		/^Read-only live reference:.*\nunpublished checkpoint$/u,
+	);
+	assert.doesNotMatch(await notesCall(child, { op: "list" }), /98acee24/u);
+	assert.doesNotMatch(
+		await notesCall(child, { op: "search", query: "checkpoint" }),
+		/unpublished checkpoint/u,
+	);
+	assert.match(
+		await notesCall(child, { op: "list", path: temporaryName }),
+		/\(no notes in .*\)$/u,
+	);
+	assert.equal(readFileSync(temporary, "utf8"), "unpublished checkpoint");
 });
 
 async function interactiveFork(
