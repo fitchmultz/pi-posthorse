@@ -1,6 +1,7 @@
 import type { ExtensionContext, TurnEndEvent } from "@earendil-works/pi-coding-agent";
 import { budgetFor, type Budget } from "./budget.ts";
 import {
+	LEGACY_WINDOW_TYPE,
 	isRecord,
 	isReminderType,
 	type EntryLike,
@@ -58,7 +59,7 @@ function contextMarker(messages: readonly ContextMessage[]): {
 	readonly present: boolean;
 	readonly windowId: unknown;
 } {
-	const marker = messages.find((message) => message.customType === "context-window");
+	const marker = messages.find((message) => message.customType === LEGACY_WINDOW_TYPE);
 	if (marker === undefined) {
 		return { present: false, windowId: undefined };
 	}

@@ -1,4 +1,10 @@
-import { AUTO_HANDOFF_PREFIX, isRecord, type EntryLike, type ProjectedEntry } from "./contracts.ts";
+import {
+	AUTO_HANDOFF_PREFIX,
+	POSTHORSE_COMPACTION,
+	isRecord,
+	type EntryLike,
+	type ProjectedEntry,
+} from "./contracts.ts";
 
 export type BoundaryKind = "fork" | "native" | "automatic" | "explicit" | "posthorse";
 /** Everything the app derives from one persisted context boundary, decided in one place. */
@@ -50,7 +56,7 @@ export function classifyBoundary(entry?: EntryLike): Boundary | undefined {
 	}
 	const details = isRecord(entry.details) ? entry.details : undefined;
 	const freshGuidance = !providerSummaryBlock(entry);
-	if (details?.posthorse !== 1) {
+	if (details?.posthorse !== POSTHORSE_COMPACTION) {
 		return { kind: "native", window: false, chainsAncestry: false, freshGuidance };
 	}
 	const kind = compactionKind(details);
