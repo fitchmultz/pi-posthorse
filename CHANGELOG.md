@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.10.27 - 2026-11-12
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- notes: normalize durable ownership paths (1/4) (#205) ([3262f0e](https://github.com/fitchmultz/pi-posthorse/commit/3262f0e2a51298bd34e76d50ea4a07a16a6dc382))
+
+### What's Changed
+
+- notes: normalize durable ownership paths (1/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/205
+- paging: size and reserve output in one synchronous operation (2/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/206
+- recovery: reconcile completed note effects by call and file (3/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/208
+- contracts: bind parallel note results to their sources (4/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/209
+- recovery: share normalized note identity across evidence and replay (5/5) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/210
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.26...v0.10.27
+
 ## 0.10.26 - 2026-11-12
 
 <!-- npm-release:unreleased:start -->
