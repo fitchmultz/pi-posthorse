@@ -1,4 +1,4 @@
-import type { EntryLike, ProjectedEntry } from "./contracts.ts";
+import { OWNER_QUESTION_TOOL, type EntryLike, type ProjectedEntry } from "./contracts.ts";
 import { chainsAncestry, contextStart } from "./boundary.ts";
 import { contextEdits } from "./history-entries.ts";
 import { toolCalls } from "./message-text.ts";
@@ -70,7 +70,7 @@ function ownerRecords(
 		const record = recoveryRecord(
 			entry,
 			ownerQuestionRegistered &&
-				call?.name === "ask_question" &&
+				call?.name === OWNER_QUESTION_TOOL &&
 				call.namespace === undefined,
 		);
 		return record === undefined ? [] : [record];

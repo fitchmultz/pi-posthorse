@@ -1,4 +1,4 @@
-import type { EntryLike, ProjectedEntry } from "./contracts.ts";
+import { OWNER_QUESTION_TOOL, type EntryLike, type ProjectedEntry } from "./contracts.ts";
 
 /** Only the session-manager members Posthorse reads; a host may omit any of them. */
 export type SessionHost = {
@@ -20,8 +20,6 @@ export type ToolRegistry = {
 	readonly getActiveTools: () => readonly string[];
 	readonly getAllTools: () => readonly ToolInfo[];
 };
-/** The session's model may answer an owner question; only the plain tool registration is owner provenance. */
-export const OWNER_QUESTION_TOOL = "ask_question";
 export type SessionIdentity = {
 	readonly sessionId: string;
 	readonly file: string | undefined;

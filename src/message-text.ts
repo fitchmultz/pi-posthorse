@@ -83,14 +83,17 @@ function blockText(part: unknown): string {
 	}
 	return `${toolIdentity(call.name, call.namespace)} ${safeJsonStringify(call.arguments ?? {})}${call.id === undefined ? "" : `\nCall ID: ${call.id}`}${executionArgumentsText(call)}`;
 }
-export function textOf(message: MessageLike): string {
-	if (typeof message.content === "string") {
-		return message.content;
+export function contentText(content: unknown): string {
+	if (typeof content === "string") {
+		return content;
 	}
-	return (unknownArray(message.content) ?? [])
+	return (unknownArray(content) ?? [])
 		.map(blockText)
 		.filter((text) => text !== "")
 		.join("\n");
+}
+export function textOf(message: MessageLike): string {
+	return contentText(message.content);
 }
 export function assistantFailure(message: MessageLike): string {
 	if (message.role !== "assistant") {

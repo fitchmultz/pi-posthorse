@@ -1,53 +1,6 @@
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-
-export interface PageRange {
-	readonly offset: number;
-	readonly end: number;
-	readonly total: number;
-}
-
-export interface HistorySpan {
-	readonly headerLength: number;
-	readonly length: number;
-}
-
-/** Display-only facts and offsets into content, never a second copy of a note or history page. */
-export type PosthorseDisplay =
-	| {
-			readonly kind: "context";
-			readonly usage?: {
-				readonly tokens: number | null;
-				readonly contextWindow: number;
-				readonly percent: number | null;
-			};
-			readonly rollover?: "enabled" | "disabled" | "unsupported";
-			readonly rolloverAt?: number | undefined;
-	  }
-	| {
-			readonly kind: "notes-list" | "notes-search";
-			readonly count: number;
-			readonly headerLength?: number;
-			readonly page?: PageRange;
-			/** More matches follow; `page.total` counts only those found so far. */
-			readonly more?: boolean;
-	  }
-	| ({ readonly kind: "note-read"; readonly headerLength?: number } & PageRange)
-	| { readonly kind: "note-write" | "note-append" | "new-context" }
-	| {
-			readonly kind: "history-search";
-			readonly entries: readonly HistorySpan[];
-			readonly footerLength?: number;
-			readonly more?: boolean;
-			readonly skipped?: number;
-	  }
-	| ({
-			readonly kind: "history-read";
-			readonly headerLength: number;
-			readonly imageOffset?: number;
-			readonly imageEnd?: number;
-			readonly imageTotal?: number;
-	  } & PageRange);
+import { formatCount, type ImageLike, type Immutable } from "../contracts.ts";
 
 const pageRangeSchema = Type.Object({
 	offset: Type.Number(),
@@ -64,7 +17,7 @@ const usageSchema = Type.Object({
 	percent: Type.Union([Type.Number(), Type.Null()]),
 });
 /** The saved-result contract: one schema decides which display facts a renderer may trust. */
-const displaySchema = Type.Union([
+export const displaySchema = Type.Union([
 	Type.Object({
 		kind: Type.Literal("context"),
 		usage: Type.Optional(usageSchema),
@@ -112,6 +65,25 @@ const displaySchema = Type.Union([
 		imageTotal: Type.Optional(Type.Number()),
 	}),
 ]);
+
+export type PageRange = Immutable<Static<typeof pageRangeSchema>>;
+export type HistorySpan = Immutable<Static<typeof historySpanSchema>>;
+/** Display-only facts and offsets into content, never a second copy of a note or history page. */
+export type PosthorseDisplay = Immutable<Static<typeof displaySchema>>;
+export type TextResult = {
+	content: Array<
+		{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+	>;
+	details: PosthorseDisplay | undefined;
+};
+
+export function textResult(
+	text: string,
+	images: readonly ImageLike[] = [],
+	display?: PosthorseDisplay,
+): TextResult {
+	return { content: [{ type: "text", text }, ...images], details: display };
+}
 
 /** Saved sessions and streamed tool results can predate the display contract. */
 export function displayOf(value: unknown): PosthorseDisplay | undefined {
@@ -178,16 +150,14 @@ function validSpan(span: HistorySpan, start: number, bodyLength: number): boolea
 	);
 }
 
-const n = (value: number): string => value.toLocaleString("en-US");
-
 export function pageSummary(page: PageRange, more = false): string {
 	if (page.total === 0) {
 		return "Empty note";
 	}
 	if (page.offset === 0 && page.end === page.total) {
-		return `${n(page.total)} chars · complete`;
+		return `${formatCount(page.total)} chars · complete`;
 	}
-	return `Chars ${n(page.offset)}–${n(page.end)} of ${n(page.total)}${more ? "+" : ""}${page.end < page.total ? `\nNext offset ${n(page.end)}` : " · final page"}`;
+	return `Chars ${formatCount(page.offset)}–${formatCount(page.end)} of ${formatCount(page.total)}${more ? "+" : ""}${page.end < page.total ? `\nNext offset ${formatCount(page.end)}` : " · final page"}`;
 }
 
 function contextSummary(display: Extract<PosthorseDisplay, { readonly kind: "context" }>): string {
@@ -195,12 +165,12 @@ function contextSummary(display: Extract<PosthorseDisplay, { readonly kind: "con
 	if (usage === undefined || usage.tokens === null) {
 		return "Context usage unknown";
 	}
-	const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens to configured context limit`;
+	const configured = `≈${formatCount(Math.max(0, usage.contextWindow - usage.tokens))} tokens to configured context limit`;
 	const rollover =
 		display.rollover === "enabled" && display.rolloverAt !== undefined
-			? `≈${n(Math.max(0, display.rolloverAt - usage.tokens))} tokens to rollover`
+			? `≈${formatCount(Math.max(0, display.rolloverAt - usage.tokens))} tokens to rollover`
 			: `Automatic rollover ${display.rollover ?? "unknown"}`;
-	return `${rollover}\n${configured}\n≈${n(usage.tokens)} / ${n(usage.contextWindow)} used${usage.percent === null ? "" : ` (≈${Math.round(usage.percent)}%)`}`;
+	return `${rollover}\n${configured}\n≈${formatCount(usage.tokens)} / ${formatCount(usage.contextWindow)} used${usage.percent === null ? "" : ` (≈${Math.round(usage.percent)}%)`}`;
 }
 
 function historyReadSummary(
@@ -213,9 +183,9 @@ function historyReadSummary(
 	) {
 		return pageSummary(display);
 	}
-	const summary = `${pageSummary(display).split("\n", 1).join("")}\nImages ${n(display.imageOffset ?? 0)}–${n(display.imageEnd)} of ${n(display.imageTotal)}`;
+	const summary = `${pageSummary(display).split("\n", 1).join("")}\nImages ${formatCount(display.imageOffset ?? 0)}–${formatCount(display.imageEnd)} of ${formatCount(display.imageTotal)}`;
 	return display.end < display.total || display.imageEnd < display.imageTotal
-		? `Next offset ${n(display.end)}\nimageOffset ${n(display.imageEnd)}\n${summary}`
+		? `Next offset ${formatCount(display.end)}\nimageOffset ${formatCount(display.imageEnd)}\n${summary}`
 		: summary;
 }
 
@@ -229,7 +199,7 @@ function historySearchSummary(
 	}
 	const skipped = display.skipped ?? 0;
 	const more = display.more ?? (display.footerLength ?? 0) > 0;
-	return `${display.entries.length > 0 ? `${n(display.entries.length)} matches` : "No matches"} · ${all ? "all sessions" : "current branch"}${skipped > 0 ? ` · ${n(skipped)} in context skipped` : ""}${more ? "\nMore results; continue with cursor" : ""}`;
+	return `${display.entries.length > 0 ? `${formatCount(display.entries.length)} matches` : "No matches"} · ${all ? "all sessions" : "current branch"}${skipped > 0 ? ` · ${formatCount(skipped)} in context skipped` : ""}${more ? "\nMore results; continue with cursor" : ""}`;
 }
 
 export function displaySummary(
@@ -242,10 +212,12 @@ export function displaySummary(
 			return contextSummary(display);
 		case "notes-list":
 			return display.count > 0
-				? `${n(display.count)} note${display.count === 1 ? "" : "s"} returned`
+				? `${formatCount(display.count)} note${display.count === 1 ? "" : "s"} returned`
 				: "No notes yet";
 		case "notes-search":
-			return display.count > 0 ? `${n(display.count)} matches returned` : "No matches";
+			return display.count > 0
+				? `${formatCount(display.count)} matches returned`
+				: "No matches";
 		case "note-read":
 			return pageSummary(display);
 		case "note-write":

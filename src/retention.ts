@@ -12,6 +12,7 @@ import {
 	MAX_HANDOFF_CHARS,
 	MIN_PAGE_CHARS,
 	type EntryLike,
+	type Immutable,
 	type MessageLike,
 	type PolicyContext,
 } from "./contracts.ts";
@@ -33,13 +34,6 @@ type RecoveryCapacity = {
 	/** The host will ask the provider for a summary block, which needs an assistant message first in the tail. */
 	readonly providerSummary?: boolean | undefined;
 };
-type Immutable<T> = T extends string | number | boolean | null | undefined
-	? T
-	: T extends readonly (infer Item)[]
-		? readonly Immutable<Item>[]
-		: T extends object
-			? { readonly [Key in keyof T]: Immutable<T[Key]> }
-			: T;
 type ProjectionEntry = Immutable<ProjectedSessionEntry>;
 const CUT_ROLES = new Set([
 	"user",

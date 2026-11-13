@@ -5,10 +5,9 @@ import {
 	MAX_PAGE_CHARS,
 	MIN_PAGE_CHARS,
 	PAGE_MARGIN_TOKENS,
-	textResult,
 	type PolicyContext,
-	type TextResult,
 } from "./contracts.ts";
+import { textResult, type TextResult } from "./ui/display.ts";
 
 /** What else the page carries: images share the budget, and the header comes out of the body. */
 export type PageRequest = {

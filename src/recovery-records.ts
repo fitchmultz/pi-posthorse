@@ -1,5 +1,5 @@
-import { isReminderType, type EntryLike } from "./contracts.ts";
-import { boundedBlock, imageSummary, imagesOf, textOf } from "./message-text.ts";
+import { isReminderType, OWNER_QUESTION_TOOL, type EntryLike } from "./contracts.ts";
+import { boundedBlock, contentText, imageSummary, imagesOf } from "./message-text.ts";
 
 export const MAX_RECOVERY_RECORD_CHARS = 4_000;
 export type RecoveryRecord = {
@@ -20,7 +20,7 @@ function ownerAnswer(entry: EntryLike, ownerQuestion: boolean): boolean {
 		ownerQuestion &&
 		entry.type === "message" &&
 		message?.role === "toolResult" &&
-		message.toolName === "ask_question" &&
+		message.toolName === OWNER_QUESTION_TOOL &&
 		message.namespace === undefined &&
 		message.isError !== true
 	);
@@ -58,7 +58,7 @@ export function recoveryRecord(
 		return undefined;
 	}
 	const id = entry.id?.slice(0, 120) ?? "unknown";
-	const text = textOf({ content: source.content }).trim();
+	const text = contentText(source.content).trim();
 	const summary =
 		source.label === "owner answer via ask_question"
 			? ""

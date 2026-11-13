@@ -7,7 +7,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { toolCards } from "../ui.ts";
 import {
 	MAX_PAGE_CHARS,
@@ -17,10 +17,10 @@ import {
 	notesDirectoryHeader,
 	presentText,
 	requireValue,
-	textResult,
+	type Immutable,
 	type PolicyContext,
-	type TextResult,
 } from "./contracts.ts";
+import { textResult, type TextResult } from "./ui/display.ts";
 import { isBinaryFile, notesDir, publishFile, readText } from "./files.ts";
 import { notePath, scopeDirectory } from "./note-scopes.ts";
 import type { NoteCall, NotesStore, SessionNotes } from "./note-store.ts";
@@ -28,14 +28,6 @@ import { NoteDiscovery, noteLabel } from "./note-discovery.ts";
 import { excerpt, excerptAround } from "./message-text.ts";
 import type { PageAccess } from "./paging.ts";
 
-export type NotesParams = {
-	readonly op: "list" | "read" | "write" | "append" | "search";
-	readonly path?: string;
-	readonly content?: string;
-	readonly query?: string;
-	readonly offset?: number;
-	readonly scope?: string;
-};
 type NoteHits = { readonly rows: string[]; readonly more: boolean; readonly skipped: number };
 /** Paged operations take a fresh policy snapshot after their filesystem awaits. */
 type NotesAccess = {
@@ -330,6 +322,7 @@ const notesParameters = Type.Object({
 		}),
 	),
 });
+export type NotesParams = Immutable<Static<typeof notesParameters>>;
 export function registerNotes(
 	pi: ExtensionAPI,
 	policy: (ctx: ExtensionContext) => PolicyContext,
@@ -345,7 +338,7 @@ export function registerNotes(
 			"Durable task notes shared across Git worktrees and context resets; forks get private copies. Ops: list (newest first), read, search (case-insensitive), write (replace; empty clears), append (one record). list/search also cover other sessions' note scopes and show their selectors; pass scope to read, list, or search one of them. list/read/search are paged; continue with the returned offset. A read of a current note returns its file path.",
 		promptSnippet: "save and recall durable state with private notes for forks",
 		parameters: notesParameters,
-		async execute(...[_id, received, signal, , ctx]) {
+		async execute(...[id, received, signal, , ctx]) {
 			const params = withoutEmptyScope(received);
 			// Migrate newly returned legacy package notes without changing this session’s binding.
 			notesDir(ctx.cwd);
@@ -359,7 +352,7 @@ export function registerNotes(
 				host: () => policy(ctx),
 				pages,
 				signal,
-				call: session.call(_id),
+				call: session.call(id),
 				discovery,
 			};
 			switch (params.op) {

@@ -1,8 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { isRecord as objectValue } from "../src/contracts.ts";
 
 type Configuration = Readonly<Record<string, unknown>>;
+
+export { objectValue };
 
 const requiredScripts = {
 	check: "tsc --noEmit",
@@ -24,10 +27,6 @@ const requiredScripts = {
 	test: "node --import ./test/pi-loader.ts --test test/*.test.ts test/host.test.mjs",
 	prepublishOnly: "npm run verify",
 };
-
-export function objectValue(value: unknown): value is Configuration {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 export function readObject(path: string): Configuration {
 	const value: unknown = JSON.parse(readFileSync(path, "utf8"));
