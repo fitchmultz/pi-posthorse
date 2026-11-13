@@ -4,6 +4,7 @@ import {
 	MAX_HANDOFF_CHARS,
 	MAX_PAGE_CHARS,
 	PAGE_MARGIN_TOKENS,
+	formatCount,
 	type CompactionPolicy,
 	type ContextUsage,
 	type MessageLike,
@@ -95,11 +96,10 @@ export function budgetGuidanceKey(ctx: PolicyContext): string {
 		: `1:${budget.contextWindow}:${budget.reserveTokens}`;
 }
 export function unsupportedMessage(budget: Budget, newContextAvailable = true): string {
-	const n = (value: number) => value.toLocaleString("en-US");
 	const reset = newContextAvailable
 		? " new_context remains available with a model-aware handoff limit."
 		: "";
-	return `Posthorse: unsupported configuration. The model's context window (${n(budget.contextWindow)} tokens) minus Pi's compaction.reserveTokens (${n(budget.reserveTokens)}) leaves ${n(budget.usable)} usable tokens; Posthorse needs at least ${n(MIN_USABLE_TOKENS)}. Automatic Posthorse rollover and checkpoint reminders are off for this model, so Pi's own compaction applies. Lower compaction.reserveTokens in Pi settings or use a larger-context model.${reset}`;
+	return `Posthorse: unsupported configuration. The model's context window (${formatCount(budget.contextWindow)} tokens) minus Pi's compaction.reserveTokens (${formatCount(budget.reserveTokens)}) leaves ${formatCount(budget.usable)} usable tokens; Posthorse needs at least ${formatCount(MIN_USABLE_TOKENS)}. Automatic Posthorse rollover and checkpoint reminders are off for this model, so Pi's own compaction applies. Lower compaction.reserveTokens in Pi settings or use a larger-context model.${reset}`;
 }
 function automaticGuidance(
 	budget: Budget | undefined,
@@ -116,7 +116,7 @@ function automaticGuidance(
 	const line =
 		budget === undefined
 			? ""
-			: `The rollover line is ${budget.rolloverAt.toLocaleString("en-US")} tokens used. `;
+			: `The rollover line is ${formatCount(budget.rolloverAt)} tokens used. `;
 	const reset = tools.newContext ? " new_context is an optional clean reset." : "";
 	return `Pi rolls context over automatically, so the context window is not a deadline. Do not reduce scope, skip steps or verification, or write a final summary because rollover is near, and do not wait for the user to say "continue". Finish when the requested work and its verification are complete, or report a genuine blocker.
 ${line}Rollover keeps a recent-message tail without summarizing. One task-note reminder may arrive at the end of a working turn near the line: update the note only if it is stale, or write one if the task has none, then continue with the next step in the same run.${reset}`;
@@ -131,7 +131,7 @@ export function buildGuidance(
 	const capacity =
 		budget === undefined
 			? "Configured context capacity is unknown."
-			: `Configured context capacity: ${budget.contextWindow.toLocaleString("en-US")} tokens (not remaining space).`;
+			: `Configured context capacity: ${formatCount(budget.contextWindow)} tokens (not remaining space).`;
 	const checkRemaining = tools.getContextRemaining
 		? " Before reporting a remaining-token count or changing your work plan because of context limits, call get_context_remaining."
 		: "";

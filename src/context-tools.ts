@@ -3,13 +3,8 @@ import { Type } from "typebox";
 import { toolCards, type PosthorseDisplay } from "../ui.ts";
 import { budgetFor, freshPayloadChars, unsupportedMessage, type Budget } from "./budget.ts";
 import { activeGuidanceTools } from "./guidance.ts";
-import {
-	EMPTY_HANDOFF,
-	MAX_HANDOFF_CHARS,
-	textResult,
-	type PolicyContext,
-	type TextResult,
-} from "./contracts.ts";
+import { EMPTY_HANDOFF, MAX_HANDOFF_CHARS, formatCount, type PolicyContext } from "./contracts.ts";
+import { textResult, type TextResult } from "./ui/display.ts";
 
 function rolloverStatus(budget: Budget | undefined): "disabled" | "enabled" | "unsupported" {
 	return budget?.state ?? "disabled";
@@ -21,16 +16,15 @@ function contextReport(host: PolicyContext, newContextAvailable: boolean): TextR
 			kind: "context",
 		});
 	}
-	const n = (value: number) => value.toLocaleString("en-US");
 	const budget = budgetFor(host, usage.contextWindow);
 	const rollover = rolloverStatus(budget);
 	const display: PosthorseDisplay = {
 		kind: "context",
 		usage,
 		rollover,
-		rolloverAt: budget?.rolloverAt,
+		...(budget?.rolloverAt === undefined ? {} : { rolloverAt: budget.rolloverAt }),
 	};
-	const configured = `≈${n(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${n(usage.tokens)}/${n(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate.`;
+	const configured = `≈${formatCount(Math.max(0, usage.contextWindow - usage.tokens))} tokens until the configured context limit (${formatCount(usage.tokens)}/${formatCount(usage.contextWindow)} used, ${Math.round(usage.percent ?? 0)}%). Best available native estimate.`;
 	if (budget === undefined || budget.state === "disabled") {
 		return textResult(
 			`Automatic rollover is disabled in the available settings (Pi compaction.enabled=false). ${configured}`,
@@ -46,7 +40,7 @@ function contextReport(host: PolicyContext, newContextAvailable: boolean): TextR
 		);
 	}
 	return textResult(
-		`≈${n(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until automatic rollover (line at ${n(budget.rolloverAt)}); ${configured}`,
+		`≈${formatCount(Math.max(0, budget.rolloverAt - usage.tokens))} tokens until automatic rollover (line at ${formatCount(budget.rolloverAt)}); ${configured}`,
 		[],
 		display,
 	);
@@ -77,7 +71,7 @@ export function registerContextTools(
 			const limit = freshPayloadChars(policy(ctx), activeToolTokens());
 			if (trimmed !== undefined && trimmed !== "" && trimmed.length > limit) {
 				throw new Error(
-					`Handoff is too large for the active model (${trimmed.length.toLocaleString("en-US")} characters; limit ${limit.toLocaleString("en-US")}). Save fuller state in notes, then retry with a shorter handoff or no handoff.`,
+					`Handoff is too large for the active model (${formatCount(trimmed.length)} characters; limit ${formatCount(limit)}). Save fuller state in notes, then retry with a shorter handoff or no handoff.`,
 				);
 			}
 			const result = textResult(

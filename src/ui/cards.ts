@@ -1,5 +1,6 @@
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import { formatCount } from "../contracts.ts";
 import {
 	displayOf,
 	displaySummary,
@@ -27,7 +28,6 @@ const titles: Readonly<Record<ToolName, string>> = {
 	get_context_remaining: "Context budget",
 	new_context: "New context",
 };
-const n = (value: number): string => value.toLocaleString("en-US");
 
 interface CallState {
 	readonly isError: boolean;
@@ -70,7 +70,7 @@ function callDetails(name: ToolName, args: Readonly<Record<string, unknown>>): s
 		const value = args[key];
 		return value === undefined
 			? ""
-			: `${label}: ${typeof value === "number" ? n(value) : `[invalid ${key}]`}`;
+			: `${label}: ${typeof value === "number" ? formatCount(value) : `[invalid ${key}]`}`;
 	});
 	return [scope, ...offsets].filter((part) => part.length > 0).join(" · ");
 }

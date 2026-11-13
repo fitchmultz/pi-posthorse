@@ -1,8 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text, stripTerminalSequences, truncateToWidth } from "@earendil-works/pi-tui";
-import { isRecord } from "../records.ts";
-
-export { isRecord } from "../records.ts";
+import { isRecord } from "../contracts.ts";
 
 export type OutputColor = "toolOutput" | "muted" | "dim" | "error" | "warning";
 

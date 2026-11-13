@@ -9,6 +9,7 @@ import {
 import { isWindow } from "./boundary.ts";
 import {
 	assistantFailure,
+	contentText,
 	excerptAround,
 	imageSummary,
 	imagesOf,
@@ -59,19 +60,19 @@ export function flattenEntry(entry: EntryLike): string | undefined {
 		case "context_window":
 			return `[context_window] ${entry.handoff === undefined || entry.handoff === "" ? "No handoff" : `Handoff: ${entry.handoff}`}`;
 		case "custom_message":
-			return `[custom:${entry.customType ?? "unknown"}] ${contentText(entry.content)}`;
+			return `[custom:${entry.customType ?? "unknown"}] ${entryBodyText(entry.content)}`;
 		case "context_edit":
 			return entry.replacement === undefined || entry.replacement === null
 				? undefined
-				: `[context_edit] ${contentText(entry.replacement.content)}`;
+				: `[context_edit] ${entryBodyText(entry.replacement.content)}`;
 		case undefined:
 			return undefined;
 		default:
 			return undefined;
 	}
 }
-function contentText(content: unknown): string {
-	return [textOf({ content }), imageSummary(imagesOf(content))]
+function entryBodyText(content: unknown): string {
+	return [contentText(content), imageSummary(imagesOf(content))]
 		.filter((part) => part !== "")
 		.join("\n");
 }
@@ -83,7 +84,7 @@ function ownAssistantText(message: MessageLike, images: WindowedEntry["images"])
 			originals.push(current);
 			current = "";
 		} else {
-			const partText = textOf({ content: [part] });
+			const partText = contentText([part]);
 			if (partText !== "") {
 				current = current === "" ? partText : `${current}\n${partText}`;
 			}

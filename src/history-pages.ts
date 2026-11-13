@@ -1,12 +1,11 @@
 import {
 	MIN_PAGE_CHARS,
 	ESTIMATED_IMAGE_CHARS,
-	textResult,
 	type HistoryHit,
 	type PolicyContext,
-	type TextResult,
 	type WindowedEntry,
 } from "./contracts.ts";
+import { textResult, type TextResult } from "./ui/display.ts";
 import { excerpt, shortKey, sourceTag } from "./message-text.ts";
 import { cursorFor as cursorAt } from "./history-cursor.ts";
 import type { HistoryMatches, HistoryParams } from "./history-search.ts";

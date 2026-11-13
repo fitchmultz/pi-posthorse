@@ -1,26 +1,21 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { objectValue, readObject } from "./quality-settings.ts";
 
-const args: readonly (string | undefined)[] = process.argv.slice(2);
-const [candidatePath, qualificationPath, flavor] = args;
+const [candidatePath, qualificationPath, flavor] = process.argv.slice(2);
 assert.ok(
 	candidatePath !== undefined &&
 		qualificationPath !== undefined &&
 		(flavor === "official" || flavor === "fork"),
 );
-const candidate: unknown = JSON.parse(readFileSync(candidatePath, "utf8"));
-const qualification: unknown = JSON.parse(readFileSync(qualificationPath, "utf8"));
-function object(value: unknown): value is Readonly<Record<string, unknown>> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const candidate = readObject(candidatePath);
+const qualification = readObject(qualificationPath);
 function equal(actual: unknown, expected: unknown, message: string): void {
 	if (actual !== expected) {
 		throw new Error(message);
 	}
 }
-assert.ok(object(candidate) && object(qualification));
-assert.ok(object(candidate.hosts) && object(candidate.hosts[flavor]));
-assert.ok(object(qualification.package) && object(qualification.host));
+assert.ok(objectValue(candidate.hosts) && objectValue(candidate.hosts[flavor]));
+assert.ok(objectValue(qualification.package) && objectValue(qualification.host));
 
 equal(qualification.result, "passed", "Host qualification did not pass");
 equal(qualification.source, candidate.source, "Host qualification used a different source");

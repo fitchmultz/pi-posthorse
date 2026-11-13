@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { isRecord, type EntryLike } from "./contracts.ts";
+import { isRecord, type EntryLike, type Immutable } from "./contracts.ts";
 
 export const NOTES_BINDING = "posthorse-notes-scope";
 export const NOTES_TOUCH = "posthorse-note-touch";
@@ -60,11 +60,6 @@ const touchSchema = Type.Object({
 		}),
 	),
 });
-type Immutable<T> = T extends readonly (infer Item)[]
-	? readonly Immutable<Item>[]
-	: T extends object
-		? { readonly [Key in keyof T]: Immutable<T[Key]> }
-		: T;
 export type NoteOwner = Immutable<Static<typeof ownerSchema>>;
 export type NoteScope = Immutable<Static<typeof scopeSchema>>;
 export type NoteAddress = Immutable<Static<typeof addressSchema>>;

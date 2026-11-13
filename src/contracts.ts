@@ -1,7 +1,24 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { PosthorseDisplay } from "./ui/display.ts";
 
-export { isRecord } from "./records.ts";
+export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export type Immutable<T> = T extends
+	| string
+	| number
+	| boolean
+	| bigint
+	| symbol
+	| null
+	| undefined
+	| ((...args: never[]) => unknown)
+	? T
+	: T extends readonly (infer Item)[]
+		? readonly Immutable<Item>[]
+		: T extends object
+			? { readonly [Key in keyof T]: Immutable<T[Key]> }
+			: T;
 
 export type CompactionPolicy = {
 	readonly enabled: boolean;
@@ -98,12 +115,6 @@ export type ReminderFingerprint = {
 	readonly contextWindow?: number | undefined;
 	readonly reserveTokens?: number | undefined;
 };
-export type TextResult = {
-	content: Array<
-		{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-	>;
-	details: PosthorseDisplay | undefined;
-};
 
 export const MAX_HANDOFF_CHARS = 20_000;
 export const MAX_PAGE_CHARS = 40_000;
@@ -111,6 +122,8 @@ export const MIN_PAGE_CHARS = 1_000;
 export const PAGE_MARGIN_TOKENS = 1_000;
 export const ESTIMATED_IMAGE_CHARS = 4_800;
 export const REMINDER_TYPE = "posthorse-reminder";
+/** The session's model may answer an owner question; only the plain tool registration is owner provenance. */
+export const OWNER_QUESTION_TOOL = "ask_question";
 export const AUTO_HANDOFF_PREFIX = "Automatic context rollover recovery record.";
 export const EMPTY_HANDOFF = "Fresh context. Restore relevant notes and history before continuing.";
 
@@ -162,6 +175,12 @@ export function unknownArray(value: unknown): readonly unknown[] | undefined {
 export function optionalString(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
+export function errorCode(error: unknown): string | undefined {
+	return isRecord(error) ? optionalString(error.code) : undefined;
+}
+export function formatCount(value: number): string {
+	return value.toLocaleString("en-US");
+}
 /** Some models send every optional argument; an empty string means the argument was omitted. */
 export function presentText(value: unknown): string | undefined {
 	return typeof value === "string" && value !== "" ? value : undefined;
@@ -174,11 +193,4 @@ export function requireValue(value: string | undefined, name: string, op: string
 }
 export function isReminderType(customType: unknown): boolean {
 	return customType === REMINDER_TYPE;
-}
-export function textResult(
-	text: string,
-	images: readonly ImageLike[] = [],
-	display?: PosthorseDisplay,
-): TextResult {
-	return { content: [{ type: "text", text }, ...images], details: display };
 }

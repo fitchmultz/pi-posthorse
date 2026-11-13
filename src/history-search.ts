@@ -1,10 +1,12 @@
 import { relative, resolve } from "node:path";
+import { Type, type Static } from "typebox";
 import type { LineMatcher } from "./session-lines.ts";
 import {
 	isReminderType,
 	requireValue,
 	type EntryLike,
 	type HistoryHit,
+	type Immutable,
 	type ProjectedEntry,
 } from "./contracts.ts";
 import { decodeCursor, type HistoryCursor } from "./history-cursor.ts";
@@ -17,16 +19,41 @@ import {
 	sessionWindowEntries,
 } from "./session-files.ts";
 
-export type HistoryParams = {
-	readonly op: "search" | "read";
-	readonly query?: string;
-	readonly id?: string;
-	readonly all?: boolean;
-	readonly limit?: number;
-	readonly cursor?: string;
-	readonly offset?: number;
-	readonly imageOffset?: number;
-};
+export const historyParameters = Type.Object({
+	op: Type.Union([Type.Literal("search"), Type.Literal("read")], {
+		description: "Operation to perform",
+	}),
+	query: Type.Optional(Type.String({ description: "Case-insensitive text to find (search)" })),
+	id: Type.Optional(Type.String({ description: "Entry id exactly as search printed it (read)" })),
+	all: Type.Optional(
+		Type.Boolean({
+			description: "Also search this project's other sessions and subagent runs",
+		}),
+	),
+	limit: Type.Optional(
+		Type.Integer({
+			description: "Maximum search results per page (default 10, max 50)",
+			minimum: 1,
+			maximum: 50,
+		}),
+	),
+	cursor: Type.Optional(
+		Type.String({
+			description: "Continuation from the previous search page; keep query and all unchanged",
+			maxLength: 512,
+		}),
+	),
+	offset: Type.Optional(
+		Type.Integer({ description: "Character offset for read (default 0)", minimum: 0 }),
+	),
+	imageOffset: Type.Optional(
+		Type.Integer({
+			description: "First image to return (read); use the value from the continuation",
+			minimum: 0,
+		}),
+	),
+});
+export type HistoryParams = Immutable<Static<typeof historyParameters>>;
 export type HistorySource = {
 	readonly dir: string;
 	readonly cwd: string;

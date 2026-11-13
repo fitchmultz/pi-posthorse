@@ -1,11 +1,10 @@
 import { relative, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { toolCards } from "../ui.ts";
 import { requireValue, type PolicyContext, type WindowedEntry } from "./contracts.ts";
 import { toWindowedEntry, windowProjection } from "./history-entries.ts";
 import { historyReadPage, searchPage } from "./history-pages.ts";
-import { historyMatches, type HistorySource } from "./history-search.ts";
+import { historyMatches, historyParameters, type HistorySource } from "./history-search.ts";
 import type { PageAccess } from "./paging.ts";
 import { scopedSessionFiles, sessionWindowEntries } from "./session-files.ts";
 
@@ -87,46 +86,7 @@ export function registerHistory(
 		promptGuidelines: [
 			"Use history search first, then history read with the entry id exactly as printed",
 		],
-		parameters: Type.Object({
-			op: Type.Union([Type.Literal("search"), Type.Literal("read")], {
-				description: "Operation to perform",
-			}),
-			query: Type.Optional(
-				Type.String({ description: "Case-insensitive text to find (search)" }),
-			),
-			id: Type.Optional(
-				Type.String({ description: "Entry id exactly as search printed it (read)" }),
-			),
-			all: Type.Optional(
-				Type.Boolean({
-					description: "Also search this project's other sessions and subagent runs",
-				}),
-			),
-			limit: Type.Optional(
-				Type.Integer({
-					description: "Maximum search results per page (default 10, max 50)",
-					minimum: 1,
-					maximum: 50,
-				}),
-			),
-			cursor: Type.Optional(
-				Type.String({
-					description:
-						"Continuation from the previous search page; keep query and all unchanged",
-					maxLength: 512,
-				}),
-			),
-			offset: Type.Optional(
-				Type.Integer({ description: "Character offset for read (default 0)", minimum: 0 }),
-			),
-			imageOffset: Type.Optional(
-				Type.Integer({
-					description:
-						"First image to return (read); use the value from the continuation",
-					minimum: 0,
-				}),
-			),
-		}),
+		parameters: historyParameters,
 		async execute(...[, params, signal, , ctx]) {
 			const source = historySource(ctx);
 			if (params.op === "search") {
