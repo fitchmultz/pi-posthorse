@@ -23,15 +23,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, mock } from "node:test";
 import { createEditTool, SessionManager } from "@earendil-works/pi-coding-agent";
-import { fixturePolicy, loadFixture, requireValue, record, stringValue } from "./harness.ts";
+import {
+	executeFixtureTool,
+	fixturePolicy,
+	isCallable,
+	loadFixture,
+	requireValue,
+	record,
+	stringValue,
+} from "./harness.ts";
 import { createPosthorse } from "../index.ts";
 import { buildAutoHandoff } from "../src/recovery.ts";
 import type { EntryLike } from "../src/contracts.ts";
 import { noteOperations } from "../src/note-tool-effects.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 import { Type, type TSchema } from "typebox";
-import { Check } from "typebox/value";
-import { fixtureResult } from "./results.ts";
 
 type ContextInput = Readonly<Omit<TestContext, "sessionManager">> & {
 	readonly sessionManager: Readonly<TestContext["sessionManager"]>;
@@ -41,8 +47,7 @@ type Tool = {
 	readonly execute: (
 		id: string,
 		params: Readonly<Record<string, unknown>>,
-		signal: AbortSignal,
-		onUpdate: () => void,
+		signal: AbortSignal | undefined,
 		context: ContextInput,
 	) => Promise<{
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
@@ -127,14 +132,37 @@ function indexedBranch(branch: readonly Readonly<Record<string, unknown>>[]) {
 	};
 }
 
+function branchContext(
+	base: ContextInput,
+	options: {
+		readonly cwd?: string;
+		readonly branch?: readonly unknown[] | (() => readonly unknown[]);
+		readonly sessionDir?: string;
+		readonly sessionFile?: string | undefined;
+	} = {},
+): TestContext {
+	const branch = options.branch ?? [];
+	const getBranch = typeof branch === "function" ? branch : () => branch;
+	const sessionDir = options.sessionDir ?? options.cwd ?? join(tmpdir(), "missing");
+	return {
+		...base,
+		...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+		sessionManager: {
+			...sessionIdentity(),
+			getSessionFile: () => options.sessionFile,
+			buildSessionProjection: emptyProjection,
+			getBranch,
+			getSessionDir: () => sessionDir,
+		},
+	};
+}
+
 async function setup() {
 	const loaded = await loadFixture(createPosthorse(fixturePolicy));
 	const handlers = new Map<string, Handler>();
 	for (const [name, callbacks] of loaded.extension.handlers) {
-		const callback = requireValue(callbacks[0], name);
-		let wrapped: Handler = callback;
 		if (name === "context_with_system") {
-			wrapped = (event, context) => {
+			handlers.set(name, (event, context) => {
 				const current = { ...event };
 				let transformed: Record<string, unknown> | undefined;
 				for (const handler of callbacks) {
@@ -149,49 +177,27 @@ async function setup() {
 					}
 				}
 				return transformed;
-			};
-		} else if (name === "turn_start") {
-			// Multiple registrations own turn-start resets; Pi fires them all.
-			wrapped = (event, context) => {
+			});
+		} else if (callbacks.length === 1) {
+			handlers.set(name, requireValue(callbacks[0], name));
+		} else {
+			handlers.set(name, async (event, context) => {
+				let last: unknown;
 				for (const handler of callbacks) {
-					const result: unknown = handler(event, context);
-					assert.ok(
-						!(result instanceof Promise),
-						"Fixture turn_start handlers are synchronous",
-					);
+					const result: unknown = await handler(event, context);
+					if (result !== undefined) {
+						last = result;
+					}
 				}
-			};
+				return last;
+			});
 		}
-		handlers.set(name, wrapped);
 	}
 	const tools = new Map<string, Tool>();
-	for (const [name, registration] of loaded.extension.tools) {
+	for (const name of loaded.extension.tools.keys()) {
 		tools.set(name, {
-			async execute(id, params, signal, onUpdate, context) {
-				assert.ok(
-					Check(registration.definition.parameters, params),
-					"Unit tool arguments must satisfy the registered schema",
-				);
-				handlers.get("tool_execution_start")?.(
-					{ type: "tool_execution_start", toolCallId: id, toolName: name, args: params },
-					context,
-				);
-				const value: unknown = await Reflect.apply(
-					registration.definition.execute.bind(registration.definition),
-					undefined,
-					[id, params, signal, onUpdate, context],
-				);
-				handlers.get("tool_execution_end")?.(
-					{
-						type: "tool_execution_end",
-						toolCallId: id,
-						toolName: name,
-						result: value,
-						isError: false,
-					},
-					context,
-				);
-				return fixtureResult(value);
+			execute(id, params, signal, context) {
+				return executeFixtureTool(loaded.extension, name, params, context, { id, signal });
 			},
 		});
 	}
@@ -294,16 +300,9 @@ function run(
 	name: string,
 	params: Readonly<Record<string, unknown>>,
 	context: ContextInput,
+	signal: AbortSignal = new AbortController().signal,
 ) {
-	return requireValue(tools.get(name)).execute(
-		"id",
-		params,
-		new AbortController().signal,
-		() => {
-			// These direct executions do not stream updates.
-		},
-		context,
-	);
+	return requireValue(tools.get(name)).execute("id", params, signal, context);
 }
 
 function notesIn(tools: ReadonlyMap<string, Tool>, context: TestContext) {
@@ -749,7 +748,8 @@ for (const { contextWindow, reserve, remindAt } of [
 				getSystemPrompt: () => "You are a test assistant.",
 			};
 
-			requireValue(handlers.get("session_start"))({}, context);
+			await requireValue(handlers.get("session_start"))({}, context);
+			branchReads = 0;
 			turnEnd(handlers, context);
 			assert.equal(messages.length, 0, "no reminder below the band");
 			assert.equal(branchReads, 0, "below-band turns must not fetch history");
@@ -946,7 +946,6 @@ await test("each safety evaluation reads native usage and policy once, including
 			}
 			assert.match(
 				toolText(
-					// Finish the current policy evaluation before changing the shared fixture state.
 					await once(() => run(tools, "new_context", { handoff: "continue" }, context)),
 				),
 				/Requested/,
@@ -1093,7 +1092,7 @@ for (const archived of [10, 43_000]) {
 		requireValue(handlers.get("session_tree"))({}, context);
 		turnEnd(handlers, context);
 		assert.equal(messages.length, 2, "navigation forward restores its absence");
-		requireValue(handlers.get("session_start"))({}, context);
+		await requireValue(handlers.get("session_start"))({}, context);
 		turnEnd(handlers, context);
 		assert.equal(
 			messages.length,
@@ -1382,24 +1381,18 @@ await test("history reads current entries without opening every archived session
 	try {
 		mkdirSync(join(dir, "unrelated.jsonl"));
 		const { tools, context: base } = await setup();
-		const context: TestContext = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [
-					{
-						type: "message",
-						id: "current",
-						parentId: null,
-						timestamp: "1",
-						message: { role: "user", content: "keep me" },
-					},
-				],
-				getSessionDir: () => dir,
-			},
-		};
+		const context = branchContext(base, {
+			sessionDir: dir,
+			branch: [
+				{
+					type: "message",
+					id: "current",
+					parentId: null,
+					timestamp: "1",
+					message: { role: "user", content: "keep me" },
+				},
+			],
+		});
 
 		const reads = await Promise.all(
 			Array.from({ length: 5 }, () =>
@@ -1461,29 +1454,20 @@ await test("all-session history recurses and returns newest matching entries fir
 		utimesSync(newFile, new Date(2_000), new Date(2_000));
 		const { tools, context: base } = await setup();
 		let mayReadCurrentBranch = false;
-		const context: TestContext = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => {
-					assert.ok(
-						mayReadCurrentBranch,
-						"all-session search must not normalize the current branch",
-					);
-					return [];
-				},
-				getSessionDir: () => dir,
+		const context = branchContext(base, {
+			sessionDir: dir,
+			branch: () => {
+				assert.ok(
+					mayReadCurrentBranch,
+					"all-session search must not normalize the current branch",
+				);
+				return [];
 			},
-		};
-		const search = await requireValue(tools.get("history")).execute(
-			"id",
+		});
+		const search = await run(
+			tools,
+			"history",
 			{ op: "search", query: "recursive needle", all: true, limit: 2 },
-			new AbortController().signal,
-			() => {
-				// Direct tool execution does not stream updates into this fixture.
-			},
 			context,
 		);
 		const text = toolText(search);
@@ -1496,13 +1480,10 @@ await test("all-session history recurses and returns newest matching entries fir
 		assert.ok(text.indexOf("nested-new") < text.indexOf("nested-old"));
 		assert.ok(!text.includes(`[${archivedId("old", "old.jsonl")}]`));
 		mayReadCurrentBranch = true;
-		const read = await requireValue(tools.get("history")).execute(
-			"id",
+		const read = await run(
+			tools,
+			"history",
 			{ op: "read", id: archivedId("nested-new", "subagents/new.jsonl") },
-			new AbortController().signal,
-			() => {
-				// Direct tool execution does not stream updates into this fixture.
-			},
 			context,
 		);
 		assert.match(toolText(read), /^4 \[subagent\] \[window nested-window\] .+nested newest/s);
@@ -1547,16 +1528,7 @@ await test("history keeps the selected session after a cwd override but excludes
 			`${header()}\n${entry("legacy", "scope needle legacy")}`,
 		);
 		const { tools, context: base } = await setup();
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-				getSessionFile: () => current,
-			},
-		};
+		const context = branchContext(base, { sessionDir: dir, sessionFile: current });
 		const hits = toolText(
 			await run(
 				tools,
@@ -1644,48 +1616,20 @@ await test("history searches normalized text and reports native window ids", asy
 			message: { role: "user", content: `${"x".repeat(40_100)}needle tail` },
 		},
 	];
-	const context: TestContext = {
-		...base,
-		sessionManager: {
-			...sessionIdentity(),
-			getSessionFile: (): string | undefined => undefined,
-			buildSessionProjection: emptyProjection,
-			getBranch: () => branch,
-			getSessionDir: () => join(tmpdir(), "missing"),
-		},
-	};
-	const result = await requireValue(tools.get("history")).execute(
-		"id",
-		{ op: "search", query: "needle" },
-		new AbortController().signal,
-		() => {
-			// Direct tool execution does not stream updates into this fixture.
-		},
-		context,
-	);
+	const context = branchContext(base, { branch });
+	const result = await run(tools, "history", { op: "search", query: "needle" }, context);
 	const text = toolText(result);
 	assert.doesNotMatch(text, /needle-only-in-id/);
 	assert.ok(text.indexOf("[long]") < text.indexOf("[after]"));
 	assert.match(text, /\[window initial\] \[before\]/);
 	assert.match(text, /\[window window-2\] \[after\]/);
 
-	const firstPage = await requireValue(tools.get("history")).execute(
-		"id",
-		{ op: "read", id: "long" },
-		new AbortController().signal,
-		() => {
-			// Direct tool execution does not stream updates into this fixture.
-		},
-		context,
-	);
+	const firstPage = await run(tools, "history", { op: "read", id: "long" }, context);
 	assert.match(toolText(firstPage), /offset 40000/);
-	const secondPage = await requireValue(tools.get("history")).execute(
-		"id",
+	const secondPage = await run(
+		tools,
+		"history",
 		{ op: "read", id: "long", offset: 40_000 },
-		new AbortController().signal,
-		() => {
-			// Direct tool execution does not stream updates into this fixture.
-		},
 		context,
 	);
 	assert.match(toolText(secondPage), /needle tail/);
@@ -1952,16 +1896,7 @@ await test("history ranks matching original content before recovery and lookup e
 			parentId: entries[index - 1]?.id ?? null,
 		}),
 	);
-	const context = {
-		...base,
-		sessionManager: {
-			...sessionIdentity(),
-			getSessionFile: (): string | undefined => undefined,
-			buildSessionProjection: emptyProjection,
-			getBranch: () => branch,
-			getSessionDir: () => join(tmpdir(), "missing"),
-		},
-	};
+	const context = branchContext(base, { branch });
 	const search = async (query: string, limit = 50) =>
 		toolText(await run(tools, "history", { op: "search", query, limit }, context));
 	const ids = (text: string) =>
@@ -2030,16 +1965,7 @@ await test("archived history preserves Unicode separators across chunks and an u
 			join(dir, "session.jsonl"),
 			entries.map((entry) => JSON.stringify(entry)).join("\r\n"),
 		);
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-			},
-		};
+		const context = branchContext(base, { sessionDir: dir });
 		const hits = toolText(
 			await run(tools, "history", { op: "search", query: "needle", all: true }, context),
 		);
@@ -2103,16 +2029,7 @@ await test("history preserves assistant failures and ranks them ahead of recover
 			},
 		},
 	];
-	const context = {
-		...base,
-		sessionManager: {
-			...sessionIdentity(),
-			getSessionFile: (): string | undefined => undefined,
-			buildSessionProjection: emptyProjection,
-			getBranch: () => branch,
-			getSessionDir: () => join(tmpdir(), "missing"),
-		},
-	};
+	const context = branchContext(base, { branch });
 	assert.ok(
 		toolText(await run(tools, "history", { op: "read", id: "failed" }, context)).endsWith(
 			"[assistant] [error] HTTP 429 QUOTA_EXCEEDED",
@@ -2156,16 +2073,7 @@ await test("all-session ranking keeps older originals ahead of newer echoes befo
 			utimesSync(file, new Date((index + 1) * 1000), new Date((index + 1) * 1000));
 		}
 		const { tools, context: base } = await setup();
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-			},
-		};
+		const context = branchContext(base, { sessionDir: dir });
 		const search = async (query: string, limit: number) =>
 			toolText(
 				await run(tools, "history", { op: "search", query, all: true, limit }, context),
@@ -2207,14 +2115,12 @@ await test("all-session ranking keeps older originals ahead of newer echoes befo
 		const controller = new AbortController();
 		controller.abort();
 		await assert.rejects(
-			requireValue(tools.get("history")).execute(
-				"id",
+			run(
+				tools,
+				"history",
 				{ op: "search", query: "needle", all: true },
-				controller.signal,
-				() => {
-					// These direct executions do not stream updates.
-				},
 				context,
+				controller.signal,
 			),
 			{ name: "AbortError" },
 		);
@@ -2223,7 +2129,6 @@ await test("all-session ranking keeps older originals ahead of newer echoes befo
 	}
 });
 
-// PR #51 review: a reminder that Pi's own compaction summarized away must not block the next one.
 await test("a reminder before a native compaction does not suppress the next reminder", async () => {
 	const { handlers, messages, context: base } = await setup();
 	const branch: Record<string, unknown>[] = [
@@ -2655,16 +2560,7 @@ await test("history returns stored images for a requested entry and summarizes t
 			},
 		},
 	];
-	const context = {
-		...base,
-		sessionManager: {
-			...sessionIdentity(),
-			getSessionFile: (): string | undefined => undefined,
-			buildSessionProjection: emptyProjection,
-			getBranch: () => branch,
-			getSessionDir: () => join(tmpdir(), "missing"),
-		},
-	};
+	const context = branchContext(base, { branch });
 
 	const user = await run(tools, "history", { op: "read", id: "img-user" }, context);
 	assert.match(
@@ -2699,16 +2595,7 @@ await test("history returns stored images for a requested entry and summarizes t
 			},
 		},
 	];
-	const tightImage = {
-		...usageContext(base, 100_000, 82_117),
-		sessionManager: {
-			...sessionIdentity(),
-			getSessionFile: (): string | undefined => undefined,
-			buildSessionProjection: emptyProjection,
-			getBranch: () => longImage,
-			getSessionDir: () => join(tmpdir(), "missing"),
-		},
-	};
+	const tightImage = branchContext(usageContext(base, 100_000, 82_117), { branch: longImage });
 	const tight = await run(tools, "history", { op: "read", id: "long-image" }, tightImage);
 	assert.deepEqual(tight.content.slice(1), [png], "a tight read still returns the next image");
 	assert.match(
@@ -2744,29 +2631,21 @@ await test("history image continuations preserve order and text, even near the r
 				mimeType: "image/png",
 				data: Buffer.from(`image ${index}`).toString("base64"),
 			}));
-			const context = {
-				...usageContext(base, 32_000, 1_000),
-				sessionManager: {
-					...sessionIdentity(),
-					getSessionFile: (): string | undefined => undefined,
-					buildSessionProjection: emptyProjection,
-					getBranch: () => [
-						{
-							type: "message",
-							id: "images",
-							message: { role: "user", content: [{ type: "text", text }, ...images] },
-						},
-					],
-					getSessionDir: () => join(tmpdir(), "missing"),
-				},
-			};
+			const context = branchContext(usageContext(base, 32_000, 1_000), {
+				branch: [
+					{
+						type: "message",
+						id: "images",
+						message: { role: "user", content: [{ type: "text", text }, ...images] },
+					},
+				],
+			});
 			let offset = 0,
 				imageOffset = 0;
 			let recoveredText = "";
 			const recoveredImages = [];
 			for (let page = 0; page < 30; page++) {
 				requireValue(handlers.get("turn_start"))({}, context);
-				// The next page depends on this receipt's text and image continuation offsets.
 				const result = await run(
 					tools,
 					"history",
@@ -2938,17 +2817,7 @@ await test("read pages shrink to the remaining budget, down to a minimum page th
 			},
 		];
 		const withBranch = (context: ContextInput) =>
-			pageContext(handlers, {
-				...context,
-				cwd: dir,
-				sessionManager: {
-					...sessionIdentity(),
-					getSessionFile: (): string | undefined => undefined,
-					buildSessionProjection: emptyProjection,
-					getBranch: () => branch,
-					getSessionDir: () => dir,
-				},
-			});
+			pageContext(handlers, branchContext(context, { cwd: dir, branch }));
 		await run(
 			tools,
 			"notes",
@@ -3019,22 +2888,17 @@ await test("note and history pages share a batch budget without double-counting 
 		const { tools, handlers, context: base } = await setup();
 		let tokens = 98_000;
 		const context = pageContext(handlers, {
-			...usageContext(base, 100_000, tokens, 16_384, false),
-			cwd: dir,
-			getContextUsage: () => ({ tokens, contextWindow: 100_000, percent: tokens / 1000 }),
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [
+			...branchContext(usageContext(base, 100_000, tokens, 16_384, false), {
+				cwd: dir,
+				branch: [
 					{
 						type: "message",
 						id: "long",
 						message: { role: "user", content: "h".repeat(25_000) },
 					},
 				],
-				getSessionDir: () => dir,
-			},
+			}),
+			getContextUsage: () => ({ tokens, contextWindow: 100_000, percent: tokens / 1000 }),
 		});
 		await run(
 			tools,
@@ -3126,7 +2990,6 @@ await test("notes list and search page every result through the shared budget, i
 			let recovered = "";
 			for (let page = 0; page < 100; page++) {
 				requireValue(handlers.get("turn_start"))({}, context);
-				// Each page supplies the exact next offset and completes the current turn reservation.
 				const result = await run(tools, "notes", { op, query: "needle", offset }, context);
 				const display = result.details;
 				assert.ok(display?.kind === "notes-list" || display?.kind === "notes-search");
@@ -3188,17 +3051,10 @@ await test("mixed search/list/read outputs and no-match results share one reserv
 			id: `entry-${index}`,
 			message: { role: "user", content: `needle ${"h".repeat(500)}` },
 		}));
-		const context = {
-			...usageContext(base, 100_000, 98_000, 16_384, false),
+		const context = branchContext(usageContext(base, 100_000, 98_000, 16_384, false), {
 			cwd: dir,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => branch,
-				getSessionDir: () => dir,
-			},
-		};
+			branch,
+		});
 		mkdirSync(join(dir, ".pi", "notes"), { recursive: true });
 		writeFileSync(
 			join(dir, ".pi", "notes", "long.md"),
@@ -3290,16 +3146,10 @@ await test("history cursors finish partial headers and progress past growing loo
 			},
 		},
 	];
-	const context = pageContext(handlers, {
-		...usageContext(base, 100_000, 98_700, 16_384, false),
-		sessionManager: {
-			...sessionIdentity(),
-			getSessionFile: (): string | undefined => undefined,
-			buildSessionProjection: emptyProjection,
-			getBranch: () => branch,
-			getSessionDir: () => join(tmpdir(), "missing"),
-		},
-	});
+	const context = pageContext(
+		handlers,
+		branchContext(usageContext(base, 100_000, 98_700, 16_384, false), { branch }),
+	);
 	let cursor: string | undefined;
 	let recovered = "";
 	const returned: string[] = [];
@@ -3320,7 +3170,6 @@ await test("history cursors finish partial headers and progress past growing loo
 				],
 			},
 		});
-		// Persist this lookup echo and obtain its cursor before appending the next lookup.
 		const result = await run(
 			tools,
 			"history",
@@ -3363,7 +3212,6 @@ await test("history cursors finish partial headers and progress past growing loo
 		{ query: "needle", cursor: "not-json" },
 	]) {
 		requireValue(handlers.get("turn_start"))({}, context);
-		// Each invalid-cursor call follows its own turn reservation reset.
 		await assert.rejects(
 			run(tools, "history", { op: "search", ...params }, context),
 			/Invalid history cursor/,
@@ -3404,16 +3252,7 @@ await test("all-session cursors retain ranking and per-file entries across pages
 		const oldFile = join(dir, "old.jsonl"),
 			activeFile = join(dir, "current.jsonl");
 		writeArchive(oldFile, older.map((entry) => JSON.stringify(entry)).join("\n"));
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-			},
-		};
+		const context = branchContext(base, { sessionDir: dir });
 		let cursor: string | undefined;
 		const ids: string[] = [];
 		for (let page = 0; page < 20; page++) {
@@ -3435,7 +3274,6 @@ await test("all-session cursors retain ranking and per-file entries across pages
 			writeArchive(activeFile, current.map((entry) => JSON.stringify(entry)).join("\n"));
 			utimesSync(oldFile, new Date(1000), new Date(1000));
 			utimesSync(activeFile, new Date(2000 + page), new Date(2000 + page));
-			// Write this page's lookup echo before reopening archives with its returned cursor.
 			const result = await run(
 				tools,
 				"history",
@@ -3479,17 +3317,14 @@ await test("all-session cursors retain ranking and per-file entries across pages
 	}
 });
 
-await test(
-	"note replacement keeps the existing checkpoint on a real file-size failure",
-	{ skip: process.platform === "win32" },
-	async () => {
-		const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-write-failure-"));
-		try {
-			const notesDir = join(dir, ".pi", "notes");
-			mkdirSync(notesDir, { recursive: true });
-			const path = join(notesDir, "durable.md");
-			writeFileSync(path, "original checkpoint");
-			const code = `import assert from "node:assert/strict";
+await test("note replacement keeps the existing checkpoint on a real file-size failure", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-write-failure-"));
+	try {
+		const notesDir = join(dir, ".pi", "notes");
+		mkdirSync(notesDir, { recursive: true });
+		const path = join(notesDir, "durable.md");
+		writeFileSync(path, "original checkpoint");
+		const code = `import assert from "node:assert/strict";
 import posthorse from ${JSON.stringify(new URL("../index.ts", import.meta.url).href)};
 import { SessionManager } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-coding-agent"))};
 const sessionManager = SessionManager.inMemory(process.cwd());
@@ -3497,41 +3332,40 @@ let notes;
 posthorse({ on() {}, appendEntry: (type, data) => sessionManager.appendCustomEntry(type, data), registerMessageRenderer() {}, registerTool(tool) { if (tool.name === "notes") notes = tool; } });
 process.on("SIGXFSZ", () => { /* Publication surfaces EFBIG through the awaited rejection. */ });
 await assert.rejects(notes.execute("fault", { op: "write", path: "durable.md", content: "N".repeat(8192) }, new AbortController().signal, undefined, { cwd: process.cwd(), sessionManager }), { code: "EFBIG" });`;
-			execFileSync(
-				"/bin/bash",
-				[
-					"-c",
-					'ulimit -f 2; exec "$@"',
-					"note-publication",
-					process.execPath,
-					"--input-type=module",
-					"-e",
-					code,
-				],
-				{
-					cwd: dir,
-					env: {
-						PATH: process.env.PATH,
-						HOME: dir,
-						TMPDIR: dir,
-						PI_CODING_AGENT_DIR: join(dir, "agent"),
-						PI_OFFLINE: "1",
-						PI_TELEMETRY: "0",
-						NODE_DISABLE_COMPILE_CACHE: "1",
-						NODE_OPTIONS: process.env.NODE_OPTIONS,
-						PI_PACKAGE_DIR: process.env.PI_PACKAGE_DIR,
-					},
-					encoding: "utf8",
-					timeout: 30_000,
+		execFileSync(
+			"/bin/bash",
+			[
+				"-c",
+				'ulimit -f 2; exec "$@"',
+				"note-publication",
+				process.execPath,
+				"--input-type=module",
+				"-e",
+				code,
+			],
+			{
+				cwd: dir,
+				env: {
+					PATH: process.env.PATH,
+					HOME: dir,
+					TMPDIR: dir,
+					PI_CODING_AGENT_DIR: join(dir, "agent"),
+					PI_OFFLINE: "1",
+					PI_TELEMETRY: "0",
+					NODE_DISABLE_COMPILE_CACHE: "1",
+					NODE_OPTIONS: process.env.NODE_OPTIONS,
+					PI_PACKAGE_DIR: process.env.PI_PACKAGE_DIR,
 				},
-			);
-			assert.equal(readFileSync(path, "utf8"), "original checkpoint");
-			assert.deepEqual(readdirSync(notesDir), ["durable.md"]);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	},
-);
+				encoding: "utf8",
+				timeout: 30_000,
+			},
+		);
+		assert.equal(readFileSync(path, "utf8"), "original checkpoint");
+		assert.deepEqual(readdirSync(notesDir), ["durable.md"]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
 
 await test("notes resolve the repository root from nested directories, worktrees, and plain folders", async () => {
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-root-test-")));
@@ -3693,8 +3527,8 @@ await test("generic Git URL prefix packages cannot disclose or overwrite each ot
 			new URL("./utils/git.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href
 		);
 		const parser = record(imported).parseGitUrl;
-		assert.ok(typeof parser === "function");
-		const source = (url: string) => record(Reflect.apply(parser, undefined, [url]));
+		assert.ok(isCallable(parser));
+		const source = (url: string) => record(parser(url));
 		const first = source("https://git.example.com/acme/tool.git");
 		const second = source("https://git.example.com/acme/tool/notes.git");
 		assert.equal(first.host, "git.example.com");
@@ -3891,17 +3725,8 @@ await test("notes list, folder reads and search let Pi keep running and stop whe
 			}
 		}
 		const { tools, context } = await setup();
-		const notes = requireValue(tools.get("notes"));
 		const execute = (params: Readonly<Record<string, unknown>>, signal: AbortSignal) =>
-			notes.execute(
-				"id",
-				params,
-				signal,
-				() => {
-					// Listings do not stream updates.
-				},
-				{ ...context, cwd: dir },
-			);
+			run(tools, "notes", params, { ...context, cwd: dir }, signal);
 		const exercise = async (params: Readonly<Record<string, unknown>>) => {
 			let turned = false;
 			setImmediate(() => {
@@ -4050,7 +3875,6 @@ await test("notes search stops reading at the requested page, skips notes over 1
 		let offset = 0;
 		let recovered = "";
 		for (let page = 0; page < 100; page++) {
-			// Each page continues from the offset the previous page returned.
 			const result = await search("needle", offset);
 			const text = toolText(result);
 			assert.ok(result.details?.kind === "notes-search" && result.details.page);
@@ -4212,16 +4036,7 @@ await test("history flattens bashExecution entries and honors excludeFromContext
 			},
 		},
 	];
-	const context = {
-		...base,
-		sessionManager: {
-			...sessionIdentity(),
-			getSessionFile: (): string | undefined => undefined,
-			buildSessionProjection: emptyProjection,
-			getBranch: () => branch,
-			getSessionDir: () => join(tmpdir(), "missing"),
-		},
-	};
+	const context = branchContext(base, { branch });
 	assert.match(
 		toolText(await run(tools, "history", { op: "search", query: "notes.md" }, context)),
 		/\[sh\] \[bashExecution\] \$ ls -la\ntotal 0\nnotes\.md/,
@@ -4248,7 +4063,17 @@ await test("all-session search returns fork copies with their source-qualified r
 	try {
 		const original = join(dir, "original.jsonl");
 		const fork = join(dir, "fork.jsonl");
+		const sibling = join(dir, "sibling.jsonl");
 		const grandchild = join(dir, "grandchild.jsonl");
+		const sessionHeader = (id: string, parentSession?: string) =>
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id,
+				...(parentSession === undefined ? {} : { parentSession }),
+				timestamp: "2026-01-01T00:00:00Z",
+				cwd: process.cwd(),
+			});
 		const shared = JSON.stringify({
 			type: "message",
 			id: "shared",
@@ -4261,11 +4086,13 @@ await test("all-session search returns fork copies with their source-qualified r
 			parentId: "shared",
 			message: { role: "user", content: "fork needle newer" },
 		});
-		writeArchive(original, shared);
-		writeArchive(fork, [shared, forkNew].join("\n"));
-		writeArchive(
+		writeFileSync(original, [sessionHeader("original"), shared].join("\n"));
+		writeFileSync(fork, [sessionHeader("fork", original), shared, forkNew].join("\n"));
+		writeFileSync(sibling, [sessionHeader("sibling", original), shared, forkNew].join("\n"));
+		writeFileSync(
 			grandchild,
 			[
+				sessionHeader("grandchild", fork),
 				shared,
 				forkNew,
 				JSON.stringify({
@@ -4278,18 +4105,10 @@ await test("all-session search returns fork copies with their source-qualified r
 		);
 		utimesSync(original, new Date(1_000), new Date(1_000));
 		utimesSync(fork, new Date(2_000), new Date(2_000));
-		utimesSync(grandchild, new Date(3_000), new Date(3_000));
+		utimesSync(sibling, new Date(3_000), new Date(3_000));
+		utimesSync(grandchild, new Date(4_000), new Date(4_000));
 		const { tools, context: base } = await setup();
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-			},
-		};
+		const context = branchContext(base, { sessionDir: dir });
 		const text = toolText(
 			await run(
 				tools,
@@ -4304,6 +4123,8 @@ await test("all-session search returns fork copies with their source-qualified r
 				archivedId("grand-new", "grandchild.jsonl"),
 				archivedId("fork-new", "grandchild.jsonl"),
 				archivedId("shared", "grandchild.jsonl"),
+				archivedId("fork-new", "sibling.jsonl"),
+				archivedId("shared", "sibling.jsonl"),
 				archivedId("fork-new", "fork.jsonl"),
 				archivedId("shared", "fork.jsonl"),
 				archivedId("shared", "original.jsonl"),
@@ -4341,8 +4162,15 @@ await test("all-session history reads the searched entry when independent sessio
 					},
 					{
 						type: "message",
-						id: "feedface",
+						id: "samecopy",
 						parentId: "deadbeef",
+						timestamp: new Date(3_000).toISOString(),
+						message: { role: "user", content: "exact repeated request" },
+					},
+					{
+						type: "message",
+						id: "feedface",
+						parentId: "samecopy",
 						timestamp: new Date(3_000).toISOString(),
 						message: {
 							role: "user",
@@ -4362,16 +4190,7 @@ await test("all-session history reads the searched entry when independent sessio
 			utimesSync(file, new Date(time), new Date(time));
 		}
 		const { tools, context: base } = await setup();
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-			},
-		};
+		const context = branchContext(base, { sessionDir: dir });
 		const search = (query: string, cursor?: string) =>
 			run(tools, "history", { op: "search", query, all: true, limit: 1, cursor }, context);
 		const older = toolText(await search("approved"));
@@ -4416,139 +4235,16 @@ await test("all-session history reads the searched entry when independent sessio
 				data: Buffer.from("older").toString("base64"),
 			},
 		]);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
-
-await test("all-session history keeps identical entries from unrelated sessions separate", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-independent-sessions-"));
-	try {
-		for (const [name, time] of [
-			["first", 1_000],
-			["second", 2_000],
-		] as const) {
-			const file = join(dir, `${name}.jsonl`);
-			writeFileSync(
-				file,
-				[
-					{
-						type: "session",
-						version: 3,
-						id: `session-${name}`,
-						timestamp: new Date(time).toISOString(),
-						cwd: process.cwd(),
-					},
-					{
-						type: "message",
-						id: "deadbeef",
-						parentId: null,
-						timestamp: new Date(3_000).toISOString(),
-						message: { role: "user", content: "needle repeated request" },
-					},
-				]
-					.map((entry) => JSON.stringify(entry))
-					.join("\n"),
-			);
-			utimesSync(file, new Date(time), new Date(time));
-		}
-		const { tools, context: base } = await setup();
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-			},
-		};
-		const hits = toolText(
-			await run(tools, "history", { op: "search", query: "needle", all: true }, context),
+		const repeated = toolText(
+			await run(
+				tools,
+				"history",
+				{ op: "search", query: "exact repeated", all: true },
+				context,
+			),
 		);
-		assert.ok(hits.includes(`[${archivedId("deadbeef", "first.jsonl")}]`));
-		assert.ok(hits.includes(`[${archivedId("deadbeef", "second.jsonl")}]`));
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
-
-await test("all-session history keeps new entries in sibling forks separate", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "pi-posthorse-sibling-forks-"));
-	try {
-		const root = join(dir, "root.jsonl");
-		const rootHeader = {
-			type: "session",
-			version: 3,
-			id: "session-root",
-			timestamp: new Date(0).toISOString(),
-			cwd: process.cwd(),
-		};
-		const ancestor = {
-			type: "message",
-			id: "ancestor",
-			parentId: null,
-			timestamp: new Date(500).toISOString(),
-			message: { role: "user", content: "start" },
-		};
-		const repeated = {
-			type: "message",
-			id: "deadbeef",
-			parentId: "ancestor",
-			timestamp: new Date(3_000).toISOString(),
-			message: { role: "user", content: "needle same request" },
-		};
-		writeFileSync(
-			root,
-			[rootHeader, ancestor].map((entry) => JSON.stringify(entry)).join("\n"),
-		);
-		utimesSync(root, new Date(500), new Date(500));
-		for (const [name, time] of [
-			["first", 1_000],
-			["second", 2_000],
-		] as const) {
-			const file = join(dir, `${name}.jsonl`);
-			writeFileSync(
-				file,
-				[
-					{
-						type: "session",
-						version: 3,
-						id: `session-${name}`,
-						parentSession: root,
-						timestamp: new Date(time).toISOString(),
-						cwd: process.cwd(),
-					},
-					ancestor,
-					repeated,
-				]
-					.map((entry) => JSON.stringify(entry))
-					.join("\n"),
-			);
-			utimesSync(file, new Date(time), new Date(time));
-		}
-		writeFileSync(
-			root,
-			[rootHeader, ancestor, repeated].map((entry) => JSON.stringify(entry)).join("\n"),
-		);
-		utimesSync(root, new Date(4_000), new Date(4_000));
-		const { tools, context: base } = await setup();
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-			},
-		};
-		const hits = toolText(
-			await run(tools, "history", { op: "search", query: "needle", all: true }, context),
-		);
-		assert.ok(hits.includes(`[${archivedId("deadbeef", "first.jsonl")}]`));
-		assert.ok(hits.includes(`[${archivedId("deadbeef", "second.jsonl")}]`));
-		assert.ok(hits.includes(`[${archivedId("deadbeef", "root.jsonl")}]`));
+		assert.ok(repeated.includes(`[${archivedId("samecopy", "older.jsonl")}]`));
+		assert.ok(repeated.includes(`[${archivedId("samecopy", "newer.jsonl")}]`));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -4576,16 +4272,7 @@ await test("all-session history cursors fit the declared limit for nested sessio
 			utimesSync(file, new Date(time), new Date(time));
 		}
 		const { tools, context: base } = await setup();
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-			},
-		};
+		const context = branchContext(base, { sessionDir: dir });
 		const first = toolText(
 			await run(
 				tools,
@@ -4661,7 +4348,8 @@ await test("all-session search finds the same entries with or without ripgrep, i
 		const expected = [["plain", "quoted"], ["quoted"], ["bare"], ["dotted"], ["lone"]];
 		assert.deepEqual(await Promise.all(queries.map(hits)), expected);
 		const { PATH, PI_CODING_AGENT_DIR } = process.env;
-		Object.assign(process.env, { PATH: "", PI_CODING_AGENT_DIR: dir });
+		process.env.PATH = "";
+		process.env.PI_CODING_AGENT_DIR = dir;
 		try {
 			assert.deepEqual(
 				await Promise.all(queries.map(hits)),
@@ -4669,7 +4357,11 @@ await test("all-session search finds the same entries with or without ripgrep, i
 				"without ripgrep every session file is scanned",
 			);
 		} finally {
-			Object.assign(process.env, { PATH });
+			if (PATH === undefined) {
+				delete process.env.PATH;
+			} else {
+				process.env.PATH = PATH;
+			}
 			if (PI_CODING_AGENT_DIR === undefined) {
 				delete process.env.PI_CODING_AGENT_DIR;
 			} else {
@@ -4805,7 +4497,6 @@ await test("all-session search still finds text that exists only in normalized e
 		const missed: string[] = [];
 		for (const entry of entries) {
 			const id = archivedId(entry.id, `${entry.id}.jsonl`);
-			// Process one archive at a time; its read establishes the queries scanned below.
 			const read = toolText(await run(tools, "history", { op: "read", id }, context));
 			const normalized = read
 				.slice(read.indexOf("] ", read.indexOf("[chars ")) + 2)
@@ -4865,16 +4556,7 @@ await test("session search and archived reads preserve modification-time orderin
 			(a, b) => statSync(join(dir, b)).mtimeMs - statSync(join(dir, a)).mtimeMs,
 		);
 		const { tools, context: base } = await setup();
-		const context = {
-			...base,
-			sessionManager: {
-				...sessionIdentity(),
-				getSessionFile: (): string | undefined => undefined,
-				buildSessionProjection: emptyProjection,
-				getBranch: () => [],
-				getSessionDir: () => dir,
-			},
-		};
+		const context = branchContext(base, { sessionDir: dir });
 		const search = toolText(
 			await run(
 				tools,
@@ -4911,9 +4593,7 @@ await test("appends from concurrent Pi processes never merge records", async () 
 			const [cwd, letter] = process.argv.slice(1);
 			const context = { cwd, sessionManager, getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }), getContextUsage: () => undefined };
 			for (let i = 0; i < 200; i++) {
-				await tools.get("notes").execute("id", { op: "append", path: "shared.md", content: letter.repeat(300) }, undefined, () => {
-      // These direct executions do not stream updates.
-    }, context);
+				await tools.get("notes").execute("id", { op: "append", path: "shared.md", content: letter.repeat(300) }, undefined, undefined, context);
 			}
 		`;
 		await Promise.all(
