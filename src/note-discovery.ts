@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
-import { isRecord } from "./contracts.ts";
+import { errorCode, type EntryLike } from "./contracts.ts";
 import { isPublicationTemporaryName } from "./files.ts";
 import { sessionNoteTouches } from "./note-evidence.ts";
 import { notesUnder, type NoteFile } from "./note-inventory.ts";
@@ -49,7 +49,7 @@ async function projectScopes(
 	];
 	const directory = join(session.binding.root, ".forks");
 	const entries = await readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
-		if (isRecord(error) && error.code === "ENOENT") {
+		if (errorCode(error) === "ENOENT") {
 			return [];
 		}
 		throw error;
@@ -102,7 +102,7 @@ async function scopedFiles(
 function noteKey(address: NoteAddress): string {
 	return JSON.stringify([address.root, address.scope, address.path]);
 }
-export function noteReadTarget(note: DiscoveredNote): string {
+function noteReadTarget(note: DiscoveredNote): string {
 	return JSON.stringify({ scope: scopeDirectory(note.address), path: note.address.path });
 }
 export function noteLabel(note: DiscoveredNote, session: SessionNotes, labeled: boolean): string {
@@ -120,16 +120,17 @@ async function readReference(
 	session: SessionNotes,
 	path: string,
 	signal: AbortSignal | undefined,
+	sourceEntries: readonly EntryLike[],
 ): Promise<DiscoveredNote | undefined> {
 	if (isPublicationTemporaryName(basename(path))) {
 		return;
 	}
-	const target = await session.access(path, { signal });
+	const target = await session.access(path, { signal, sourceEntries });
 	if (target.kind === "own") {
 		return;
 	}
 	const info = await stat(target.path).catch((error: unknown) => {
-		if (isRecord(error) && error.code === "ENOENT") {
+		if (errorCode(error) === "ENOENT") {
 			return;
 		}
 		throw error;
@@ -258,8 +259,12 @@ export class NoteDiscovery {
 				path === options.path ||
 				path.startsWith(`${options.path}/`),
 		);
+		if (candidates.length === 0) {
+			return [];
+		}
+		const sourceEntries = await session.ancestorEntries(options.signal);
 		const resolved = await mapBatch(candidates, (path) =>
-			readReference(session, path, options.signal),
+			readReference(session, path, options.signal, sourceEntries),
 		);
 		return resolved.filter((file): file is DiscoveredNote => file !== undefined);
 	}

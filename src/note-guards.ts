@@ -16,9 +16,6 @@ import type { NoteCall, NotesStore, SessionNotes } from "./note-store.ts";
 /** Native core tools expand @/~ paths; pi-apply-edits deliberately treats them literally. */
 function toolPath(tool: string, path: string, cwd: string): string {
 	if (tool !== "read" && tool !== "write" && tool !== "edit") {
-		if (process.platform === "win32") {
-			return resolve(cwd, path);
-		}
 		return isAbsolute(path) ? path : `${cwd}/${path}`;
 	}
 	let normalized = path

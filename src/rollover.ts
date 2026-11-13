@@ -37,22 +37,15 @@ type RolloverResources = {
 	readonly guidance: WindowGuidance;
 };
 import {
-	countRetainedMessages,
 	createReminderLookup,
 	reminderDecision,
-	retainedTailMessages,
 	staleReminderPredicate,
 	type ReminderLookup,
 	type StaleReminderPredicate,
 } from "./reminders.ts";
-import { retainedTailEnd } from "./retained-tail.ts";
+import { findRetainedTailEnd } from "./retained-tail.ts";
 
-function explicitReset(
-	event: TurnEndEvent,
-	ctx: ExtensionContext,
-	summary: string,
-	limit: () => number,
-): BoundaryResult | undefined {
+function explicitReset(event: TurnEndEvent, summary: string, limit: () => number): BoundaryResult {
 	if (summary.length > limit()) {
 		return {
 			entries: [
@@ -92,8 +85,8 @@ function chronologicalRetainedTail(
 		// present a retained message as one (pi-change-working-dir's directory snapshots) or
 		// interleave a new message. Match the projected journal tail before reordering it;
 		// count positions only on a host without a projection.
-		const { count, end } = retainedTailSliceEnd(messages, summaryIndex, ctx, stale);
-		if (count > 0 && end !== undefined) {
+		const end = findRetainedTailEnd(messages, summaryIndex, ctx, stale);
+		if (end !== undefined) {
 			const prefix = messages.slice(0, summaryIndex);
 			const retainedSlice = messages.slice(summaryIndex + 1, end);
 			const afterSlice = messages.slice(end);
@@ -118,26 +111,6 @@ function chronologicalRetainedTail(
 	return messages;
 }
 
-/** An unmatched projection must not silently become a positional match. */
-function retainedTailSliceEnd(
-	messages: ContextWithSystemEvent["messages"],
-	summaryIndex: number,
-	ctx: ExtensionContext,
-	stale: StaleReminderPredicate,
-): { readonly count: number; readonly end: number | undefined } {
-	const retained = retainedTailMessages(ctx, stale);
-	const count = retained?.length ?? countRetainedMessages(ctx, stale);
-	if (count === 0) {
-		return { count, end: undefined };
-	}
-	let end: number | undefined;
-	if (retained !== undefined) {
-		end = retainedTailEnd(messages, summaryIndex, retained);
-	} else if (summaryIndex + 1 + count <= messages.length) {
-		end = summaryIndex + 1 + count;
-	}
-	return { count, end };
-}
 function registerReminderFilter(
 	pi: ExtensionAPI,
 	policy: SnapshotReader,
@@ -433,7 +406,7 @@ export function registerRollover(
 			return;
 		}
 		if (reset.kind === "reset") {
-			return explicitReset(event, ctx, reset.handoff, () =>
+			return explicitReset(event, reset.handoff, () =>
 				freshPayloadChars(host, activeToolTokens(), {
 					pendingMessages: event.context.pendingMessages,
 				}),

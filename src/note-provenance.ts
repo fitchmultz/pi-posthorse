@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isRecord, type EntryLike } from "./contracts.ts";
+import { errorCode, type EntryLike } from "./contracts.ts";
 import { sessionLines } from "./session-lines.ts";
 import { parseSessionLine } from "./session-files.ts";
 import { sessionNoteTouches } from "./note-evidence.ts";
@@ -51,7 +51,7 @@ async function journalMetadata(
 			}
 		}
 	} catch (error) {
-		if (!isRecord(error) || error.code !== "ENOENT") {
+		if (errorCode(error) !== "ENOENT") {
 			throw error;
 		}
 	}
