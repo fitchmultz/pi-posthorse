@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.10.29 - 2026-11-13
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- contracts: derive display and tool types from single schemas (1/4) (#214) ([04955f6](https://github.com/fitchmultz/pi-posthorse/commit/04955f6a3552437da9508256c73da1a47197657f))
+
+### What's Changed
+
+- contracts: derive display and tool types from single schemas (1/4) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/214
+- runtime: remove duplicate scans, dead platform branches, and unused exports (2/4) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/215
+- test: unify unit extension harness and remove reflection ceremony (3/4) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/217
+- test: consolidate host session fixtures and transcript helpers (4/4) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/218
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.28...v0.10.29
+
 ## 0.10.28 - 2026-11-12
 
 <!-- npm-release:unreleased:start -->
