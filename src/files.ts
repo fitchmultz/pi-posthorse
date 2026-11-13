@@ -25,20 +25,20 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { isRecord } from "./contracts.ts";
+import { errorCode } from "./contracts.ts";
 
 async function lstatOrMissing(path: string) {
 	try {
 		return await lstat(path);
 	} catch (error) {
-		if (isRecord(error) && error.code === "ENOENT") {
+		if (errorCode(error) === "ENOENT") {
 			return;
 		}
 		throw error;
 	}
 }
 /** Resolve every link before normalization, preserving path traversal constraints. */
-export async function resolveFileTarget(absolutePath: string): Promise<string> {
+async function resolveFileTarget(absolutePath: string): Promise<string> {
 	let target = absolutePath;
 	const links = new Set<string>();
 	for (;;) {
@@ -53,10 +53,8 @@ export async function resolveFileTarget(absolutePath: string): Promise<string> {
 		if (!(await stat(parentInput)).isDirectory()) {
 			throw Object.assign(new Error(`Not a directory: ${parentInput}`), { code: "ENOTDIR" });
 		}
-		// Each parent must resolve before its child link can be examined.
 		const parent = await realpath(parentInput);
 		target = join(parent, basename(target));
-		// Link targets cannot be known before examining the current link.
 		const info = await lstatOrMissing(target);
 		if (info === undefined) {
 			return target;
@@ -300,7 +298,7 @@ export function notesDir(cwd: string): string {
 		}
 		try {
 			// Sessions still running an older Posthorse keep reaching the notes until they reload.
-			symlinkSync(moved, local, "junction");
+			symlinkSync(moved, local);
 		} catch (error) {
 			if (lstatSync(local, { throwIfNoEntry: false })?.isDirectory() === true) {
 				throw error;

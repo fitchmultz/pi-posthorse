@@ -349,7 +349,6 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 					expanded,
 					imageCount: result.content.filter((part) => part.type === "image").length,
 					showImages: context.showImages,
-					// Pi injects keyText so the hint shows the user's configured keys.
 					expandKey: context.keyText("app.tools.expand"),
 				},
 				theme,

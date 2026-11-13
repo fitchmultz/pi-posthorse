@@ -1,4 +1,8 @@
-import type { EntryLike, MessageLike } from "./contracts.ts";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { EntryLike, MessageLike, ProjectedEntry } from "./contracts.ts";
+import { contextEdits } from "./history-entries.ts";
+import { sessionBranch, sessionProjection } from "./host.ts";
+import type { StaleReminderPredicate } from "./reminders.ts";
 
 /**
  * What a rollover retains: where Pi keeps the tail, which entries it holds, and how it must start.
@@ -87,6 +91,76 @@ export function retainedTailEnd(
 		}
 	}
 	return expected === retained.length ? end : undefined;
+}
+
+function retainedProjectedMessages(
+	projected: readonly ProjectedEntry[],
+	retainedIds: ReadonlySet<string>,
+	stale: StaleReminderPredicate,
+): MessageLike[] {
+	const retained: MessageLike[] = [];
+	for (const item of projected) {
+		if (!retainedIds.has(item.sourceEntry.id ?? "")) {
+			continue;
+		}
+		for (const msg of item.messages) {
+			if (
+				!stale({ role: msg.role ?? "", customType: msg.customType, details: msg.details })
+			) {
+				retained.push(msg);
+			}
+		}
+	}
+	return retained;
+}
+
+function entryProducesRetainedMessage(
+	entry: EntryLike,
+	edits: ReadonlyMap<string, EntryLike>,
+	stale: StaleReminderPredicate,
+): boolean {
+	if (edits.get(entry.id ?? "")?.replacement === null) {
+		return false;
+	}
+	if (entry.type === "message") {
+		return entry.message?.role !== "system" && entry.message?.excludeFromContext !== true;
+	}
+	if (entry.type === "custom_message") {
+		return !stale({ role: "custom", customType: entry.customType, details: entry.details });
+	}
+	return entry.type === "branch_summary";
+}
+
+/**
+ * Match the projected journal tail in `messages`, falling back to entry counts only when the host
+ * exposes no session projection. An unmatched projection never falls back to a positional count.
+ */
+export function findRetainedTailEnd(
+	messages: readonly MessageLike[],
+	summaryIndex: number,
+	ctx: ExtensionContext,
+	stale: StaleReminderPredicate,
+): number | undefined {
+	const branch = sessionBranch(ctx.sessionManager) ?? [];
+	const retainedIds = journalRetainedIds(branch);
+	if (retainedIds === undefined || retainedIds.size === 0) {
+		return undefined;
+	}
+	const projection = sessionProjection(ctx.sessionManager);
+	if (projection !== undefined) {
+		const retained = retainedProjectedMessages(projection, retainedIds, stale);
+		return retained.length === 0
+			? undefined
+			: retainedTailEnd(messages, summaryIndex, retained);
+	}
+	const edits = contextEdits(branch);
+	const count = branch.filter(
+		(entry) =>
+			retainedIds.has(entry.id ?? "") && entryProducesRetainedMessage(entry, edits, stale),
+	).length;
+	return count > 0 && summaryIndex + 1 + count <= messages.length
+		? summaryIndex + 1 + count
+		: undefined;
 }
 
 /**

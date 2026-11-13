@@ -15,7 +15,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import { isRecord } from "./contracts.ts";
+import { errorCode } from "./contracts.ts";
 import { publishFile } from "./files.ts";
 import {
 	addressIn,
@@ -75,10 +75,8 @@ export async function readManifest(directory: string): Promise<ForkBinding | und
 			? binding
 			: undefined;
 	} catch (error) {
-		if (
-			error instanceof SyntaxError ||
-			(isRecord(error) && (error.code === "ENOENT" || error.code === "ENOTDIR"))
-		) {
+		const code = errorCode(error);
+		if (error instanceof SyntaxError || code === "ENOENT" || code === "ENOTDIR") {
 			return;
 		}
 		throw error;
@@ -165,7 +163,7 @@ async function prepareSnapshot(
 	const container = dirname(directory);
 	if (
 		await lstat(container).catch((error: unknown) => {
-			if (isRecord(error) && error.code === "ENOENT") {
+			if (errorCode(error) === "ENOENT") {
 				return;
 			}
 			throw error;
@@ -229,7 +227,7 @@ export async function ensureManifest(binding: NoteBinding): Promise<void> {
 	try {
 		await writeFile(path, JSON.stringify(binding), { flag: "wx" });
 	} catch (error) {
-		if (!isRecord(error) || error.code !== "EEXIST") {
+		if (errorCode(error) !== "EEXIST") {
 			throw error;
 		}
 		const existing = await readManifest(scopeDirectory(binding));

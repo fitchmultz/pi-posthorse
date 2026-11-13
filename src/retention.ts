@@ -22,7 +22,7 @@ import {
 	providerSummaryInstructions,
 	type ProviderSummaryRequest,
 } from "./provider-summary.ts";
-import { buildAutoHandoff, recoveryNotePath } from "./recovery.ts";
+import { buildAutoRecovery } from "./recovery.ts";
 import type { RetainedTail } from "./retained-tail.ts";
 
 type RecoveryCapacity = {
@@ -228,7 +228,7 @@ export function automaticRecovery(
 		capacity,
 		Math.floor((payload - limit) / 4) - (asksProvider ? PROVIDER_SUMMARY_TOKENS : 0),
 	);
-	const handoff = buildAutoHandoff(entries, projected, limit, {
+	const { handoff, primaryNotePath } = buildAutoRecovery(entries, projected, limit, {
 		ownerQuestionRegistered,
 		retainedEntryIds: retained.ids,
 		notes: capacity.notes,
@@ -244,12 +244,7 @@ export function automaticRecovery(
 			!asksProvider || retained.firstKeptEntryId === undefined
 				? undefined
 				: {
-						instructions: providerSummaryInstructions(
-							recoveryNotePath(entries, projected, {
-								retainedEntryIds: retained.ids,
-								notes: capacity.notes,
-							}),
-						),
+						instructions: providerSummaryInstructions(primaryNotePath),
 					},
 	};
 }

@@ -4,17 +4,13 @@ import {
 	LEGACY_WINDOW_TYPE,
 	isRecord,
 	isReminderType,
-	type MessageLike,
 	type EntryLike,
 	type PolicyContext,
-	type ProjectedEntry,
 	type ReminderFingerprint,
 } from "./contracts.ts";
 import { contextStart, isWindow } from "./boundary.ts";
-import { contextEdits } from "./history-entries.ts";
 import { createEpochCache, type EpochValue, type SessionContext } from "./epoch-cache.ts";
-import { sessionBranch, sessionEntry, sessionProjection, type SessionHost } from "./host.ts";
-import { journalRetainedIds } from "./retained-tail.ts";
+import { sessionEntry, type SessionHost } from "./host.ts";
 
 type ReminderFacts = {
 	readonly windowId: string;
@@ -31,7 +27,7 @@ export type ContextMessage = {
 };
 export type StaleReminderPredicate = (message: ContextMessage) => boolean;
 
-export function reminderMatches(details: unknown, fingerprint: ReminderFingerprint): boolean {
+function reminderMatches(details: unknown, fingerprint: ReminderFingerprint): boolean {
 	if (!isRecord(details)) {
 		return false;
 	}
@@ -41,10 +37,7 @@ export function reminderMatches(details: unknown, fingerprint: ReminderFingerpri
 		details.reserveTokens === fingerprint.reserveTokens
 	);
 }
-export function hasReminder(
-	entries: readonly EntryLike[],
-	fingerprint: ReminderFingerprint,
-): boolean {
+function hasReminder(entries: readonly EntryLike[], fingerprint: ReminderFingerprint): boolean {
 	return entries.some(
 		(entry) =>
 			entry.type === "custom_message" &&
@@ -235,83 +228,4 @@ export function createReminderLookup(): ReminderLookup {
 		scanAncestry(ctx.sessionManager, identity.leaf, previous),
 	);
 	return { reset: cache.reset, read: cache.read };
-}
-
-function retainedProjectedMessages(
-	projected: readonly ProjectedEntry[],
-	retainedIds: ReadonlySet<string>,
-	stale: StaleReminderPredicate,
-): MessageLike[] {
-	const retained: MessageLike[] = [];
-	for (const item of projected) {
-		if (!retainedIds.has(item.sourceEntry.id ?? "")) {
-			continue;
-		}
-		for (const msg of item.messages) {
-			if (
-				!stale({ role: msg.role ?? "", customType: msg.customType, details: msg.details })
-			) {
-				retained.push(msg);
-			}
-		}
-	}
-	return retained;
-}
-
-function entryProducesRetainedMessage(
-	entry: EntryLike,
-	edits: ReadonlyMap<string, EntryLike>,
-	stale: StaleReminderPredicate,
-): boolean {
-	if (edits.get(entry.id ?? "")?.replacement === null) {
-		return false;
-	}
-	if (entry.type === "message") {
-		return entry.message?.role !== "system" && entry.message?.excludeFromContext !== true;
-	}
-	if (entry.type === "custom_message") {
-		return !stale({ role: "custom", customType: entry.customType, details: entry.details });
-	}
-	return entry.type === "branch_summary";
-}
-
-export function countRetainedMessages(
-	ctx: ExtensionContext,
-	stale: StaleReminderPredicate,
-): number {
-	const branch = sessionBranch(ctx.sessionManager) ?? [];
-	const retainedIds = journalRetainedIds(branch);
-	if (retainedIds === undefined || retainedIds.size === 0) {
-		return 0;
-	}
-	const projection = sessionProjection(ctx.sessionManager);
-	if (projection !== undefined) {
-		return retainedProjectedMessages(projection, retainedIds, stale).length;
-	}
-	const edits = contextEdits(branch);
-	return branch.filter(
-		(entry) =>
-			retainedIds.has(entry.id ?? "") && entryProducesRetainedMessage(entry, edits, stale),
-	).length;
-}
-
-/**
- * The retained tail's messages, in journal order, as the session projection carries them.
- * Stale reminders leave the list exactly as the provider filter removes them. Undefined when
- * the journal names no tail or the host has no session projection, so callers cannot certify
- * the tail by identity and must count positions instead.
- */
-export function retainedTailMessages(
-	ctx: ExtensionContext,
-	stale: StaleReminderPredicate,
-): readonly MessageLike[] | undefined {
-	const branch = sessionBranch(ctx.sessionManager) ?? [];
-	const retainedIds = journalRetainedIds(branch);
-	if (retainedIds === undefined) {
-		return undefined;
-	}
-	const projection = sessionProjection(ctx.sessionManager);
-	return projection === undefined
-		? undefined
-		: retainedProjectedMessages(projection, retainedIds, stale);
 }

@@ -160,7 +160,7 @@ export function historyHit(
 		headerLength: header.length,
 	};
 }
-export function entryContent(entry: EntryLike): unknown {
+function entryContent(entry: EntryLike): unknown {
 	switch (entry.type) {
 		case "context_edit":
 			return entry.replacement?.content;

@@ -145,19 +145,26 @@ export class SessionNotes {
 		options: {
 			readonly includeDirectories?: boolean | undefined;
 			readonly signal?: AbortSignal | undefined;
+			readonly sourceEntries?: readonly EntryLike[] | undefined;
 		} = {},
 	): Promise<NoteAddress | undefined> {
 		if (this.binding.kind !== "fork" || this.binding.source === null) {
 			return;
 		}
+		const live =
+			options.sourceEntries ?? (await sourceEntries(this.#source.file, options.signal));
 		const entries = [
 			...this.#manager.getEntries(),
-			...this.#source.entries,
-			...(await sourceEntries(this.#source.file, options.signal)),
+			...(live.length > 0 ? live : this.#source.entries),
 		];
 		return resolveReference(this.binding.source, path, entries, {
 			includeDirectories: options.includeDirectories,
 		});
+	}
+	async ancestorEntries(signal?: AbortSignal): Promise<readonly EntryLike[]> {
+		return this.binding.kind === "fork" && this.binding.source !== null
+			? sourceEntries(this.#source.file, signal)
+			: [];
 	}
 	async access(
 		path: string,
@@ -165,6 +172,7 @@ export class SessionNotes {
 			readonly scope?: string | undefined;
 			readonly includeDirectories?: boolean | undefined;
 			readonly signal?: AbortSignal | undefined;
+			readonly sourceEntries?: readonly EntryLike[] | undefined;
 		} = {},
 	): Promise<NoteAccess> {
 		if (options.scope !== undefined) {
@@ -187,6 +195,7 @@ export class SessionNotes {
 		const reference = await this.#reference(relative, {
 			includeDirectories: options.includeDirectories,
 			signal: options.signal,
+			sourceEntries: options.sourceEntries,
 		});
 		return reference === undefined
 			? {

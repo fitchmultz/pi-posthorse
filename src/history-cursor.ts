@@ -3,7 +3,7 @@ import { presentText, unknownArray } from "./contracts.ts";
 /** Where a search page stopped: the anchor entry, its rank, its offset, and the search it belongs to. */
 export type HistoryCursor = readonly [id: string, priority: 0 | 1, offset: number, key: string];
 
-export function encodeCursor(cursor: HistoryCursor): string {
+function encodeCursor(cursor: HistoryCursor): string {
 	return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 export function cursorFor(

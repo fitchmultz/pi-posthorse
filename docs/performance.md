@@ -151,12 +151,11 @@ Ordinary frames reuse cached rows and stay near 0.01 ms.
 
 ## Development and CI
 
-| Check                   | Before    | After                                   |
-| ----------------------- | --------- | --------------------------------------- |
-| `npm run verify`, local | 32.8 s    | 12.9 s                                  |
-| `npm test`, local       | 25.3 s    | 8.7 s                                   |
-| Pull-request CI         | 17–19 min | 2 min with cached checkers; 11 min cold |
+| Check                   | Before    | After  |
+| ----------------------- | --------- | ------ |
+| `npm run verify`, local | 32.8 s    | 12.9 s |
+| `npm test`, local       | 25.3 s    | 8.7 s  |
+| Pull-request CI         | 17–19 min | 2 min  |
 
-Lint probes and test files now run concurrently. CI caches the patched native checkers by their
-exact inputs and qualifies official Pi and the fork in parallel. A run whose checker patches or
-toolchains changed rebuilds them once.
+Lint probes and test files now run concurrently. CI runs the published native checkers directly
+from the locked dependency tree and qualifies official Pi and the fork in parallel.

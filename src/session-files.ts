@@ -18,8 +18,8 @@ import { shortKey } from "./message-text.ts";
 
 /** Newest archive bytes searched before the rest; common queries finish within them. */
 const FIRST_SEARCH_BYTES = 256 * 1024 * 1024;
-/** File-list characters per ripgrep run, within Windows' 32,767 and POSIX ARG_MAX limits. */
-const ARGUMENT_CHARS = process.platform === "win32" ? 30_000 : 256 * 1024;
+/** File-list characters per ripgrep run, well within POSIX ARG_MAX limits. */
+const ARGUMENT_CHARS = 256 * 1024;
 /** Pi writes these keys first, so most lines yield window metadata without JSON.parse. */
 const ENTRY_HEAD = /^\{"type":"([^"\\]*)","id":"([^"\\]*)","parentId":(null|"[^"\\]*")[,}]/u;
 
@@ -274,7 +274,6 @@ async function sessionFiles(dir: string): Promise<string[]> {
 	const files: string[] = [];
 	let level = existsSync(dir) ? [dir] : [];
 	while (level.length > 0) {
-		// Each level lists the directories the previous level found.
 		const listings = await Promise.all(
 			level.map((path) => readdir(path, { withFileTypes: true })),
 		);

@@ -15,7 +15,7 @@ import {
 	type RecoveryRecord,
 } from "./recovery-records.ts";
 import type { NotesRecovery } from "./note-evidence.ts";
-import { primaryNotePath, renderSessionNotes } from "./recovery-notes.ts";
+import { sessionNotesEvidence } from "./recovery-notes.ts";
 import { retainedSpan, type RetainedSpan } from "./retained-tail.ts";
 import {
 	recoverableToolResults,
@@ -217,12 +217,12 @@ function rolloverPreambleWithNotes(
 		readonly notes?: NotesRecovery | undefined;
 		readonly maxChars: number;
 	},
-): string {
+): { readonly preamble: string; readonly primaryNotePath: string | undefined } {
 	const { retained, reserveParts, maxChars } = options;
 	const span = retainedSpan(entries.slice(contextStart(entries).start), retained);
 	const basePreamble = buildRolloverPreamble(span);
 	const reserveLen = joined([basePreamble, ...reserveParts]).length;
-	const notesSection = renderSessionNotes(
+	const { section, primaryNotePath } = sessionNotesEvidence(
 		entries.slice(automaticChainStart(entries)),
 		entries,
 		projected,
@@ -236,24 +236,10 @@ function rolloverPreambleWithNotes(
 			),
 		},
 	);
-	return joined([basePreamble, notesSection]);
-}
-/** The note the automatic record tells the agent to read, for text that names it outside the record. */
-export function recoveryNotePath(
-	entries: readonly EntryLike[],
-	projected: readonly ProjectedEntry[],
-	options: {
-		readonly retainedEntryIds: ReadonlySet<string>;
-		readonly notes?: NotesRecovery | undefined;
-	},
-): string | undefined {
-	return primaryNotePath(entries.slice(automaticChainStart(entries)), entries, projected, {
-		retained: options.retainedEntryIds,
-		notes: options.notes,
-	});
+	return { preamble: joined([basePreamble, section]), primaryNotePath };
 }
 /** Raw owner anchors and projected tool evidence have distinct provenance and share one bounded payload. */
-export function buildAutoHandoff(
+export function buildAutoRecovery(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
 	maxChars: number,
@@ -262,7 +248,7 @@ export function buildAutoHandoff(
 		readonly retainedEntryIds?: ReadonlySet<string>;
 		readonly notes?: NotesRecovery | undefined;
 	},
-): string {
+): { readonly handoff: string; readonly primaryNotePath: string | undefined } {
 	const { ownerQuestionRegistered, retainedEntryIds: retained = new Set<string>() } = options;
 	const { fixed, others, ...history } = recoveryInputs(entries, projected, {
 		ownerQuestionRegistered,
@@ -287,7 +273,7 @@ export function buildAutoHandoff(
 		priorCheckpoint(priorWindow, 0),
 		skippedRecords(history.skipped, 0),
 	];
-	const preamble = rolloverPreambleWithNotes(entries, projected, {
+	const { preamble, primaryNotePath } = rolloverPreambleWithNotes(entries, projected, {
 		retained,
 		reserveParts,
 		maxChars,
@@ -328,5 +314,20 @@ export function buildAutoHandoff(
 			joined([...fixedParts, indexHeader, renderedBatch, prior]).length -
 			HANDOFF_OVERHEAD_RESERVE,
 	);
-	return joined([...fixedParts, renderIndex(others, available), renderedBatch, prior]);
+	return {
+		handoff: joined([...fixedParts, renderIndex(others, available), renderedBatch, prior]),
+		primaryNotePath,
+	};
+}
+export function buildAutoHandoff(
+	entries: readonly EntryLike[],
+	projected: readonly ProjectedEntry[],
+	maxChars: number,
+	options: {
+		readonly ownerQuestionRegistered: boolean;
+		readonly retainedEntryIds?: ReadonlySet<string>;
+		readonly notes?: NotesRecovery | undefined;
+	},
+): string {
+	return buildAutoRecovery(entries, projected, maxChars, options).handoff;
 }

@@ -9,7 +9,7 @@ import {
 	type ToolCallLike,
 } from "./contracts.ts";
 
-export function isImage(part: unknown): part is ImageLike {
+function isImage(part: unknown): part is ImageLike {
 	return (
 		isRecord(part) &&
 		part.type === "image" &&
@@ -47,7 +47,7 @@ export function executionArgumentsText(call: ToolCallLike): string {
 		? ""
 		: `\nExecution arguments: ${safeJsonStringify(call.executionArguments)}`;
 }
-export function toolCallOf(part: unknown): ToolCallLike | undefined {
+function toolCallOf(part: unknown): ToolCallLike | undefined {
 	if (!isRecord(part) || part.type !== "toolCall") {
 		return undefined;
 	}

@@ -196,21 +196,43 @@ function sessionNotes(
 			sources.notes === undefined ? defaultDir : scopeDirectory(sources.notes.binding),
 	};
 }
-/**
- * The file path of the note that the record names first, when this session wrote one. The path is
- * absolute whenever the notes directory is known, so the `read` tool opens it from any directory.
- */
-export function primaryNotePath(
+export function sessionNotesEvidence(
 	chainEntries: readonly EntryLike[],
 	allEntries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
-	sources: NoteSources,
-): string | undefined {
-	const { all, notesDirectory } = sessionNotes(chainEntries, allEntries, projected, sources);
-	const primary = all.find((note) => note.kind === "written");
-	return primary === undefined
-		? undefined
-		: (pathElsewhere(primary, notesDirectory) ?? primary.absPath ?? primary.notePath);
+	options: NoteSources & {
+		readonly span: RetainedSpan | undefined;
+		readonly maxChars: number;
+	},
+): { readonly section: string | undefined; readonly primaryNotePath: string | undefined } {
+	const { span, maxChars } = options;
+	const { all, notesDirectory } = sessionNotes(chainEntries, allEntries, projected, options);
+	if (all.length === 0) {
+		return { section: undefined, primaryNotePath: undefined };
+	}
+	const written = all.filter((note) => note.kind === "written").slice(0, MAX_WRITTEN_NOTES);
+	const primary = written[0];
+	const primaryNotePath =
+		primary === undefined
+			? undefined
+			: (pathElsewhere(primary, notesDirectory) ?? primary.absPath ?? primary.notePath);
+	const readOnly = all.filter((note) => note.kind === "read").slice(0, MAX_READ_NOTES);
+	const lines = [
+		...written.map((note) => formatWrittenNoteLine(note, span, notesDirectory)),
+		...readOnly.map((note) => formatReadNoteLine(note, span, notesDirectory)),
+	];
+	const header = "Task notes in this session:";
+	const action = formatNotesAction(primary, span, notesDirectory);
+	const selected: string[] = [];
+	for (const line of lines) {
+		if ([header, ...selected, line, action].join("\n").length <= maxChars) {
+			selected.push(line);
+		}
+	}
+	return {
+		section: selected.length === 0 ? undefined : [header, ...selected, action].join("\n"),
+		primaryNotePath,
+	};
 }
 export function renderSessionNotes(
 	chainEntries: readonly EntryLike[],
@@ -221,24 +243,5 @@ export function renderSessionNotes(
 		readonly maxChars: number;
 	},
 ): string | undefined {
-	const { span, maxChars } = options;
-	const { all, notesDirectory } = sessionNotes(chainEntries, allEntries, projected, options);
-	if (all.length === 0) {
-		return;
-	}
-	const written = all.filter((note) => note.kind === "written").slice(0, MAX_WRITTEN_NOTES);
-	const readOnly = all.filter((note) => note.kind === "read").slice(0, MAX_READ_NOTES);
-	const lines = [
-		...written.map((note) => formatWrittenNoteLine(note, span, notesDirectory)),
-		...readOnly.map((note) => formatReadNoteLine(note, span, notesDirectory)),
-	];
-	const header = "Task notes in this session:";
-	const action = formatNotesAction(written[0], span, notesDirectory);
-	const selected: string[] = [];
-	for (const line of lines) {
-		if ([header, ...selected, line, action].join("\n").length <= maxChars) {
-			selected.push(line);
-		}
-	}
-	return selected.length === 0 ? undefined : [header, ...selected, action].join("\n");
+	return sessionNotesEvidence(chainEntries, allEntries, projected, options).section;
 }

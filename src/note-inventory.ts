@@ -1,6 +1,6 @@
 import { readdir, realpath, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { isRecord, presentText } from "./contracts.ts";
+import { errorCode, presentText } from "./contracts.ts";
 import { isPublicationTemporaryName } from "./files.ts";
 import {
 	canonicalPath,
@@ -19,7 +19,8 @@ async function statIfPresent(path: string) {
 	try {
 		return await stat(path);
 	} catch (error) {
-		if (isRecord(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+		const code = errorCode(error);
+		if (code === "ENOENT" || code === "ENOTDIR") {
 			return;
 		}
 		throw error;

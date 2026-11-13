@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { isRecord, type EntryLike, type Immutable } from "./contracts.ts";
+import { errorCode, type EntryLike, type Immutable } from "./contracts.ts";
 
 export const NOTES_BINDING = "posthorse-notes-scope";
 export const NOTES_TOUCH = "posthorse-note-touch";
@@ -144,7 +144,8 @@ export function canonicalPath(path: string): string {
 	try {
 		return realpathSync(absolute);
 	} catch (error) {
-		if (!isRecord(error) || (error.code !== "ENOENT" && error.code !== "ENOTDIR")) {
+		const code = errorCode(error);
+		if (code !== "ENOENT" && code !== "ENOTDIR") {
 			throw error;
 		}
 		const parent = dirname(absolute);
