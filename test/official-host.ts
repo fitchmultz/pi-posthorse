@@ -4,243 +4,59 @@ import {
 	existsSync,
 	lstatSync,
 	mkdirSync,
-	mkdtempSync,
 	readFileSync,
 	readdirSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { fileURLToPath } from "node:url";
 import {
-	createAgentSession,
 	createCodemodeExtension,
-	DefaultResourceLoader,
-	ModelRuntime,
-	SessionManager,
-	SettingsManager,
+	type SessionManager,
 	type ExtensionAPI,
-	type ExtensionFactory,
 	type BeforeAgentStartEvent,
 	type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
-	fauxProvider,
 	fauxAssistantMessage,
 	fauxToolCall,
 	getCurrentSystemPrompt,
 	getCurrentTools,
-	InMemoryCredentialStore,
-	type FauxContentBlock,
 	type FauxResponseFactory,
-	type FauxModelDefinition,
 	type Model,
-	type Provider,
 	type ImageContent,
 	type TranscriptContext,
 	type AssistantMessage,
 	type Tool,
 } from "@earendil-works/pi-ai";
-import { createPosthorse } from "../index.ts";
-import { retainSession } from "./fixture-files.ts";
-import { textOf, messageEntry, posthorseBoundaries } from "./host-helpers.ts";
+import {
+	FIXTURE_PNG,
+	hostFixture,
+	lastToolResult,
+	messageEntry,
+	posthorseBoundaries,
+	registerDump,
+	reopenedMessages,
+	textOf,
+	toolResults,
+	toolTurn,
+	type HostFixture,
+	type HostFixtureOptions,
+	type TranscriptMessages,
+} from "./host-helpers.ts";
 import { record, requireValue } from "./harness.ts";
 import { isRecord } from "../src/contracts.ts";
 
-type TranscriptMessages = TranscriptContext["messages"];
-
-const toolTurn = (...calls: FauxContentBlock[]) =>
-	fauxAssistantMessage(calls, { stopReason: "toolUse" });
 const overflow = () =>
 	fauxAssistantMessage("", {
 		stopReason: "error",
 		errorMessage: "prompt is too long: 300000 tokens > 100000 maximum",
 	});
-type Fixture = Awaited<ReturnType<typeof fixture>>;
-const boundaries = (h: Fixture) => posthorseBoundaries(h.sessionManager);
-const toolResult = (h: Fixture, name: string) => {
-	const entry = h.sessionManager
-		.getBranch()
-		.findLast(
-			(candidate) =>
-				candidate.type === "message" &&
-				candidate.message.role === "toolResult" &&
-				candidate.message.toolName === name,
-		);
-	assert.ok(
-		entry?.type === "message" && entry.message.role === "toolResult",
-		`Missing ${name} result`,
-	);
-	return entry.message;
-};
-
-interface FixtureOptions {
-	readonly fileExtension?: boolean;
-	readonly models?: FauxModelDefinition[];
-	readonly contextWindow?: number;
-	readonly providerAuth?: Provider["auth"];
-	readonly enabled?: boolean;
-	readonly reserveTokens?: number;
-	readonly keepRecentTokens?: number;
-	readonly extension?: ExtensionFactory;
-	readonly afterExtension?: ExtensionFactory;
-	readonly getPolicy?: Parameters<typeof createPosthorse>[0];
-	readonly expectedErrors?: ReturnType<DefaultResourceLoader["getExtensions"]>["errors"];
-	readonly seed?: ((manager: SessionManager, model: Model<string>) => void) | undefined;
-}
-function isolateAgentDir(t: TestContext, agentDir: string, options: FixtureOptions) {
-	if (options.fileExtension !== true) {
-		return;
-	}
-	const previous = process.env.PI_CODING_AGENT_DIR;
-	process.env.PI_CODING_AGENT_DIR = agentDir;
-	t.after(() => {
-		if (previous === undefined) {
-			delete process.env.PI_CODING_AGENT_DIR;
-		} else {
-			process.env.PI_CODING_AGENT_DIR = previous;
-		}
-	});
-}
-
-async function fixture(t: TestContext, options: FixtureOptions = {}) {
-	const temp = mkdtempSync(join(tmpdir(), "posthorse-official-"));
-	t.diagnostic(`isolated fixture: ${temp}`);
-	const cwd = join(temp, "project"),
-		agentDir = join(temp, "agent");
-	mkdirSync(cwd);
-	mkdirSync(agentDir);
-	isolateAgentDir(t, agentDir, options);
-	const faux = fauxProvider({
-		models: options.models ?? [
-			{
-				id: "official-posthorse",
-				contextWindow: options.contextWindow ?? 100_000,
-				maxTokens: 1000,
-			},
-		],
-	});
-	const setResponses = faux.setResponses;
-	faux.setResponses = (steps) =>
-		setResponses(
-			steps.map((step): FauxResponseFactory => async (ctx, opts, state, model) => {
-				// Constructed fixtures must not look older than a compaction committed during this run.
-				await new Promise((resolve) => {
-					setTimeout(resolve, 2);
-				});
-				const response = await (typeof step === "function"
-					? step(ctx, opts, state, model)
-					: step);
-				return { ...response, timestamp: Date.now() };
-			}),
-		);
-	const modelRuntime = await ModelRuntime.create({
-		credentials: new InMemoryCredentialStore(),
-		modelsPath: null,
-	});
-	const settingsManager = SettingsManager.inMemory({
-		compaction: {
-			enabled: options.enabled ?? true,
-			reserveTokens: options.reserveTokens ?? 16_384,
-			keepRecentTokens: options.keepRecentTokens ?? 20_000,
-		},
-		retry: { enabled: false },
-	});
-	const resourceLoader = new DefaultResourceLoader({
-		cwd,
-		agentDir,
-		settingsManager,
-		noExtensions: true,
-		noSkills: true,
-		noPromptTemplates: true,
-		noThemes: true,
-		noContextFiles: true,
-		systemPromptOverride: () => "OFFICIAL_SYSTEM_POLICY",
-		additionalExtensionPaths:
-			options.fileExtension === true
-				? [fileURLToPath(new URL("../index.ts", import.meta.url))]
-				: [],
-		extensionFactories: [
-			(pi) => {
-				pi.registerProvider(
-					options.providerAuth === undefined
-						? faux.provider
-						: { ...faux.provider, auth: options.providerAuth },
-				);
-				return options.extension?.(pi);
-			},
-			...(options.fileExtension === true ? [] : [createPosthorse(options.getPolicy)]),
-			...(options.afterExtension ? [options.afterExtension] : []),
-		],
-	});
-	await resourceLoader.reload();
-	assert.deepEqual(resourceLoader.getExtensions().errors, options.expectedErrors ?? []);
-	const sessionManager = SessionManager.create(cwd, join(temp, "sessions"));
-	options.seed?.(sessionManager, faux.getModel());
-	const { session } = await createAgentSession({
-		cwd,
-		agentDir,
-		modelRuntime,
-		model: faux.getModel(),
-		resourceLoader,
-		settingsManager,
-		sessionManager,
-		noTools: "builtin",
-	});
-	t.after(() => {
-		try {
-			session.dispose();
-		} finally {
-			retainSession(temp, sessionManager, "final");
-		}
-	});
-	await session.bindExtensions({
-		onError(error) {
-			throw new Error(error.error);
-		},
-	});
-	return {
-		cwd,
-		agentDir,
-		session,
-		faux,
-		sessionManager,
-		settingsManager,
-		modelRuntime,
-		resourceLoader,
-	};
-}
-
-function registerDump(
-	pi: ExtensionAPI,
-	terminate = false,
-	size: number | readonly [number, ...number[]] = 600_000,
-	image?: ImageContent,
-) {
-	let dumps = 0;
-	pi.registerTool({
-		name: "dump",
-		label: "Dump",
-		description: "Oversized local output",
-		parameters: { type: "object", properties: {} },
-		async execute() {
-			const chars =
-				typeof size === "number"
-					? size
-					: (size[Math.min(dumps++, size.length - 1)] ?? size[0]);
-			return {
-				content: [
-					{ type: "text", text: `DUMP_HEAD ${"x".repeat(chars)} DUMP_TAIL` },
-					...(image ? [image] : []),
-				],
-				details: {},
-				terminate,
-			};
-		},
-	});
-}
+const boundaries = (h: HostFixture) => posthorseBoundaries(h.sessionManager);
+const toolResult = (h: HostFixture, name: string) => lastToolResult(h.sessionManager, name);
+const fixture = (t: TestContext, options: HostFixtureOptions = {}) =>
+	hostFixture(t, { systemPrompt: "OFFICIAL_SYSTEM_POLICY", ...options });
 
 await test("official explicit reset preserves system/tools and raw transcript; notes/history work after reset and resume", async (t) => {
 	const h = await fixture(t, {
@@ -337,9 +153,8 @@ await test("official explicit reset preserves system/tools and raw transcript; n
 		{ preserved: true },
 		"Posthorse preserves drafts from handlers that ran before its explicit reset",
 	);
-	const reopened = SessionManager.open(requireValue(h.sessionManager.getSessionFile()));
 	assert.deepEqual(
-		reopened.buildSessionContext().messages,
+		reopenedMessages(h.sessionManager),
 		JSON.parse(JSON.stringify(h.sessionManager.buildSessionContext().messages)),
 	);
 	assert.equal(h.faux.state.callCount, 3);
@@ -601,11 +416,7 @@ await test("a failed sibling cancels the explicit reset for the whole batch", as
 	assert.equal(boundaries(h).length, 1);
 	assert.equal(requireValue(boundaries(h)[0]).summary, "SUCCESS_AFTER_FAILURE");
 	assert.doesNotMatch(
-		JSON.stringify(
-			SessionManager.open(
-				requireValue(h.sessionManager.getSessionFile()),
-			).buildSessionContext().messages,
-		),
+		JSON.stringify(reopenedMessages(h.sessionManager)),
 		/BATCH_OWNER_INPUT|MUST_NOT_COMMIT/,
 	);
 });
@@ -664,12 +475,7 @@ for (const order of ["before", "after"]) {
 }
 
 await test("oversized tool output rolls over without credentials and repeated resets do not nest recovery", async (t) => {
-	const image: ImageContent = {
-		type: "image",
-		mimeType: "image/png",
-		data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0ioAAAAASUVORK5CYII=",
-	};
-	const h = await fixture(t, { extension: (pi) => registerDump(pi, false, 600_000, image) });
+	const h = await fixture(t, { extension: (pi) => registerDump(pi, { image: FIXTURE_PNG }) });
 	const requests: TranscriptMessages[] = [];
 	for (let cycle = 0; cycle < 2; cycle++) {
 		h.faux.setResponses([
@@ -694,17 +500,16 @@ await test("oversized tool output rolls over without credentials and repeated re
 				);
 				assert.doesNotMatch(
 					requireValue(boundaries(h).at(-1)).summary,
-					new RegExp(image.data.slice(0, 20)),
+					new RegExp(FIXTURE_PNG.data.slice(0, 20)),
 				);
 				return toolTurn(fauxToolCall("history", { op: "read", id: entry.id }));
 			},
 			fauxAssistantMessage("Done."),
 		]);
-		// Reuse the same session to prove later resets do not nest the earlier recovery.
 		await h.session.prompt(`OWNER_APPROVAL: inspect only. Cycle ${cycle}.`);
 		assert.deepEqual(
 			toolResult(h, "history").content.filter((part) => part.type === "image"),
-			[image],
+			[FIXTURE_PNG],
 		);
 		assert.match(textOf(toolResult(h, "history")), /\[toolResult\] DUMP_HEAD/);
 		assert.match(textOf(toolResult(h, "history")), /More remains; call history read/);
@@ -748,92 +553,77 @@ await test("oversized tool output rolls over without credentials and repeated re
 			"posthorse-boundary",
 		);
 	}
-	const reopened = SessionManager.open(requireValue(h.sessionManager.getSessionFile()));
 	assert.deepEqual(
-		reopened.buildSessionContext().messages,
+		reopenedMessages(h.sessionManager),
 		JSON.parse(JSON.stringify(h.sessionManager.buildSessionContext().messages)),
 	);
 });
 
-for (const reserveTokens of [64_000, 32_000, 24_000]) {
-	await test(`reserve investigation preserves stable request inputs across automatic rollover (${reserveTokens})`, async (t) => {
-		const h = await fixture(t, { contextWindow: 335_000, reserveTokens });
-		let initialSystem: string | undefined;
-		let initialTools: Tool[] | undefined;
-		let fresh: TranscriptMessages | undefined;
-		h.faux.setResponses([
-			(ctx) => {
-				initialSystem = getCurrentSystemPrompt(ctx.messages);
-				initialTools = structuredClone(getCurrentTools(ctx.messages));
-				return fauxAssistantMessage("Ready for the synthetic fixture.");
-			},
-		]);
-		await h.session.prompt("Establish the stable system and tools.");
-		h.sessionManager.appendMessage({
-			role: "user",
-			content: `ARCHIVED_OWNER ${"o".repeat(1_200_000)}`,
-			timestamp: 1,
-		});
-		h.sessionManager.appendMessage(
-			fauxAssistantMessage(`RECENT_ASSISTANT ${"a".repeat(16_000)}`),
-		);
-		h.sessionManager.appendMessage({
-			role: "user",
-			content: `RETAINED_OWNER ${"u".repeat(20_000)}`,
-			timestamp: 2,
-		});
-		h.sessionManager.appendMessage(
-			toolTurn({ ...fauxToolCall("read", {}), id: "stable-read" }),
-		);
-		h.sessionManager.appendMessage({
-			role: "toolResult",
-			toolName: "read",
-			toolCallId: "stable-read",
-			content: [{ type: "text", text: `RETAINED_RECEIPT ${"r".repeat(40_000)}` }],
-			isError: false,
-			timestamp: 3,
-		});
-		h.faux.setResponses([fauxAssistantMessage("Finish the full window.")]);
-		await h.session.prompt("Finish this synthetic window.");
-		assert.equal(
-			h.faux.state.callCount,
-			2,
-			"rollover must not add a summary or wake a finished run",
-		);
-		assert.equal(boundaries(h).length, 1);
-		assert.equal(record(requireValue(boundaries(h)[0]).details).reason, "threshold");
-		h.faux.setResponses([
-			(ctx) => {
-				fresh = structuredClone(ctx.messages);
-				return fauxAssistantMessage("Continue from the retained tail.");
-			},
-		]);
-		await h.session.prompt("Continue after the synthetic automatic boundary.");
-		assert.ok(fresh !== undefined);
-		assert.equal(h.faux.state.callCount, 3);
-		assert.equal(requireValue(boundaries(h)[0]).usage, undefined);
-		assert.ok(requireValue(boundaries(h)[0]).summary.length <= 20_000);
-		assert.equal(getCurrentSystemPrompt(fresh), initialSystem);
-		assert.deepEqual(getCurrentTools(fresh), initialTools);
-		for (const marker of ["RECENT_ASSISTANT", "RETAINED_OWNER", "RETAINED_RECEIPT"]) {
-			assert.ok(
-				fresh.some((message) => textOf(message).startsWith(marker)),
-				marker,
-			);
-			assert.ok(!requireValue(boundaries(h)[0]).summary.includes(marker), marker);
-		}
-		assert.ok(!fresh.some((message) => textOf(message).startsWith("ARCHIVED_OWNER")));
-		assert.match(requireValue(boundaries(h)[0]).summary, /ARCHIVED_OWNER/);
-		const evidence = process.env.PI_COMPAT_EVIDENCE_DIR;
-		if (evidence !== undefined && evidence !== "") {
-			mkdirSync(evidence, { recursive: true });
-			writeFileSync(
-				join(evidence, `reserve-${reserveTokens}.jsonl`),
-				readFileSync(requireValue(h.sessionManager.getSessionFile())),
-			);
-		}
+await test("reserve investigation preserves stable request inputs across automatic rollover", async (t) => {
+	const h = await fixture(t, { contextWindow: 335_000, reserveTokens: 24_000 });
+	let initialSystem: string | undefined;
+	let initialTools: Tool[] | undefined;
+	let fresh: TranscriptMessages | undefined;
+	h.faux.setResponses([
+		(ctx) => {
+			initialSystem = getCurrentSystemPrompt(ctx.messages);
+			initialTools = structuredClone(getCurrentTools(ctx.messages));
+			return fauxAssistantMessage("Ready for the synthetic fixture.");
+		},
+	]);
+	await h.session.prompt("Establish the stable system and tools.");
+	h.sessionManager.appendMessage({
+		role: "user",
+		content: `ARCHIVED_OWNER ${"o".repeat(1_200_000)}`,
+		timestamp: 1,
 	});
-}
+	h.sessionManager.appendMessage(fauxAssistantMessage(`RECENT_ASSISTANT ${"a".repeat(16_000)}`));
+	h.sessionManager.appendMessage({
+		role: "user",
+		content: `RETAINED_OWNER ${"u".repeat(20_000)}`,
+		timestamp: 2,
+	});
+	h.sessionManager.appendMessage(toolTurn({ ...fauxToolCall("read", {}), id: "stable-read" }));
+	h.sessionManager.appendMessage({
+		role: "toolResult",
+		toolName: "read",
+		toolCallId: "stable-read",
+		content: [{ type: "text", text: `RETAINED_RECEIPT ${"r".repeat(40_000)}` }],
+		isError: false,
+		timestamp: 3,
+	});
+	h.faux.setResponses([fauxAssistantMessage("Finish the full window.")]);
+	await h.session.prompt("Finish this synthetic window.");
+	assert.equal(
+		h.faux.state.callCount,
+		2,
+		"rollover must not add a summary or wake a finished run",
+	);
+	assert.equal(boundaries(h).length, 1);
+	assert.equal(record(requireValue(boundaries(h)[0]).details).reason, "threshold");
+	h.faux.setResponses([
+		(ctx) => {
+			fresh = structuredClone(ctx.messages);
+			return fauxAssistantMessage("Continue from the retained tail.");
+		},
+	]);
+	await h.session.prompt("Continue after the synthetic automatic boundary.");
+	assert.ok(fresh !== undefined);
+	assert.equal(h.faux.state.callCount, 3);
+	assert.equal(requireValue(boundaries(h)[0]).usage, undefined);
+	assert.ok(requireValue(boundaries(h)[0]).summary.length <= 20_000);
+	assert.equal(getCurrentSystemPrompt(fresh), initialSystem);
+	assert.deepEqual(getCurrentTools(fresh), initialTools);
+	for (const marker of ["RECENT_ASSISTANT", "RETAINED_OWNER", "RETAINED_RECEIPT"]) {
+		assert.ok(
+			fresh.some((message) => textOf(message).startsWith(marker)),
+			marker,
+		);
+		assert.ok(!requireValue(boundaries(h)[0]).summary.includes(marker), marker);
+	}
+	assert.ok(!fresh.some((message) => textOf(message).startsWith("ARCHIVED_OWNER")));
+	assert.match(requireValue(boundaries(h)[0]).summary, /ARCHIVED_OWNER/);
+});
 
 for (const forced of [false, true]) {
 	await test(`tool discovery after retained-tail rollover preserves ${forced ? "conversation" : "full request"} prefix`, async (t) => {
@@ -953,7 +743,7 @@ await test("retained-tail order survives an earlier handler presenting a retaine
 			manager.appendCustomMessageEntry("retained-patch", "", false, { patch: "PATCH" });
 		},
 		extension(pi) {
-			registerDump(pi, false, 60_000);
+			registerDump(pi, { size: 60_000 });
 			// Loaded before Posthorse, like pi-change-working-dir's cwd snapshots.
 			pi.on("context_with_system", (event) => ({
 				messages: event.messages.map((message) =>
@@ -1117,9 +907,8 @@ for (const { reason, asynchronous } of [
 		);
 		assert.match(textOf(toolResult(h, "history")), /skipped.*context/i);
 		assert.match(textOf(toolResult(h, "history")), /^No history matches/);
-		const reopened = SessionManager.open(requireValue(h.sessionManager.getSessionFile()));
 		assert.deepEqual(
-			reopened.buildSessionContext().messages,
+			reopenedMessages(h.sessionManager),
 			JSON.parse(JSON.stringify(h.sessionManager.buildSessionContext().messages)),
 		);
 		h.settingsManager.applyOverrides({
@@ -1309,7 +1098,7 @@ await test("automatic retention of owner input permits another native threshold 
 			});
 		},
 		extension(pi) {
-			registerDump(pi, false, 80_000);
+			registerDump(pi, { size: 80_000 });
 		},
 	});
 	const requests: TranscriptMessages[] = [];
@@ -1479,7 +1268,7 @@ await test("a retained old notes reminder neither leaks nor suppresses the new w
 });
 
 await test("native terminating batch keeps its receipt without a reset or unsolicited request", async (t) => {
-	const h = await fixture(t, { extension: (pi) => registerDump(pi, true) });
+	const h = await fixture(t, { extension: (pi) => registerDump(pi, { terminate: true }) });
 	h.faux.setResponses([toolTurn(fauxToolCall("dump", {})), fauxAssistantMessage("MUST_NOT_RUN")]);
 	await h.session.prompt("Read the output and stop.");
 	assert.equal(boundaries(h).length, 0);
@@ -1532,7 +1321,7 @@ await test("eligible overflow recovery (keepRecentTokens=1) retries once without
 await test("eligible overflow (keepRecentTokens=1) retries fresh and later requests can recover again", async (t) => {
 	const h = await fixture(t, {
 		keepRecentTokens: 1,
-		extension: (pi) => registerDump(pi, false, 20_000),
+		extension: (pi) => registerDump(pi, { size: 20_000 }),
 	});
 	let retry: TranscriptMessages | undefined;
 	for (let cycle = 0; cycle < 2; cycle++) {
@@ -1544,7 +1333,6 @@ await test("eligible overflow (keepRecentTokens=1) retries fresh and later reque
 				return fauxAssistantMessage("Recovered.");
 			},
 		]);
-		// The later request must recover after the previous retry has settled.
 		await h.session.prompt(`Owner request ${cycle}`);
 		assert.ok(retry !== undefined);
 		const results = retry.filter((message) => message.role === "toolResult");
@@ -1579,7 +1367,7 @@ for (const stopReason of ordinaryStops) {
 await test("disabled live settings suppress automatic rollover and reminders but retain explicit reset", async (t) => {
 	const h = await fixture(t, {
 		enabled: false,
-		extension: (pi) => registerDump(pi, false, 340_000),
+		extension: (pi) => registerDump(pi, { size: 340_000 }),
 	});
 	let oversized: string | undefined;
 	h.faux.setResponses([
@@ -1888,7 +1676,6 @@ await test("manual compact remains native and calls the summarization provider",
 	);
 });
 
-// PR #51 review: recovery after Pi's own /compact starts at its kept tail and carries its summary.
 await test("automatic recovery after a native /compact excludes summarized inputs and keeps the native summary", async (t) => {
 	const h = await fixture(t, { extension: registerDump });
 	h.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
@@ -2158,14 +1945,9 @@ for (const trigger of ["user", "custom"]) {
 }
 
 await test("same-boundary replacement and custom-message references recover committed text and images", async (t) => {
-	const image: ImageContent = {
-		type: "image",
-		mimeType: "image/png",
-		data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0ioAAAAASUVORK5CYII=",
-	};
 	const replacement = (kind: string): (ImageContent | { type: "text"; text: string })[] => [
 		{ type: "text", text: `${kind}_START ${"r".repeat(15_000)} ${kind}_END` },
-		image,
+		FIXTURE_PNG,
 	];
 	let ownerId: string | undefined, toolId: string | undefined, handoff: string | undefined;
 	const h = await fixture(t, {
@@ -2242,17 +2024,9 @@ await test("same-boundary replacement and custom-message references recover comm
 	]);
 	await h.session.prompt("Inspect only, then recover the full boundary evidence.");
 	assert.ok(handoff !== undefined && handoff.length > 0);
-	const reads = h.sessionManager
-		.getBranch()
-		.filter((entry) => entry.type === "message")
-		.map((entry) => entry.message)
-		.filter((message) => message.role === "toolResult")
-		.filter(
-			(message) =>
-				message.toolName === "history" &&
-				isRecord(message.details) &&
-				message.details.kind === "history-read",
-		);
+	const reads = toolResults(h.sessionManager, "history").filter(
+		(message) => isRecord(message.details) && message.details.kind === "history-read",
+	);
 	assert.equal(reads.length, 3);
 	for (const kind of ["OWNER", "TOOL", "CUSTOM"]) {
 		const read = reads.find((message) => textOf(message).includes(`${kind}_START`));
@@ -2260,7 +2034,7 @@ await test("same-boundary replacement and custom-message references recover comm
 		assert.match(textOf(read), new RegExp(`${kind}_END`));
 		assert.deepEqual(
 			read.content.filter((part) => part.type === "image"),
-			[image],
+			[FIXTURE_PNG],
 		);
 	}
 	assert.match(handoff, /middle omitted/);
@@ -2643,7 +2417,7 @@ for (const keepRecentTokens of [20_000, 1]) {
 				const h = await fixture(t, {
 					keepRecentTokens,
 					extension(pi) {
-						registerDump(pi, false, start === "automatic" ? [600_000, size] : size);
+						registerDump(pi, { size: start === "automatic" ? [600_000, size] : size });
 					},
 				});
 				let third: TranscriptMessages | undefined;
@@ -2698,7 +2472,7 @@ for (const unavailable of ["unknown usage", "disabled policy"]) {
 	await test(`fresh-window fallback skips ${unavailable}`, async (t) => {
 		const h = await fixture(t, {
 			extension(pi) {
-				registerDump(pi, false, 350_000);
+				registerDump(pi, { size: 350_000 });
 				pi.on("turn_end", (event, ctx) => {
 					if (event.toolResults.some((result) => result.toolName === "dump")) {
 						if (unavailable === "unknown usage") {
@@ -2738,7 +2512,7 @@ await test("earlier turn-start drafts leave fresh-window compaction Pi-owned", a
 	let intercepted = 0;
 	const h = await fixture(t, {
 		extension(pi) {
-			registerDump(pi, false, 350_000);
+			registerDump(pi, { size: 350_000 });
 			pi.on("session_before_compact", () => {
 				intercepted++;
 			});
@@ -2777,7 +2551,7 @@ for (const start of ["explicit", "automatic", "replaced owner", "omitted owner"]
 		let editId: string | undefined;
 		const h = await fixture(t, {
 			extension(pi) {
-				registerDump(pi, false, start === "explicit" ? 350_000 : [600_000, 350_000]);
+				registerDump(pi, { size: start === "explicit" ? 350_000 : [600_000, 350_000] });
 				pi.on("turn_end", (event) => {
 					if (
 						(start === "replaced owner" || start === "omitted owner") &&
@@ -2864,7 +2638,7 @@ for (const start of ["explicit", "automatic", "replaced owner", "omitted owner"]
 await test("a short owner follow-up keeps the original request in the next automatic record", async (t) => {
 	const h = await fixture(t, {
 		extension(pi) {
-			registerDump(pi, false, [600_000, 350_000]);
+			registerDump(pi, { size: [600_000, 350_000] });
 		},
 	});
 	h.faux.setResponses([
@@ -2891,7 +2665,7 @@ await test("fresh-window truncated answers keep native omit-and-retry recovery",
 	const h = await fixture(t, {
 		models: [{ id: "official-posthorse", contextWindow: 100_000, maxTokens: 30_000 }],
 		extension(pi) {
-			registerDump(pi, false, [40_000, 240_000]);
+			registerDump(pi, { size: [40_000, 240_000] });
 			pi.on("session_before_compact", (event) => {
 				intercepted.push({ reason: event.reason, willRetry: event.willRetry });
 			});
@@ -2920,7 +2694,7 @@ await test("fresh-window truncated answers keep native omit-and-retry recovery",
 await test("earlier redaction drafts defer fallback and never copy unredacted evidence", async (t) => {
 	const h = await fixture(t, {
 		extension(pi) {
-			registerDump(pi, false, 350_000);
+			registerDump(pi, { size: 350_000 });
 			pi.on("turn_end", (event) => {
 				const index = event.toolResults.findIndex((result) => result.toolName === "dump");
 				return index < 0
@@ -2996,12 +2770,7 @@ await test("note publication rejects directory-only symlink targets and traversa
 		fauxAssistantMessage("Both publication failures reported."),
 	]);
 	await h.session.prompt("Check malformed note links.");
-	const failures = h.sessionManager
-		.getBranch()
-		.filter((entry) => entry.type === "message")
-		.map((entry) => entry.message)
-		.filter((message) => message.role === "toolResult")
-		.filter((message) => message.toolName === "notes");
+	const failures = toolResults(h.sessionManager, "notes");
 	assert.equal(failures.length, 2);
 	assert.ok(failures.every((message) => message.isError));
 	assert.equal(existsSync(join(dir, "missing-directory")), false);

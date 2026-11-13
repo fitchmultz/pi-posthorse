@@ -22,180 +22,86 @@ import { syncBuiltinESMExports } from "node:module";
 import { basename, dirname, join, relative } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import * as NativeSdk from "@earendil-works/pi-coding-agent";
-import * as NativeAi from "@earendil-works/pi-ai";
-import { record, requireValue, stringValue } from "./harness.ts";
+import {
+	AgentSessionRuntime,
+	createAgentSessionFromServices,
+	createAgentSessionServices,
+	createCodemodeExtension,
+	discoverAndLoadExtensions,
+	ExtensionRunner,
+	ModelRegistry,
+	ModelRuntime,
+	SessionManager,
+	wrapRegisteredTools,
+	type AgentSessionServices,
+	type BeforeAgentStartEvent,
+	type ContextWithSystemEvent,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type ExtensionFactory,
+	type ToolInfo,
+} from "@earendil-works/pi-coding-agent";
+import * as PiAi from "@earendil-works/pi-ai";
+import {
+	fauxAssistantMessage,
+	fauxProvider,
+	fauxToolCall,
+	getCurrentSystemPrompt,
+	getCurrentTools,
+	InMemoryCredentialStore,
+	type AssistantMessage,
+	type FauxResponseFactory,
+	type FauxResponseStep,
+	type JsonValue,
+	type ToolCall,
+	type ToolResultMessage,
+	type TranscriptContext,
+} from "@earendil-works/pi-ai";
+import { createPosthorse } from "../index.ts";
+import { ISOLATED_LOADER_FLAGS, record, requireValue, stringValue } from "./harness.ts";
 import { isRecord } from "../src/contracts.ts";
-import { textOf, messageEntry, posthorseBoundaries } from "./host-helpers.ts";
+import {
+	enableBackgroundCodemode,
+	FIXTURE_PNG,
+	forkFixture,
+	hostFixture,
+	lastToolResult,
+	messageEntry,
+	posthorseBoundaries,
+	registerDump,
+	reminderEntries,
+	reopenedMessages,
+	requireForkCapability,
+	resumeFixture,
+	rewriteSessionJsonl,
+	textOf,
+	toolResults,
+	toolTurn,
+	type HostFixture,
+	type TranscriptMessages,
+} from "./host-helpers.ts";
 import { fixtureDisplay, fixtureResult } from "./results.ts";
-type TranscriptMessages = NativeAi.TranscriptContext["messages"];
 import type { HistoryParams } from "../src/history-search.ts";
 import type { NotesParams } from "../src/notes.ts";
 import { renderSessionNotes } from "../src/recovery-notes.ts";
 import { retainFile, retainSession } from "./fixture-files.ts";
 
-const {
-	AgentSessionRuntime,
-	createAgentSession,
-	createAgentSessionFromServices,
-	createAgentSessionServices,
-	createCodemodeExtension,
-	DefaultResourceLoader,
-	discoverAndLoadExtensions,
-	ExtensionRunner,
-	ModelRuntime,
-	ModelRegistry,
-	SessionManager,
-	SettingsManager,
-	wrapRegisteredTools,
-} = NativeSdk;
-
-const {
-	fauxProvider,
-	fauxAssistantMessage,
-	fauxToolCall,
-	getCurrentSystemPrompt,
-	getCurrentTools,
-	InMemoryCredentialStore,
-} = NativeAi;
-const { createPosthorse } = await import("../index.ts");
+const fixture = hostFixture;
 const nextCursor = (text: string) =>
 	text.match(
 		/\[More results; continue with cursor "([^"]+)" and the same query\/scope\.\]$/,
 	)?.[1];
-interface FixtureOptions {
-	readonly cwd?: string;
-	readonly posthorse?: boolean;
-	readonly fileTools?: boolean;
-	readonly manager?: (cwd: string, directory: string) => NativeSdk.SessionManager;
-	readonly contextWindow?: number;
-	readonly maxTokens?: number;
-	readonly enabled?: boolean;
-	readonly customPrompt?: string | undefined;
-	readonly extension?: NativeSdk.ExtensionFactory;
-	readonly afterExtension?: NativeSdk.ExtensionFactory;
-	readonly seed?: (manager: NativeSdk.SessionManager) => void;
-	readonly onError?: Parameters<NativeSdk.AgentSession["bindExtensions"]>[0]["onError"];
-}
-async function fixture(t: TestContext, options: FixtureOptions = {}) {
-	const temp = realpathSync(mkdtempSync(join(tmpdir(), "posthorse-regression-")));
-	t.diagnostic(`fixture: ${temp}`);
-	const cwd = options.cwd ?? join(temp, "project"),
-		agentDir = join(temp, "agent");
-	mkdirSync(cwd, { recursive: true });
-	mkdirSync(agentDir);
-	const faux = fauxProvider({
-		models: [
-			{
-				id: "posthorse-regression",
-				contextWindow: options.contextWindow ?? 100_000,
-				maxTokens: options.maxTokens ?? 1000,
-			},
-		],
-	});
-	const modelRuntime = await ModelRuntime.create({
-		credentials: new InMemoryCredentialStore(),
-		modelsPath: null,
-	});
-	const settingsManager = SettingsManager.inMemory({
-		compaction: { enabled: options.enabled ?? true, reserveTokens: 16_384 },
-		retry: { enabled: false },
-	});
-	const resourceLoader = new DefaultResourceLoader({
-		cwd,
-		agentDir,
-		settingsManager,
-		noExtensions: true,
-		noSkills: true,
-		noPromptTemplates: true,
-		noThemes: true,
-		noContextFiles: true,
 
-		...(options.customPrompt !== undefined && options.customPrompt !== ""
-			? { systemPromptOverride: () => options.customPrompt ?? "" }
-			: {}),
-		extensionFactories: [
-			(pi) => {
-				pi.registerProvider(faux.provider);
-				return options.extension?.(pi);
-			},
-			...(options.posthorse === false ? [] : [createPosthorse()]),
-			...(options.afterExtension ? [options.afterExtension] : []),
-		],
-	});
-	await resourceLoader.reload();
-	assert.deepEqual(resourceLoader.getExtensions().errors, []);
-	const sessionManager =
-		options.manager?.(cwd, join(temp, "sessions")) ??
-		SessionManager.create(cwd, join(temp, "sessions"));
-	options.seed?.(sessionManager);
-	const { session } = await createAgentSession({
-		cwd,
-		agentDir,
-		modelRuntime,
-		model: faux.getModel(),
-		resourceLoader,
-		settingsManager,
-		sessionManager,
-		noTools: "builtin",
-		...(options.fileTools === true ? { tools: ["+read", "+write", "+edit"] } : {}),
-	});
-	t.after(() => {
-		try {
-			session.dispose();
-		} finally {
-			retainSession(temp, sessionManager, "final");
-		}
-	});
-	await session.bindExtensions({
-		onError:
-			options.onError ??
-			((error) => {
-				throw new Error(error.error);
-			}),
-	});
-	return {
-		cwd,
-		agentDir,
-		session,
-		faux,
-		sessionManager,
-		settingsManager,
-		resourceLoader,
-		modelRuntime,
-	};
-}
-
-function reset(manager: NativeSdk.SessionManager, handoff: string) {
+function reset(manager: SessionManager, handoff: string) {
 	return manager.appendCompaction(handoff, null, 100, { posthorse: 1 });
 }
 
-async function nativeCall(
-	h: Awaited<ReturnType<typeof fixture>>,
-	call: NativeAi.ToolCall,
-): Promise<NativeAi.ToolResultMessage> {
-	h.faux.setResponses([
-		fauxAssistantMessage(call, { stopReason: "toolUse" }),
-		fauxAssistantMessage("Note operation complete."),
-	]);
+async function nativeCall(h: HostFixture, call: ToolCall): Promise<ToolResultMessage> {
+	h.faux.setResponses([toolTurn(call), fauxAssistantMessage("Note operation complete.")]);
 	await h.session.prompt("Use the requested notes operation.");
-	const result = messageEntry(
-		h.sessionManager
-			.getBranch()
-			.findLast(
-				(entry) =>
-					entry.type === "message" &&
-					entry.message.role === "toolResult" &&
-					entry.message.toolCallId === call.id,
-			),
-	).message;
-	assert.ok(result.role === "toolResult");
-	return result;
+	return lastToolResult(h.sessionManager, { toolCallId: call.id });
 }
-async function notesCall(
-	h: Awaited<ReturnType<typeof fixture>>,
-	params: NotesParams,
-): Promise<string> {
+async function notesCall(h: HostFixture, params: NotesParams): Promise<string> {
 	const result = await nativeCall(h, fauxToolCall("notes", params));
 	assert.equal(result.isError, false, textOf(result));
 	return textOf(result);
@@ -205,7 +111,7 @@ async function notesCall(
  * root, scope and path, and never holds the binding that owns that location.
  */
 function assertStoredNoteLocations(
-	manager: NativeSdk.SessionManager,
+	manager: SessionManager,
 	notesDirectory?: string,
 ): { readonly files: number; readonly seeds: number } {
 	const own = readFileSync(requireValue(manager.getSessionFile()), "utf8")
@@ -258,15 +164,7 @@ await test("fork notes canonicalize legacy receipt aliases before resolving thei
 		const result = await nativeCall(parent, fauxToolCall("read", { path }));
 		assert.equal(result.isError, false, textOf(result));
 	}
-	const child = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (cwd, target) =>
-			SessionManager.forkFrom(
-				requireValue(parent.sessionManager.getSessionFile()),
-				cwd,
-				target,
-			),
-	});
+	const child = await forkFixture(t, parent);
 	assert.match(
 		await notesCall(child, { op: "read", path: "legacy.md" }),
 		/\/\.forks\/[^/]+\/notes\/legacy\.md\nlegacy checkpoint$/u,
@@ -280,15 +178,7 @@ await test("fork notes canonicalize legacy receipt aliases before resolving thei
 			.isError,
 		false,
 	);
-	const ambiguous = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (cwd, target) =>
-			SessionManager.forkFrom(
-				requireValue(parent.sessionManager.getSessionFile()),
-				cwd,
-				target,
-			),
-	});
+	const ambiguous = await forkFixture(t, parent);
 	assert.match(
 		await notesCall(ambiguous, { op: "write", path: "fork.md", content: "fork checkpoint" }),
 		/^Wrote .*\/\.forks\/[^/]+\/notes\/fork\.md$/u,
@@ -301,15 +191,7 @@ await test("fork notes start without a missing source note and reference it once
 	await notesCall(parent, { op: "write", path: "task.md", content: "parent checkpoint" });
 	const source = join(parent.cwd, ".pi", "notes", "task.md");
 	unlinkSync(source);
-	const child = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (cwd, target) =>
-			SessionManager.forkFrom(
-				requireValue(parent.sessionManager.getSessionFile()),
-				cwd,
-				target,
-			),
-	});
+	const child = await forkFixture(t, parent);
 	const missing = await nativeCall(child, fauxToolCall("notes", { op: "read", path: "task.md" }));
 	assert.equal(missing.isError, true);
 	assert.match(textOf(missing), /No note at task\.md/u);
@@ -348,7 +230,7 @@ async function interactiveFork(
 	h: Awaited<ReturnType<typeof fixture>>,
 	entryId: string,
 ) {
-	const services: NativeSdk.AgentSessionServices = {
+	const services: AgentSessionServices = {
 		cwd: h.cwd,
 		agentDir: h.agentDir,
 		modelRuntime: h.modelRuntime,
@@ -363,11 +245,7 @@ async function interactiveFork(
 			modelRuntime: h.modelRuntime,
 			settingsManager: h.settingsManager,
 			resourceLoaderOptions: {
-				noExtensions: true,
-				noSkills: true,
-				noPromptTemplates: true,
-				noThemes: true,
-				noContextFiles: true,
+				...ISOLATED_LOADER_FLAGS,
 				extensionFactories: [
 					(pi) => {
 						pi.registerProvider(h.faux.provider);
@@ -430,9 +308,9 @@ await test("fork notes retain deleted-worktree source roots across projects and 
 	const source = requireValue(parent.sessionManager.getSessionFile());
 	execFileSync("git", ["-C", main, "worktree", "remove", worktree]);
 	assert.equal(existsSync(worktree), false);
-	const child = await fixture(t, {
+	const child = await forkFixture(t, parent, {
 		cwd: join(root, "other-project"),
-		manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
+		sourceFile: source,
 	});
 	const inherited = await notesCall(child, { op: "read", path: "task.md" });
 	const childPath = requireValue(/^File: ([^\n]+)/u.exec(inherited)?.[1]);
@@ -487,10 +365,7 @@ await test("fork notes snapshot the selected branch without sharing its writable
 	const parentNote = join(parent.cwd, ".pi", "notes", "task.md");
 	utimesSync(parentNote, new Date("2020-01-01T00:00:00Z"), new Date("2020-01-01T00:00:00Z"));
 	writeFileSync(join(parent.cwd, ".pi", "notes", "untouched.md"), "not part of the branch");
-	const child = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
-	});
+	const child = await forkFixture(t, parent, { sourceFile: source });
 	const initial = await notesCall(child, { op: "read", path: "task.md" });
 	const childPath = requireValue(/^File: ([^\n]+)/.exec(initial)?.[1]);
 	assert.equal(statSync(childPath).mtimeMs, statSync(parentNote).mtimeMs);
@@ -517,11 +392,7 @@ await test("fork notes snapshot the selected branch without sharing its writable
 		/parent checkpoint\nchild progress\n$/,
 	);
 	assert.match(await notesCall(parent, { op: "read", path: "task.md" }), /parent advanced$/);
-	const resumed = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (_cwd, directory) =>
-			SessionManager.open(requireValue(child.sessionManager.getSessionFile()), directory),
-	});
+	const resumed = await resumeFixture(t, child);
 	assert.match(
 		await notesCall(resumed, { op: "read", path: "task.md" }),
 		/parent checkpoint\nchild progress\n$/,
@@ -531,15 +402,7 @@ await test("fork notes snapshot the selected branch without sharing its writable
 await test("fork notes keep only locations from the oversized addresses of releases 0.10.4 through 0.10.17", async (t) => {
 	const parent = await fixture(t);
 	await notesCall(parent, { op: "write", path: "task.md", content: "shared checkpoint" });
-	const child = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (cwd, directory) =>
-			SessionManager.forkFrom(
-				requireValue(parent.sessionManager.getSessionFile()),
-				cwd,
-				directory,
-			),
-	});
+	const child = await forkFixture(t, parent);
 	const inherited = await notesCall(child, { op: "read", path: "task.md" });
 	const childPath = requireValue(/^File: ([^\n]+)/u.exec(inherited)?.[1]);
 	// Those releases stored the binding that owns a note inside each address of a seed.
@@ -560,21 +423,15 @@ await test("fork notes keep only locations from the oversized addresses of relea
 		}
 		return binding;
 	};
-	for (const entry of entries) {
-		if (bindingKind(entry) === "fork") {
-			oversize(record(entry.data));
-		}
-	}
-	writeFileSync(childFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+	rewriteSessionJsonl(dirname(child.cwd), childFile, (entry) =>
+		bindingKind(entry) === "fork" ? { ...entry, data: oversize(record(entry.data)) } : entry,
+	);
 	const manifest = join(dirname(dirname(childPath)), "manifest.json");
 	writeFileSync(
 		manifest,
 		JSON.stringify(oversize(record(JSON.parse(readFileSync(manifest, "utf8"))))),
 	);
-	const grandchild = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (cwd, directory) => SessionManager.forkFrom(childFile, cwd, directory),
-	});
+	const grandchild = await forkFixture(t, parent, { sourceFile: childFile });
 	const copied = await notesCall(grandchild, { op: "read", path: "task.md" });
 	const grandchildPath = requireValue(/^File: ([^\n]+)/u.exec(copied)?.[1]);
 	assert.notEqual(grandchildPath, childPath);
@@ -604,16 +461,10 @@ await test("fork notes keep ownership across tree navigation, adoption, deletion
 		await notesCall(parent, { op: "write", path, content: "parent alias reference" });
 	}
 	const otherBranch = requireValue(parent.sessionManager.getLeafId());
-	const source = requireValue(parent.sessionManager.getSessionFile());
-	const child = await fixture(t, {
-		cwd: parent.cwd,
+	const child = await forkFixture(t, parent, {
 		fileTools: true,
 		extension: createCodemodeExtension(),
-		manager: (cwd, directory) => {
-			const manager = SessionManager.forkFrom(source, cwd, directory);
-			manager.branch(forkPoint);
-			return manager;
-		},
+		branch: forkPoint,
 	});
 	const selected = await notesCall(child, { op: "read", path: "selected.md" });
 	const childDirectory = dirname(requireValue(/^File: ([^\n]+)/u.exec(selected)?.[1]));
@@ -713,11 +564,7 @@ await test("fork notes keep ownership across tree navigation, adoption, deletion
 	const stored = assertStoredNoteLocations(child.sessionManager, childDirectory);
 	assert.ok(stored.files >= 5, `file-tool and notes-tool touches: ${stored.files}`);
 	assert.ok(stored.seeds >= 3, `fork and adoption seeds: ${stored.seeds}`);
-	const resumed = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (_cwd, directory) =>
-			SessionManager.open(requireValue(child.sessionManager.getSessionFile()), directory),
-	});
+	const resumed = await resumeFixture(t, child);
 	const stillDeleted = await nativeCall(
 		resumed,
 		fauxToolCall("notes", { op: "read", path: "reference.md" }),
@@ -737,18 +584,7 @@ await test("fork adoption reports a private copy left by failed source verificat
 	const forkPoint = requireValue(parent.sessionManager.getLeafId());
 	await notesCall(parent, { op: "write", path: "changing.md", content: "original reference" });
 	const otherBranch = requireValue(parent.sessionManager.getLeafId());
-	const child = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (cwd, directory) => {
-			const manager = SessionManager.forkFrom(
-				requireValue(parent.sessionManager.getSessionFile()),
-				cwd,
-				directory,
-			);
-			manager.branch(forkPoint);
-			return manager;
-		},
-	});
+	const child = await forkFixture(t, parent, { branch: forkPoint });
 	const selected = await notesCall(child, { op: "read", path: "selected.md" });
 	const directory = dirname(requireValue(/^File: ([^\n]+)/u.exec(selected)?.[1]));
 	await child.session.navigateTree(otherBranch, { summarize: false });
@@ -802,17 +638,9 @@ await test("fork adoption reports a private copy left by failed source verificat
 	assert.equal(readFileSync(source, "utf8"), "source changed after the copy");
 });
 
-const noteRecoveryTools: NativeSdk.ExtensionFactory = async (pi) => {
+const noteRecoveryTools: ExtensionFactory = async (pi) => {
 	await createCodemodeExtension()(pi);
-	pi.registerTool({
-		name: "dump",
-		label: "Dump",
-		description: "Large local result to exercise native automatic rollover",
-		parameters: { type: "object", properties: {} },
-		async execute() {
-			return { content: [{ type: "text", text: "x".repeat(600_000) }], details: {} };
-		},
-	});
+	registerDump(pi);
 };
 
 await test("fork notes recover metadata-only nested writes through edited receipts and compaction", async (t) => {
@@ -848,19 +676,12 @@ await test("fork notes recover metadata-only nested writes through edited receip
 	const recovery = requireValue(posthorseBoundaries(h.sessionManager).at(-1)).summary;
 	assert.match(recovery, /metadata-only\.md.*full content is not retained.*read this note now/u);
 	assert.doesNotMatch(recovery, /latest full write is in the retained tail/u);
-	const source = requireValue(h.sessionManager.getSessionFile());
-	const child = await fixture(t, {
-		cwd: h.cwd,
-		manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
-	});
+	const child = await forkFixture(t, h);
 	const copy = await notesCall(child, { op: "read", path: "metadata-only.md" });
 	assert.match(copy, /File: .*\/\.forks\//u);
 	assert.ok(copy.endsWith("saved checkpoint ".repeat(1024)));
 	h.sessionManager.appendContextEdit(receipt.id, null);
-	const excluded = await fixture(t, {
-		cwd: h.cwd,
-		manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
-	});
+	const excluded = await forkFixture(t, h);
 	const listing = await notesCall(excluded, { op: "list" });
 	const directory = requireValue(/^Notes directory: ([^\n]+)/u.exec(listing)?.[1]);
 	assert.equal(
@@ -899,13 +720,10 @@ await test("recovery clears a file-tool note written through a dot-segment alias
 await test("fork recovery names a note it wrote in another scope by its path", async (t) => {
 	const parent = await fixture(t);
 	await notesCall(parent, { op: "write", path: "task.md", content: "parent checkpoint" });
-	const source = requireValue(parent.sessionManager.getSessionFile());
-	const child = await fixture(t, {
-		cwd: parent.cwd,
+	const child = await forkFixture(t, parent, {
 		fileTools: true,
 		extension: noteRecoveryTools,
 		contextWindow: 128_000,
-		manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
 	});
 	// The fork owns a private task.md, so notes read task.md would not reach the project's note.
 	assert.match(await notesCall(child, { op: "read", path: "task.md" }), /File: .*\/\.forks\//u);
@@ -1040,11 +858,7 @@ await test("notes read accepts an absolute path only inside this session's own n
 		.map((file) => file.path);
 	assert.deepEqual(recordedReads, ["sub/task.md", "sub/task.md", "sub/task.md"]);
 
-	const source = requireValue(parent.sessionManager.getSessionFile());
-	const child = await fixture(t, {
-		cwd: parent.cwd,
-		manager: (cwd, directory) => SessionManager.forkFrom(source, cwd, directory),
-	});
+	const child = await forkFixture(t, parent);
 	await notesCall(parent, { op: "write", path: "inherited/later.md", content: "later note" });
 	assert.match(
 		await notesCall(child, { op: "read", path: "inherited" }),
@@ -1134,17 +948,7 @@ await test("fork notes associate late cancelled background effects with their la
 			});
 		},
 	});
-	h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "codemode"]);
-	const codemode = requireValue(h.session.getAllTools().find((tool) => tool.name === "codemode"));
-	if (!codemode.description.includes('"background": true')) {
-		assert.notEqual(
-			process.env.PI_COMPAT_HOST,
-			"fork",
-			"The maintained fork must expose background codemode.",
-		);
-		t.skip(
-			"This host does not expose background codemode; the fork qualification owns this case.",
-		);
+	if (!enableBackgroundCodemode(t, h)) {
 		return;
 	}
 	h.faux.setResponses([fauxAssistantMessage("Seed branch.")]);
@@ -1242,13 +1046,7 @@ for (const earlyRequest of [true, false]) {
 				});
 			},
 		});
-		h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "codemode"]);
-		const codemode = requireValue(
-			h.session.getAllTools().find((tool) => tool.name === "codemode"),
-		);
-		if (!codemode.description.includes('"background": true')) {
-			assert.notEqual(process.env.PI_COMPAT_HOST, "fork");
-			t.skip("The fork qualification owns background codemode.");
+		if (!enableBackgroundCodemode(t, h)) {
 			return;
 		}
 		const launch = await nativeCall(
@@ -1289,7 +1087,7 @@ async function loadedHistory(t: TestContext) {
 	const evidence = process.env.PI_COMPAT_EVIDENCE_DIR;
 	const managers =
 		evidence !== undefined && evidence !== ""
-			? new Map<string | NativeSdk.SessionManager, NativeSdk.SessionManager>()
+			? new Map<string | SessionManager, SessionManager>()
 			: undefined;
 	const models = new ModelRegistry(
 		await ModelRuntime.create({
@@ -1315,7 +1113,7 @@ async function loadedHistory(t: TestContext) {
 	runtime.getSettings = () => ({});
 	runtime.getAllTools = () =>
 		[...extension.tools.values()].map(({ definition, sourceInfo }) => {
-			const info: NativeSdk.ToolInfo = {
+			const info: ToolInfo = {
 				name: definition.name,
 				description: definition.description,
 				parameters: definition.parameters,
@@ -1340,7 +1138,7 @@ async function loadedHistory(t: TestContext) {
 	const history = requireValue(extension.tools.get("history")).definition;
 	return {
 		cwd,
-		async call(sessionManager: NativeSdk.SessionManager, params: HistoryParams) {
+		async call(sessionManager: SessionManager, params: HistoryParams) {
 			managers?.set(sessionManager.getSessionFile() ?? sessionManager, sessionManager);
 			// Isolate extension extraction from the host's separate usage-estimation cost.
 			const runner = new ExtensionRunner(extensions, runtime, cwd, sessionManager, models);
@@ -1367,7 +1165,7 @@ async function loadedHistory(t: TestContext) {
 
 await test("native page reads estimate current active schemas only when usage is unknown", async (t) => {
 	const h = await fixture(t, {
-		customPrompt: "Offline page regression.",
+		systemPrompt: "Offline page regression.",
 		extension(pi) {
 			pi.registerTool({
 				name: "catalog",
@@ -1385,7 +1183,7 @@ await test("native page reads estimate current active schemas only when usage is
 	assert.ok(runner instanceof ExtensionRunner);
 	const tools = wrapRegisteredTools(runner.getAllRegisteredTools(), runner);
 	const runtime = h.resourceLoader.getExtensions().runtime;
-	let usage: ReturnType<NativeSdk.ExtensionContext["getContextUsage"]>;
+	let usage: ReturnType<ExtensionContext["getContextUsage"]>;
 	const probes = [
 		t.mock.method(runtime, "getActiveTools", () => h.session.getActiveToolNames()),
 		t.mock.method(runtime, "getAllTools", () => h.session.getAllTools()),
@@ -1403,7 +1201,7 @@ await test("native page reads estimate current active schemas only when usage is
 	});
 	const actual: number[][] = [],
 		expected: number[][] = [];
-	const call = async (name: string, params: Record<string, NativeAi.JsonValue>) => {
+	const call = async (name: string, params: Record<string, JsonValue>) => {
 		await runner.emit({ type: "turn_start", turnIndex: 0, timestamp: 1 });
 		for (const probe of probes) {
 			probe.mock.resetCalls();
@@ -1444,7 +1242,6 @@ await test("native page reads estimate current active schemas only when usage is
 		`${requireValue(h.sessionManager.getEntry(id)).timestamp} [window initial] [${id}] [chars 0-18 of 18] [user] saved state`,
 	);
 	for (const tokens of [0, null, undefined]) {
-		// Each evaluation owns the native usage state and callback counters.
 		assert.deepEqual(await readPair(tokens), baseline);
 	}
 	const body = "n".repeat(50_000);
@@ -1527,13 +1324,12 @@ await test("native history searches do not serialize unrelated active tool argum
 	reset(manager, "Earlier entries archived.");
 	for (let index = 0; index < 64; index++) {
 		manager.appendMessage(
-			fauxAssistantMessage(
+			toolTurn(
 				fauxToolCall("unrelated", {
 					historyProjectionProbe: true,
 					payload: "x".repeat(65_536),
 					index,
 				}),
-				{ stopReason: "toolUse" },
 			),
 		);
 	}
@@ -1600,7 +1396,7 @@ for (const all of [false, true]) {
 		const h = await loadedHistory(t);
 		const manager = SessionManager.create(h.cwd, join(h.cwd, "sessions"));
 		const id = manager.appendMessage(fauxAssistantMessage("Before edits."));
-		let lastArguments: NativeAi.ToolCall["arguments"] | undefined;
+		let lastArguments: ToolCall["arguments"] | undefined;
 		for (let index = 0; index < 8; index++) {
 			lastArguments = { value: "MATCH_EDIT_ARGUMENT", payload: "x".repeat(4096) };
 			manager.appendContextEdit(id, {
@@ -1762,7 +1558,6 @@ await test("native loaded history reads only the selected content and preserves 
 	]) {
 		accessed.clear();
 		const id = requireValue(ids[index]);
-		// Each independent read must finish before measuring the next selected entry.
 		const result = await h.call(manager, { op: "read", id });
 		assert.ok(textOf(result).includes(`[window ${window}] [${id}]`));
 		assert.ok(textOf(result).endsWith(`[user] HIST_NEEDLE old:${index}.`));
@@ -1774,7 +1569,7 @@ await test("native loaded history reads only the selected content and preserves 
 	const abandonedWindow = reset(persisted, "Abandoned boundary.");
 	for (let i = 0; i < 64; i++) {
 		const call = fauxToolCall("archive_probe", { archivePayload: "unselected", index: i });
-		persisted.appendMessage(fauxAssistantMessage(call, { stopReason: "toolUse" }));
+		persisted.appendMessage(toolTurn(call));
 		persisted.appendMessage({
 			role: "toolResult",
 			toolName: "archive_probe",
@@ -1844,25 +1639,15 @@ await test("official resume keeps legacy saved window data recoverable after a p
 		},
 	});
 	h.faux.setResponses([
-		fauxAssistantMessage(fauxToolCall("new_context", { handoff: "Public fresh context" }), {
-			stopReason: "toolUse",
-		}),
-		fauxAssistantMessage(
-			[
-				fauxToolCall("history", { op: "search", query: "LEGACY_OWNER_INPUT" }),
-				fauxToolCall("history", { op: "read", id: "legacy-window" }),
-			],
-			{ stopReason: "toolUse" },
+		toolTurn(fauxToolCall("new_context", { handoff: "Public fresh context" })),
+		toolTurn(
+			fauxToolCall("history", { op: "search", query: "LEGACY_OWNER_INPUT" }),
+			fauxToolCall("history", { op: "read", id: "legacy-window" }),
 		),
 		fauxAssistantMessage("Recovered saved data."),
 	]);
 	await h.session.prompt("Reset using public compaction, then recover the legacy record.");
-	const results = h.sessionManager
-		.getBranch()
-		.filter((entry) => entry.type === "message")
-		.map((entry) => entry.message)
-		.filter((message) => message.role === "toolResult")
-		.filter((message) => message.toolName === "history");
+	const results = toolResults(h.sessionManager, "history");
 	assert.equal(results.length, 2);
 	assert.ok(results.every((result) => !result.isError));
 	assert.match(textOf(results[0]), /LEGACY_OWNER_INPUT/);
@@ -1923,35 +1708,22 @@ await test("all-session history scopes project sessions and their nested subagen
 	const ownRead = fauxToolCall("history", { op: "read", id: requireValue(ownId) });
 	const ownChildRead = fauxToolCall("history", { op: "read", id: requireValue(ownChildId) });
 	faux.setResponses([
-		fauxAssistantMessage([search, foreignRead, foreignChildRead, ownRead, ownChildRead], {
-			stopReason: "toolUse",
-		}),
+		toolTurn(search, foreignRead, foreignChildRead, ownRead, ownChildRead),
 		fauxAssistantMessage("done"),
 	]);
 	await session.prompt("Check archived history.");
-	const result = (call: NativeAi.ToolCall) =>
-		sessionManager
-			.getBranch()
-			.filter((entry) => entry.type === "message")
-			.map((entry) => entry.message)
-			.filter((message) => message.role === "toolResult")
-			.find((message) => message.toolCallId === call.id);
+	const result = (call: ToolCall) => lastToolResult(sessionManager, { toolCallId: call.id });
 	assert.match(textOf(result(search)), /\[user\] SCOPE_NEEDLE own/);
 	assert.match(textOf(result(search)), /\[user\] SCOPE_NEEDLE own child/);
 	assert.doesNotMatch(textOf(result(search)), /\[user\] SCOPE_NEEDLE foreign/);
-	assert.equal(result(foreignRead)?.isError, true);
-	assert.equal(result(foreignChildRead)?.isError, true);
+	assert.equal(result(foreignRead).isError, true);
+	assert.equal(result(foreignChildRead).isError, true);
 	assert.match(textOf(result(ownRead)), /\[user\] SCOPE_NEEDLE own/);
 	assert.match(textOf(result(ownChildRead)), /\[user\] SCOPE_NEEDLE own child/);
 });
 
 await test("history recovers every image across pages and fresh contexts", async (t) => {
-	const image: NativeAi.ImageContent = {
-		type: "image",
-		mimeType: "image/png",
-		data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0ioAAAAASUVORK5CYII=",
-	};
-	const images = Array.from({ length: 13 }, () => ({ ...image }));
+	const images = Array.from({ length: 13 }, () => ({ ...FIXTURE_PNG }));
 	let id: string | undefined;
 	const { session, faux, sessionManager } = await fixture(t, {
 		contextWindow: 32_000,
@@ -1969,32 +1741,14 @@ await test("history recovers every image across pages and fresh contexts", async
 	const recovered = [];
 	for (let page = 0; page < images.length; page++) {
 		faux.setResponses([
-			fauxAssistantMessage(
+			toolTurn(
 				fauxToolCall("history", { op: "read", id: requireValue(id), offset, imageOffset }),
-				{
-					stopReason: "toolUse",
-				},
 			),
-			fauxAssistantMessage(
-				fauxToolCall("new_context", { handoff: "Continue recovering screenshots." }),
-				{ stopReason: "toolUse" },
-			),
+			toolTurn(fauxToolCall("new_context", { handoff: "Continue recovering screenshots." })),
 			fauxAssistantMessage("Page recovered."),
 		]);
-		// Each page needs the prior receipt offsets and its committed context reset.
 		await session.prompt("Recover the next page, then start a fresh context.");
-		const entry = messageEntry(
-			sessionManager
-				.getBranch()
-				.findLast(
-					(candidate) =>
-						candidate.type === "message" &&
-						candidate.message.role === "toolResult" &&
-						candidate.message.toolName === "history",
-				),
-		);
-		const result = entry.message;
-		assert.ok(result.role === "toolResult");
+		const result = lastToolResult(sessionManager, "history");
 		assert.equal(result.isError, false, textOf(result));
 		const returned = result.content.filter((part) => part.type === "image");
 		assert.ok(
@@ -2062,33 +1816,19 @@ for (const { callEdit, callNamespace } of [
 						};
 					},
 				});
-				pi.registerTool({
-					name: "dump",
-					label: "Dump",
-					description: "Large local result",
-					parameters: { type: "object", properties: {} },
-					async execute() {
-						return {
-							content: [{ type: "text", text: "x".repeat(600_000) }],
-							details: {},
-						};
-					},
-				});
+				registerDump(pi);
 			},
 		});
 		let nextRequest: string | undefined;
 		faux.setResponses([
-			fauxAssistantMessage(
-				[
-					{
-						...fauxToolCall("ask_question", {}),
-						...(callNamespace !== undefined && callNamespace !== ""
-							? { namespace: callNamespace }
-							: {}),
-					},
-					fauxToolCall("dump", {}),
-				],
-				{ stopReason: "toolUse" },
+			toolTurn(
+				{
+					...fauxToolCall("ask_question", {}),
+					...(callNamespace !== undefined && callNamespace !== ""
+						? { namespace: callNamespace }
+						: {}),
+				},
+				fauxToolCall("dump", {}),
 			),
 			(ctx) => {
 				nextRequest = JSON.stringify(ctx.messages);
@@ -2169,30 +1909,15 @@ for (const outcome of ["answer", "cancelled", "error"]) {
 						};
 					},
 				});
-				pi.registerTool({
-					name: "dump",
-					label: "Dump",
-					description: "Large local result",
-					parameters: { type: "object", properties: {} },
-					async execute() {
-						return {
-							content: [{ type: "text", text: "x".repeat(600_000) }],
-							details: {},
-						};
-					},
-				});
+				registerDump(pi);
 			},
 		});
 		let nextRequest: string | undefined, chainedRequest: string | undefined;
 		h.faux.setResponses([
-			fauxAssistantMessage([fauxToolCall("ask_question", {}), fauxToolCall("dump", {})], {
-				stopReason: "toolUse",
-			}),
+			toolTurn(fauxToolCall("ask_question", {}), fauxToolCall("dump", {})),
 			(ctx) => {
 				nextRequest = JSON.stringify(ctx.messages);
-				return fauxAssistantMessage([fauxToolCall("dump", {})], {
-					stopReason: "toolUse",
-				});
+				return toolTurn(fauxToolCall("dump", {}));
 			},
 			(ctx) => {
 				chainedRequest = JSON.stringify(ctx.messages);
@@ -2200,10 +1925,7 @@ for (const outcome of ["answer", "cancelled", "error"]) {
 			},
 		]);
 		await h.session.prompt("Ask the owner, then retain the result.");
-		const boundary = h.sessionManager
-			.getBranch()
-			.filter((entry) => entry.type === "compaction")
-			.filter((entry) => isRecord(entry.details) && entry.details.posthorse === 1);
+		const boundary = posthorseBoundaries(h.sessionManager);
 		assert.equal(boundary.length, 2);
 		for (const text of [requireValue(boundary[0]).summary, requireValue(nextRequest)]) {
 			if (outcome === "error") {
@@ -2236,101 +1958,14 @@ for (const outcome of ["answer", "cancelled", "error"]) {
 	});
 }
 
-await test("automatic rollover respects context edits in its recovery handoff", async (t) => {
-	const { session, faux, sessionManager } = await fixture(t, {
-		contextWindow: 128_000,
-		seed(manager) {
-			const omitted = manager.appendMessage({
-				role: "user",
-				content: "PRIVATE_EDIT_MARKER",
-				timestamp: Date.now(),
-			});
-			manager.appendContextEdit(omitted, null);
-			const revised = manager.appendMessage({
-				role: "user",
-				content: "OBSOLETE_EDIT_MARKER",
-				timestamp: Date.now(),
-			});
-			manager.appendContextEdit(revised, { content: "APPROVED_EDIT_MARKER" });
-		},
-		extension(pi) {
-			pi.registerTool({
-				name: "dump",
-				label: "dump",
-				description: "Large local result",
-				parameters: { type: "object", properties: {} },
-				async execute() {
-					return {
-						content: [
-							{ type: "text", text: `PRIVATE_TOOL_MARKER ${"x".repeat(600_000)}` },
-						],
-						details: {},
-					};
-				},
-			});
-			pi.on("turn_end", (event, ctx) => {
-				if (!event.toolResults.some((result) => result.toolName === "dump")) {
-					return;
-				}
-				const result = ctx.sessionManager
-					.getBranch()
-					.findLast(
-						(entry) =>
-							entry.type === "message" &&
-							entry.message.role === "toolResult" &&
-							entry.message.toolName === "dump",
-					);
-				assert.ok(ctx.sessionManager instanceof SessionManager);
-				ctx.sessionManager.appendContextEdit(requireValue(result).id, {
-					content: [
-						{ type: "text", text: `APPROVED_TOOL_MARKER ${"x".repeat(600_000)}` },
-					],
-				});
-			});
-		},
-	});
-	const requests: string[] = [];
-	faux.setResponses([
-		(ctx) => {
-			requests.push(JSON.stringify(ctx.messages));
-			return fauxAssistantMessage(fauxToolCall("dump", {}), { stopReason: "toolUse" });
-		},
-		(ctx) => {
-			requests.push(JSON.stringify(ctx.messages));
-			return fauxAssistantMessage("done");
-		},
-	]);
-	await session.prompt("Run the local dump tool.");
-	const windows = sessionManager
-		.getBranch()
-		.filter((entry) => entry.type === "compaction")
-		.filter((entry) => isRecord(entry.details) && entry.details.posthorse === 1);
-	assert.equal(windows.length, 1);
-	assert.equal(requests.length, 2);
-	for (const text of [...requests, requireValue(windows[0]).summary]) {
-		assert.equal(/PRIVATE_EDIT_MARKER|OBSOLETE_EDIT_MARKER/.test(text), false);
-		assert.equal(text.includes("APPROVED_EDIT_MARKER"), true);
-	}
-	for (const text of [requireValue(requests[1]), requireValue(windows[0]).summary]) {
-		assert.equal(text.includes("PRIVATE_TOOL_MARKER"), false);
-		assert.equal(text.includes("APPROVED_TOOL_MARKER"), true);
-	}
-});
-
 const RECOVERY_RECORD = "Automatic context rollover recovery record.";
 /**
  * A session whose model gets provider summary blocks from the host, or undefined on a host that
  * makes none. The host makes blocks for Anthropic Messages models only, so the session's model
  * claims that API and the faux provider answers its requests.
  */
-async function providerSummaryHost(t: TestContext, extension: NativeSdk.ExtensionFactory) {
-	if (!("supportsProviderSummary" in NativeAi)) {
-		assert.notEqual(
-			process.env.PI_COMPAT_HOST,
-			"fork",
-			"The maintained fork must make provider summary blocks.",
-		);
-		t.skip("This host makes no provider summary blocks.");
+async function providerSummaryHost(t: TestContext, extension: ExtensionFactory) {
+	if (!requireForkCapability(t, "supportsProviderSummary" in PiAi, "provider summary blocks")) {
 		return;
 	}
 	const h = await fixture(t, { extension });
@@ -2357,8 +1992,8 @@ async function providerSummaryHost(t: TestContext, extension: NativeSdk.Extensio
 		block,
 		instructions,
 		/** The block answers the host's summary request and "done" the window after the rollover. */
-		respond(work: () => NativeAi.ToolCall, steps: number): void {
-			const step: NativeAi.FauxResponseStep = (ctx, options) => {
+		respond(work: (ctx: TranscriptContext) => ToolCall, steps: number): void {
+			const step: FauxResponseStep = (ctx, options) => {
 				const request = record(options ?? {}).providerSummary;
 				if (request !== undefined) {
 					instructions.push(stringValue(record(request).instructions));
@@ -2374,7 +2009,7 @@ async function providerSummaryHost(t: TestContext, extension: NativeSdk.Extensio
 				}
 				return ctx.messages.some(isRecordMessage)
 					? fauxAssistantMessage("done")
-					: fauxAssistantMessage(work(), { stopReason: "toolUse" });
+					: toolTurn(work(ctx));
 			};
 			h.faux.setResponses(Array.from({ length: steps }, () => step));
 		},
@@ -2531,37 +2166,20 @@ await test("a provider summary block keeps the leading guidance unchanged after 
 	h.session.setActiveToolsByName(["notes", "pad"]);
 	let turns = 0;
 	let firstGuidance: string | null | undefined;
-	h.faux.setResponses(
-		Array.from({ length: 18 }, (): NativeAi.FauxResponseStep => (ctx, options) => {
-			const request = record(options ?? {}).providerSummary;
-			if (request !== undefined) {
-				return Object.assign(fauxAssistantMessage([]), {
-					rawStopReason: "compaction",
-					providerSummary: {
-						provider: h.faux.getModel().provider,
-						api: h.faux.getModel().api,
-						model: h.faux.getModel().id,
-						block: h.block,
-					},
-				});
-			}
-			const head = requireValue(ctx.messages[0]);
-			assert.equal(head.role, "system");
-			firstGuidance ??= head.sections?.posthorse;
-			if (turns === 0) {
-				h.session.setActiveToolsByName([
-					"notes",
-					"pad",
-					"new_context",
-					"get_context_remaining",
-				]);
-			}
-			turns++;
-			return ctx.messages.some((message) => textOf(message).includes(RECOVERY_RECORD))
-				? fauxAssistantMessage("done")
-				: fauxAssistantMessage(fauxToolCall("pad", {}), { stopReason: "toolUse" });
-		}),
-	);
+	h.respond((ctx) => {
+		const head = requireValue(ctx.messages[0]);
+		assert.equal(head.role, "system");
+		firstGuidance ??= head.sections?.posthorse;
+		if (turns++ === 0) {
+			h.session.setActiveToolsByName([
+				"notes",
+				"pad",
+				"new_context",
+				"get_context_remaining",
+			]);
+		}
+		return fauxToolCall("pad", {});
+	}, 18);
 	await h.session.prompt("p".repeat(240_000));
 	const held = h.heldAfterRollover();
 	const postRolloverHead = requireValue(held[0]);
@@ -2575,11 +2193,6 @@ await test("a provider summary block keeps the leading guidance unchanged after 
 });
 
 await test("edited image recovery points to the replacement rather than the raw original", async (t) => {
-	const image: NativeAi.ImageContent = {
-		type: "image",
-		mimeType: "image/png",
-		data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0ioAAAAASUVORK5CYII=",
-	};
 	let editId: string | undefined;
 	const h = await fixture(t, {
 		seed(manager) {
@@ -2588,22 +2201,9 @@ await test("edited image recovery points to the replacement rather than the raw 
 				content: "PRIVATE_IMAGE_ORIGINAL",
 				timestamp: Date.now(),
 			});
-			editId = manager.appendContextEdit(original, { content: [image] });
+			editId = manager.appendContextEdit(original, { content: [FIXTURE_PNG] });
 		},
-		extension(pi) {
-			pi.registerTool({
-				name: "dump",
-				label: "Dump",
-				description: "Trigger local rollover",
-				parameters: { type: "object", properties: {} },
-				async execute() {
-					return {
-						content: [{ type: "text", text: "x".repeat(600_000) }],
-						details: {},
-					};
-				},
-			});
-		},
+		extension: registerDump,
 	});
 	assert.doesNotMatch(
 		JSON.stringify(h.sessionManager.buildSessionProjection().messages),
@@ -2611,31 +2211,19 @@ await test("edited image recovery points to the replacement rather than the raw 
 	);
 	let pointer: string | undefined;
 	h.faux.setResponses([
-		fauxAssistantMessage(fauxToolCall("dump", {}), { stopReason: "toolUse" }),
+		toolTurn(fauxToolCall("dump", {})),
 		() => {
 			const handoff = requireValue(
 				h.sessionManager.getBranch().findLast((entry) => entry.type === "compaction"),
 			).summary;
 			pointer = handoff.match(/recover with history read id ([^\s]+)/)?.[1];
 			assert.ok(pointer !== undefined && pointer !== "", handoff);
-			return fauxAssistantMessage(fauxToolCall("history", { op: "read", id: pointer }), {
-				stopReason: "toolUse",
-			});
+			return toolTurn(fauxToolCall("history", { op: "read", id: pointer }));
 		},
 		fauxAssistantMessage("done"),
 	]);
 	await h.session.prompt("Recover the edited image.");
-	const result = messageEntry(
-		h.sessionManager
-			.getBranch()
-			.findLast(
-				(entry) =>
-					entry.type === "message" &&
-					entry.message.role === "toolResult" &&
-					entry.message.toolName === "history",
-			),
-	).message;
-	assert.ok(result.role === "toolResult");
+	const result = lastToolResult(h.sessionManager, "history");
 	assert.equal(result.isError, false);
 	assert.equal(result.content.filter((part) => part.type === "image").length, 1);
 	assert.doesNotMatch(textOf(result), /PRIVATE_IMAGE_ORIGINAL/);
@@ -2645,7 +2233,7 @@ await test("edited image recovery points to the replacement rather than the raw 
 for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 	await test(`public Posthorse guidance survives tool additions and rollover (${mode})`, async (t) => {
 		const h = await fixture(t, {
-			customPrompt: mode === "custom" ? "CUSTOM_PROMPT_POLICY" : undefined,
+			systemPrompt: mode === "custom" ? "CUSTOM_PROMPT_POLICY" : undefined,
 			extension(pi) {
 				pi.registerTool({
 					name: "extra",
@@ -2670,13 +2258,10 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 			}));
 		}
 		const captures: TranscriptMessages[] = [];
-		const capture = (ctx: NativeAi.TranscriptContext, requestReset = false) => {
+		const capture = (ctx: TranscriptContext, requestReset = false) => {
 			captures.push(structuredClone(ctx.messages));
 			return requestReset
-				? fauxAssistantMessage(
-						fauxToolCall("new_context", { handoff: "Checkpoint ready" }),
-						{ stopReason: "toolUse" },
-					)
+				? toolTurn(fauxToolCall("new_context", { handoff: "Checkpoint ready" }))
 				: fauxAssistantMessage("done");
 		};
 		h.session.setActiveToolsByName(["new_context"]);
@@ -2688,13 +2273,7 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 		h.faux.setResponses([(ctx) => capture(ctx, true), (ctx) => capture(ctx)]);
 		await h.session.prompt("Continue in a fresh window");
 		assert.equal(h.faux.getPendingResponseCount(), 0);
-		assert.equal(
-			h.sessionManager
-				.getBranch()
-				.filter((entry) => entry.type === "compaction")
-				.filter((entry) => isRecord(entry.details) && entry.details.posthorse === 1).length,
-			1,
-		);
+		assert.equal(posthorseBoundaries(h.sessionManager).length, 1);
 		for (const messages of captures) {
 			const prompt = getCurrentSystemPrompt(messages);
 			const guidance = mode.startsWith("forced-")
@@ -2737,9 +2316,7 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 					),
 			);
 		}
-		const reopened = SessionManager.open(
-			requireValue(h.sessionManager.getSessionFile()),
-		).buildSessionContext().messages;
+		const reopened = reopenedMessages(h.sessionManager);
 		assert.deepEqual(
 			getCurrentTools(reopened)
 				.map((tool) => tool.name)
@@ -2758,18 +2335,18 @@ for (const mode of ["structured", "custom", "forced-before", "forced-after"]) {
 
 for (const mode of ["unforced", "forced", "forced-user-to-custom"]) {
 	await test(`idle custom wakeup gets current request-local guidance (${mode})`, async (t) => {
-		let api: NativeSdk.ExtensionAPI | undefined;
-		let projected: NativeSdk.ContextWithSystemEvent["messages"] | undefined;
+		let api: ExtensionAPI | undefined;
+		let projected: ContextWithSystemEvent["messages"] | undefined;
 		let forcePrompt = mode === "forced-user-to-custom";
 		const starts: {
-			readonly messageType: NativeSdk.BeforeAgentStartEvent["messageType"];
+			readonly messageType: BeforeAgentStartEvent["messageType"];
 			readonly message: unknown;
 			readonly hasPrompt: boolean;
 			readonly idle: boolean;
-			readonly options: NativeSdk.BeforeAgentStartEvent["systemPromptOptions"];
+			readonly options: BeforeAgentStartEvent["systemPromptOptions"];
 		}[] = [];
 		const h = await fixture(t, {
-			customPrompt: "CUSTOM_RUN_POLICY",
+			systemPrompt: "CUSTOM_RUN_POLICY",
 			extension(pi) {
 				api = pi;
 				pi.on("before_agent_start", (event, ctx) => {
@@ -2905,28 +2482,12 @@ await test("window guidance stays byte-identical across restarts and updates unt
 	const sessionFile = requireValue(initial.sessionManager.getSessionFile());
 	const legacyBody =
 		"## Automatic context management (Posthorse)\nSaved guidance from an earlier release in this window.";
-	const rewritten = readFileSync(sessionFile, "utf8")
-		.split("\n")
-		.map((line) => {
-			if (line === "") {
-				return "";
-			}
-			const parsed = record(JSON.parse(line));
-			if (parsed.type === "custom" && parsed.customType === "posthorse-window-guidance") {
-				return JSON.stringify({
-					...parsed,
-					data: { ...record(parsed.data), text: legacyBody },
-				});
-			}
-			return line;
-		})
-		.join("\n");
-	writeFileSync(sessionFile, rewritten);
-
-	const resumed = await fixture(t, {
-		cwd: initial.cwd,
-		manager: () => SessionManager.open(sessionFile),
-	});
+	rewriteSessionJsonl(dirname(initial.cwd), sessionFile, (entry) =>
+		entry.type === "custom" && entry.customType === "posthorse-window-guidance"
+			? { ...entry, data: { ...record(entry.data), text: legacyBody } }
+			: entry,
+	);
+	const resumed = await resumeFixture(t, initial);
 	const capturedResumed: TranscriptMessages[] = [];
 	resumed.faux.setResponses([
 		(ctx) => {
@@ -2949,10 +2510,7 @@ await test("window guidance stays byte-identical across restarts and updates unt
 	resumed.faux.setResponses([
 		(ctx) => {
 			capturedResumed.push(structuredClone(ctx.messages));
-			return fauxAssistantMessage(
-				fauxToolCall("new_context", { handoff: "Start fresh window." }),
-				{ stopReason: "toolUse" },
-			);
+			return toolTurn(fauxToolCall("new_context", { handoff: "Start fresh window." }));
 		},
 		(ctx) => {
 			capturedResumed.push(structuredClone(ctx.messages));
@@ -2991,16 +2549,11 @@ await test("guidance omits undeclared context tools and stays locked when tools 
 				"new_context",
 				"get_context_remaining",
 			]);
-			return fauxAssistantMessage(fauxToolCall("notes", { op: "list" }), {
-				stopReason: "toolUse",
-			});
+			return toolTurn(fauxToolCall("notes", { op: "list" }));
 		},
 		(ctx) => {
 			requests.push(structuredClone(ctx.messages));
-			return fauxAssistantMessage(
-				fauxToolCall("new_context", { handoff: "Tools are now active." }),
-				{ stopReason: "toolUse" },
-			);
+			return toolTurn(fauxToolCall("new_context", { handoff: "Tools are now active." }));
 		},
 		(ctx) => {
 			requests.push(structuredClone(ctx.messages));
@@ -3075,20 +2628,11 @@ await test("namespaced tools count toward the fresh handoff budget", async (t) =
 	h.session.setActiveToolsByName(["new_context", catalog.name]);
 	const handoff = "h".repeat(20_000);
 	h.faux.setResponses([
-		fauxAssistantMessage(fauxToolCall("new_context", { handoff }), { stopReason: "toolUse" }),
+		toolTurn(fauxToolCall("new_context", { handoff })),
 		fauxAssistantMessage("Done."),
 	]);
 	await h.session.prompt("Save the handoff.");
-	const branch = h.sessionManager.getBranch();
-	const result = messageEntry(
-		branch.findLast(
-			(entry) =>
-				entry.type === "message" &&
-				entry.message.role === "toolResult" &&
-				entry.message.toolName === "new_context",
-		),
-	).message;
-	assert.ok(result.role === "toolResult");
+	const result = lastToolResult(h.sessionManager, "new_context");
 	assert.equal(
 		result.isError,
 		true,
@@ -3096,9 +2640,7 @@ await test("namespaced tools count toward the fresh handoff budget", async (t) =
 	);
 	assert.match(textOf(result), /Handoff is too large for the active model/);
 	assert.equal(
-		branch
-			.filter((entry) => entry.type === "compaction")
-			.filter((entry) => isRecord(entry.details) && entry.details.posthorse === 1).length,
+		posthorseBoundaries(h.sessionManager).length,
 		0,
 		"a denied handoff must not commit any Posthorse boundary",
 	);
@@ -3158,7 +2700,7 @@ for (const { enabled, reads } of [
 										})
 									: fauxToolCall("notes", { op: "read", path: "long.md" }),
 							);
-				return fauxAssistantMessage(calls, { stopReason: "toolUse" });
+				return toolTurn(...calls);
 			},
 			(ctx) => {
 				after = h.session.getContextUsage()?.tokens;
@@ -3181,18 +2723,9 @@ for (const { enabled, reads } of [
 			"siblings past the shared budget get minimum pages, not refusals",
 		);
 		for (const result of results) {
-			const journal = messageEntry(
-				h.sessionManager
-					.getBranch()
-					.findLast(
-						(entry) =>
-							entry.type === "message" &&
-							entry.message.role === "toolResult" &&
-							entry.message.toolCallId === result.toolCallId,
-					),
-			);
-			assert.ok(journal.message.role === "toolResult");
-			const details = journal.message.details;
+			const details = lastToolResult(h.sessionManager, {
+				toolCallId: result.toolCallId,
+			}).details;
 			if (
 				isRecord(details) &&
 				(details.kind === "history-read" || details.kind === "note-read")
@@ -3213,20 +2746,14 @@ for (const { enabled, reads } of [
 				"partial pages retain continuation offsets",
 			);
 		}
-		assert.equal(
-			h.sessionManager
-				.getBranch()
-				.filter((entry) => entry.type === "compaction")
-				.filter((entry) => isRecord(entry.details) && entry.details.posthorse === 1).length,
-			1,
-		);
+		assert.equal(posthorseBoundaries(h.sessionManager).length, 1);
 		t.diagnostic(JSON.stringify({ before, after, enabled, reads }));
 	});
 }
 
 const settlementCases: readonly {
 	readonly continuation: "none" | "steer" | "followUp" | "boundary";
-	readonly stopReason: NativeAi.AssistantMessage["stopReason"];
+	readonly stopReason: AssistantMessage["stopReason"];
 }[] = [
 	{ continuation: "none", stopReason: "stop" },
 	{ continuation: "none", stopReason: "length" },
@@ -3284,14 +2811,7 @@ for (const { continuation, stopReason } of settlementCases) {
 			},
 		]);
 		await h.session.prompt("p".repeat(305_000));
-		const reminders = () =>
-			h.sessionManager
-				.getBranch()
-				.filter(
-					(entry) =>
-						entry.type === "custom_message" &&
-						entry.customType === "posthorse-reminder",
-				);
+		const reminders = () => reminderEntries(h.sessionManager);
 		if (continuation !== "none") {
 			assert.equal(reminders().length, 1);
 			assert.match(JSON.stringify(requests.slice(1)), /Routine task-note update\./);
@@ -3331,9 +2851,7 @@ for (const { continuation, stopReason } of settlementCases) {
 			"the final answer is inside the reminder band",
 		);
 		h.faux.setResponses([
-			fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
-				stopReason: "toolUse",
-			}),
+			toolTurn(fauxToolCall("get_context_remaining", {})),
 			(ctx) => {
 				requests.push(ctx.messages);
 				return fauxAssistantMessage("Working turn completed.");
@@ -3343,9 +2861,7 @@ for (const { continuation, stopReason } of settlementCases) {
 		assert.equal(reminders().length, 1, "a skipped final answer does not consume the reminder");
 		assert.match(JSON.stringify(requests.at(-1)), /Routine task-note update\./);
 		h.faux.setResponses([
-			fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
-				stopReason: "toolUse",
-			}),
+			toolTurn(fauxToolCall("get_context_remaining", {})),
 			fauxAssistantMessage("Another working turn completed."),
 		]);
 		await h.session.prompt("Continue working again.");
@@ -3356,19 +2872,11 @@ for (const { continuation, stopReason } of settlementCases) {
 await test("public enabled-to-disabled policy removes the active reminder but keeps its journal entry", async (t) => {
 	const h = await fixture(t);
 	h.faux.setResponses([
-		fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
-			stopReason: "toolUse",
-		}),
+		toolTurn(fauxToolCall("get_context_remaining", {})),
 		fauxAssistantMessage("Checkpoint reminder received"),
 	]);
 	await h.session.prompt("p".repeat(305_000));
-	const reminders = () =>
-		h.sessionManager
-			.getBranch()
-			.filter(
-				(entry) =>
-					entry.type === "custom_message" && entry.customType === "posthorse-reminder",
-			);
+	const reminders = () => reminderEntries(h.sessionManager);
 	assert.equal(reminders().length, 1);
 	const original = structuredClone(reminders()[0]);
 	h.settingsManager.applyOverrides({ compaction: { enabled: false } });
@@ -3412,9 +2920,7 @@ await test("public checkpoint reminder reaches the model after Pi compacts insid
 	});
 	let input: string | undefined;
 	h.faux.setResponses([
-		fauxAssistantMessage([fauxToolCall("get_context_remaining", {})], {
-			stopReason: "toolUse",
-		}),
+		toolTurn(fauxToolCall("get_context_remaining", {})),
 		(ctx) => {
 			input = JSON.stringify(ctx.messages);
 			return fauxAssistantMessage("Checkpoint reminder received");
@@ -3454,28 +2960,18 @@ for (const nativeCompact of [false, true]) {
 			},
 		});
 		h.faux.setResponses([
-			fauxAssistantMessage(
-				[
-					fauxToolCall("history", { op: "search", query: "in_context_needle" }),
-					fauxToolCall("history", {
-						op: "search",
-						query: "in_context_needle",
-						all: true,
-					}),
-				],
-				{ stopReason: "toolUse" },
+			toolTurn(
+				fauxToolCall("history", { op: "search", query: "in_context_needle" }),
+				fauxToolCall("history", {
+					op: "search",
+					query: "in_context_needle",
+					all: true,
+				}),
 			),
 			fauxAssistantMessage("done"),
 		]);
 		await h.session.prompt("Look back.");
-		const results = h.sessionManager
-			.getBranch()
-			.filter((entry) => entry.type === "message")
-			.filter(
-				(entry) =>
-					entry.message.role === "toolResult" && entry.message.toolName === "history",
-			)
-			.map((entry) => textOf(entry.message));
+		const results = toolResults(h.sessionManager, "history").map(textOf);
 		assert.equal(results.length, 2);
 		for (const text of results) {
 			assert.match(text, /\[user\] IN_CONTEXT_NEEDLE before rollover/);
@@ -3521,7 +3017,7 @@ for (const all of [false, true]) {
 		const returned: string[] = [];
 		let complete = false;
 		const call = (cursor?: string) =>
-			fauxAssistantMessage(
+			toolTurn(
 				fauxToolCall("history", {
 					op: "search",
 					query: "CURSOR-NEEDLE",
@@ -3529,27 +3025,19 @@ for (const all of [false, true]) {
 					all,
 					...(cursor !== undefined && cursor !== "" ? { cursor } : {}),
 				}),
-				{ stopReason: "toolUse" },
 			);
 		h.faux.setResponses([
 			call(),
-			...Array.from({ length: 30 }, (): NativeAi.FauxResponseFactory => (ctx) => {
+			...Array.from({ length: 30 }, (): FauxResponseFactory => (ctx) => {
 				const result = ctx.messages.at(-1);
 				assert.ok(result?.role === "toolResult");
 				assert.equal(result.toolName, "history");
 				assert.ok(!result.isError, textOf(result));
 				const text = textOf(result);
 				// Excerpts can contain previous result headers. Native display spans delimit actual hits.
-				const journal = [...h.sessionManager.getBranch()]
-					.reverse()
-					.find(
-						(entry) =>
-							entry.type === "message" &&
-							entry.message.role === "toolResult" &&
-							entry.message.toolCallId === result.toolCallId,
-					);
-				const message = messageEntry(journal).message;
-				assert.ok(message.role === "toolResult");
+				const message = lastToolResult(h.sessionManager, {
+					toolCallId: result.toolCallId,
+				});
 				const details = fixtureResult(message).details;
 				assert.ok(details?.kind === "history-search");
 				let start = 0;
