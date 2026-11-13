@@ -17,9 +17,8 @@ import {
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { createPosthorse } from "../index.ts";
-import { fixturePolicy, loadFixture, requireValue } from "./harness.ts";
-import { fixtureDisplay, fixtureResult } from "./results.ts";
-import { Check } from "typebox/value";
+import { executeFixtureTool, fixturePolicy, loadFixture, requireValue } from "./harness.ts";
+import { fixtureDisplay } from "./results.ts";
 
 initTheme("dark");
 
@@ -41,11 +40,13 @@ async function setup() {
 			sourceInfo,
 		}));
 	return {
+		extension: loaded.extension,
 		tools,
 		messages: loaded.extension.messageRenderers,
-		handlers: loaded.extension.handlers,
 	};
 }
+
+const renderers = await setup();
 
 class RenderOnlyTUI extends TuiMainScreen {
 	constructor() {
@@ -56,8 +57,8 @@ class RenderOnlyTUI extends TuiMainScreen {
 	}
 }
 
-async function card(name: string, args: unknown = {}) {
-	const definition = requireValue((await setup()).tools.get(name));
+function card(name: string, args: unknown = {}) {
+	const definition = requireValue(renderers.tools.get(name));
 	return new ToolExecutionComponent(
 		name,
 		"tool-1",
@@ -134,25 +135,7 @@ async function execute(
 	},
 ) {
 	const loaded = await setup();
-	const definition = requireValue(loaded.tools.get(name));
-	assert.ok(
-		Check(definition.parameters, args),
-		"Executed renderer fixtures must satisfy the registered tool schema",
-	);
-	for (const handler of loaded.handlers.get("tool_execution_start") ?? []) {
-		await Reflect.apply(handler, undefined, [
-			{ type: "tool_execution_start", toolCallId: "tool-1", toolName: name, args },
-			ctx,
-		]);
-	}
-	const value: unknown = await Reflect.apply(definition.execute.bind(definition), undefined, [
-		"tool-1",
-		args,
-		undefined,
-		undefined,
-		ctx,
-	]);
-	return fixtureResult(value);
+	return executeFixtureTool(loaded.extension, name, args, ctx, { id: "tool-1" });
 }
 
 await test("all four native cards identify pending calls and tolerate malformed streamed arguments", async () => {
@@ -165,7 +148,7 @@ await test("all four native cards identify pending calls and tolerate malformed 
 				["new_context", { handoff: "next station" }, /New context/],
 			] as const
 		).map(async ([name, args, expected]) => {
-			const definition = requireValue((await setup()).tools.get(name));
+			const definition = requireValue(renderers.tools.get(name));
 			assert.equal(
 				typeof definition.renderCall,
 				"function",
@@ -177,7 +160,7 @@ await test("all four native cards identify pending calls and tolerate malformed 
 				`${name} needs its native result renderer`,
 			);
 			assert.notEqual(definition.renderShell, "self", "Pi owns the card shell and expansion");
-			const component = await card(name, args);
+			const component = card(name, args);
 			component.markExecutionStarted();
 			assert.match(text(component), expected);
 			assert.match(text(component), /running/i);
@@ -196,7 +179,7 @@ await test("all four native cards identify pending calls and tolerate malformed 
 
 await test("native cards cap actual wrapped rows and expose complete legacy text by click or global expansion", async () => {
 	const body = `START ${"界 👩🏽‍💻 é ".repeat(900)} END`;
-	const component = await card("notes", { op: "read", path: `${"長".repeat(100)}.md` });
+	const component = card("notes", { op: "read", path: `${"長".repeat(100)}.md` });
 	component.updateResult(result(body));
 	for (const width of [24, 40, 80, 196]) {
 		const collapsed = text(component, width);
@@ -213,7 +196,7 @@ await test("native cards cap actual wrapped rows and expose complete legacy text
 });
 
 await test("collapsed previews show exactly the first rows of the expanded text", async () => {
-	const renderer = (await setup()).messages.get("posthorse-reminder");
+	const renderer = renderers.messages.get("posthorse-reminder");
 	const bodies = [
 		`START ${"👩🏽‍💻".repeat(800)} END`,
 		"👨‍👩‍👧‍👦 ".repeat(500),
@@ -224,7 +207,7 @@ await test("collapsed previews show exactly the first rows of the expanded text"
 		"a\tb ".repeat(1500),
 		"one\ntwo\nthree",
 	];
-	const note = await card("notes", { op: "read", path: "a.md" });
+	const note = card("notes", { op: "read", path: "a.md" });
 	for (const body of bodies) {
 		note.updateResult(result(body));
 		const reminder = new CustomMessageComponent(
@@ -268,7 +251,7 @@ await test("notes show page range and next offset even when the preview fills th
 		const args = { op: "read", path: "ledger.md" };
 		const output = await execute("notes", args, ctx);
 		const snapshot = structuredClone(output);
-		const component = await card("notes", args);
+		const component = card("notes", args);
 		component.updateResult({ ...output, isError: false });
 		const compact = text(component, 40);
 		const end = 40_000 - `File: ${join(cwd, ".pi", "notes", "ledger.md")}\n`.length;
@@ -295,17 +278,17 @@ await test("notes show page range and next offset even when the preview fills th
 });
 
 await test("empty notes, no matches, actual errors, and submitted content stay distinct", async () => {
-	const empty = await card("notes", { op: "read", path: "empty.md" });
+	const empty = card("notes", { op: "read", path: "empty.md" });
 	empty.updateResult(result(""));
 	assert.match(text(empty), /Empty note/);
-	const error = await card("notes", { op: "read", path: "missing.md" });
+	const error = card("notes", { op: "read", path: "missing.md" });
 	error.updateResult(result("No note at missing.md. Use list.", undefined, true));
 	assert.match(text(error), /error/i);
 	assert.match(text(error), /No note at missing\.md/);
-	const noMatches = await card("history", { op: "search", query: "nothing" });
+	const noMatches = card("history", { op: "search", query: "nothing" });
 	noMatches.updateResult(result('No history matches "nothing".'));
 	assert.match(text(noMatches), /No history matches/);
-	const write = await card("notes", {
+	const write = card("notes", {
 		op: "write",
 		path: "draft.md",
 		content: "SUBMITTED TEXT",
@@ -320,7 +303,7 @@ await test("empty history has one compact summary and keeps the returned text on
 	try {
 		const args = { op: "search", query: "absent", all: true };
 		const output = await execute("history", args, context(cwd));
-		const component = await card("history", args);
+		const component = card("history", args);
 		component.updateResult({ ...output, isError: false });
 		assert.match(text(component), /No matches · all sessions/);
 		assert.doesNotMatch(text(component), /No history matches/);
@@ -344,7 +327,7 @@ await test("history searches lead with content and retain every entry and recove
 	}));
 	const args = { op: "search", query: "Relay station", limit: 30 };
 	const output = await execute("history", args, context(tmpdir(), branch));
-	const component = await card("history", args);
+	const component = card("history", args);
 	component.updateResult({ ...output, isError: false });
 	assert.match(text(component, 40), /30 matches/);
 	assert.match(text(component, 40), /Relay station 29/);
@@ -390,7 +373,7 @@ await test("paginated searches retain accurate counts, spans, identifiers and co
 		display.entries.reduce((sum, span) => sum + span.length + 1, -1),
 		raw.length - display.footerLength,
 	);
-	const component = await card("history", args);
+	const component = card("history", args);
 	component.updateResult({ ...output, isError: false });
 	assert.match(text(component), new RegExp(`${display.entries.length} matches`));
 	assert.match(text(component), /More results; continue with cursor/);
@@ -430,7 +413,7 @@ await test("paginated searches retain accurate counts, spans, identifiers and co
 		assert.equal(details.kind, "notes-search");
 
 		assert.ok(details.page && details.page.end < details.page.total);
-		const notes = await card("notes", { op: "search", query: "needle" });
+		const notes = card("notes", { op: "search", query: "needle" });
 		notes.updateResult({ ...searchResult, isError: false });
 		assert.match(text(notes), new RegExp(`${details.count} matches returned`));
 		assert.match(text(notes), /Next offset/);
@@ -452,7 +435,7 @@ await test("paginated searches retain accurate counts, spans, identifiers and co
 		const partial = await execute("notes", { op: "search", query: "needle" }, ctx);
 		const found = fixtureDisplay(partial.details);
 		assert.ok(found.kind === "notes-search" && found.more === true && found.page);
-		const partialCard = await card("notes", { op: "search", query: "needle" });
+		const partialCard = card("notes", { op: "search", query: "needle" });
 		partialCard.updateResult({ ...partial, isError: false });
 		assert.match(
 			text(partialCard),
@@ -480,7 +463,7 @@ await test("context summaries preserve approximation and native disabled, unsupp
 				getCompactionSettings: () => ({ enabled, reserveTokens: 16_384 }),
 			});
 			const output = await execute("get_context_remaining", {}, ctx);
-			const component = await card("get_context_remaining");
+			const component = card("get_context_remaining");
 			component.updateResult({ ...output, isError: false });
 			assert.match(text(component, 80), expected);
 			assert.doesNotMatch(text(component, 80), /0%|hard limit/);
@@ -501,7 +484,7 @@ await test("new_context remains a conditional request and only its committed mes
 		output.content.map((part) => (part.type === "text" ? part.text : "")).join("\n"),
 		/Requested.*foreground tools succeed.*Background work continues/s,
 	);
-	const component = await card("new_context", args);
+	const component = card("new_context", args);
 	component.updateResult({ ...output, isError: false });
 	assert.match(text(component), /Requested.*foreground tools succeed/s);
 	assert.match(text(component), /Background work continues/);
@@ -516,7 +499,7 @@ await test("new_context remains a conditional request and only its committed mes
 		details: { windowId: "window-2", tokensBefore: 1000 },
 		content: `Context window window-2 starts here. Earlier conversation is not available in this window.\n\nHandoff from the previous window:\n${handoff}`,
 	};
-	const renderer = (await setup()).messages.get("context-window");
+	const renderer = renderers.messages.get("context-window");
 	assert.equal(typeof renderer, "function");
 	const committed = new CustomMessageComponent(message, renderer, undefined, 0);
 	assert.match(text(committed), /history/);
@@ -542,17 +525,15 @@ await test("new_context remains a conditional request and only its committed mes
 });
 
 await test("native rendering preserves theme changes and leaves drag selection to Pi", async () => {
-	const component = await card("notes", { op: "read", path: "theme.md" });
+	const component = card("notes", { op: "read", path: "theme.md" });
 	component.updateResult(result("A readable note"));
 	const before = component.render(80).join("\n");
 	try {
 		initTheme("light");
 		component.invalidate();
 		const after = component.render(80).join("\n");
-		const withoutShellBackground = (value: string) => {
-			// Color comparison strips only the intentional ANSI background sequences.
-			return value.replace(/\x1b\[(?:48;[0-9;]+|49)m/g, "");
-		};
+		const withoutShellBackground = (value: string) =>
+			value.replace(/\x1b\[(?:48;[0-9;]+|49)m/g, "");
 		const noteRow = (value: string) =>
 			requireValue(value.split("\n").find((line) => line.includes("A readable note")));
 		assert.notEqual(
@@ -584,7 +565,7 @@ await test("native rendering preserves theme changes and leaves drag selection t
 
 await test("partial and error results cannot inherit a success summary or terminal controls", async () => {
 	const controls = "\x1b[2J\x1b]52;c;c2VjcmV0\x07\x1b_hidden\x1b\\\x00\r";
-	const component = await card("notes", {
+	const component = card("notes", {
 		op: "write",
 		path: `draft${controls}.md`,
 		content: `saved${controls}`,
@@ -624,7 +605,7 @@ await test("history pages keep paging, metadata, and native image attachments wi
 	];
 	const args = { op: "read", id: "picture-entry" };
 	const output = await execute("history", args, context(tmpdir(), branch));
-	const component = await card("history", args);
+	const component = card("history", args);
 	component.updateResult({ ...output, isError: false });
 	component.setShowImages(false);
 	assert.match(text(component, 40), /Next offset 40,000/);
@@ -690,7 +671,7 @@ await test("legacy history and malformed display spans fall back to the complete
 				usage: { tokens: "not-number", contextWindow: 100, percent: null },
 			},
 		].map(async (details) => {
-			const component = await card("history", { op: "search", query: "Relay station" });
+			const component = card("history", { op: "search", query: "Relay station" });
 			component.updateResult(result(raw, details));
 			assert.match(text(component, 40), /Relay station/);
 			assert.ok(lines(component, 40).length <= 10);
@@ -701,7 +682,7 @@ await test("legacy history and malformed display spans fall back to the complete
 			}
 		}),
 	);
-	const blankBlocks = await card("history", { op: "read", id: "spaced" });
+	const blankBlocks = card("history", { op: "read", id: "spaced" });
 	blankBlocks.updateResult({
 		content: [
 			{ type: "text", text: "FIRST" },
@@ -719,7 +700,7 @@ await test("legacy history and malformed display spans fall back to the complete
 
 await test("owned reminders are compact, expandable, and sanitize terminal control content", async () => {
 	const customType = "posthorse-reminder";
-	const renderer = (await setup()).messages.get(customType);
+	const renderer = renderers.messages.get(customType);
 	assert.equal(typeof renderer, "function");
 	const message = {
 		role: "custom" as const,

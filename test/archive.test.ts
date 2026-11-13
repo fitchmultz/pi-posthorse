@@ -3,12 +3,10 @@ import { closeSync, mkdtempSync, openSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { Check } from "typebox/value";
 import { registerHistory } from "../src/history.ts";
 import { PageReservations } from "../src/paging.ts";
 import { retainFile } from "./fixture-files.ts";
-import { loadFixture, requireValue } from "./harness.ts";
-import { fixtureResult } from "./results.ts";
+import { executeFixtureTool, loadFixture, requireValue } from "./harness.ts";
 
 async function historyAt(dir: string) {
 	const { extension } = await loadFixture((pi) => {
@@ -22,7 +20,6 @@ async function historyAt(dir: string) {
 			new PageReservations(() => 0),
 		);
 	});
-	const { definition } = requireValue(extension.tools.get("history"));
 	const context = {
 		cwd: dir,
 		sessionManager: {
@@ -35,19 +32,11 @@ async function historyAt(dir: string) {
 	return async (
 		params: Readonly<Record<string, unknown>>,
 		signal = new AbortController().signal,
-	) => {
-		assert.ok(Check(definition.parameters, params));
-		const value: unknown = await Reflect.apply(definition.execute.bind(definition), undefined, [
-			"archive-test",
-			params,
+	) =>
+		executeFixtureTool(extension, "history", params, context, {
+			id: "archive-test",
 			signal,
-			() => {
-				// The registered history executor does not stream updates.
-			},
-			context,
-		]);
-		return fixtureResult(value);
-	};
+		});
 }
 function text(result: {
 	readonly content: readonly { readonly type: string; readonly text?: string }[];
