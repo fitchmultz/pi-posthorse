@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.31 - 2026-11-14
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- Raise the Pi floor to 1.5.2 (#222) ([5ba6200](https://github.com/fitchmultz/pi-posthorse/commit/5ba62001358af02daaeb9f6a04d927f80ca7fdaf))
+
+### What's Changed
+
+- Raise the Pi floor to 1.5.2 by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/222
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.30...v0.10.31
+
 ## 0.10.30 - 2026-11-14
 
 <!-- npm-release:unreleased:start -->
