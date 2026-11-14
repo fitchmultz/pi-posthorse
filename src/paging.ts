@@ -1,5 +1,5 @@
+import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import { pageCapacity } from "./budget.ts";
-import { textOf } from "./message-text.ts";
 import {
 	ESTIMATED_IMAGE_CHARS,
 	MAX_PAGE_CHARS,
@@ -85,12 +85,10 @@ export class PageReservations {
 	private settle(ctx: PolicyContext): void {
 		this.accounting = reconcile(this.accounting, ctx.getContextUsage()?.tokens);
 	}
-	private reserve(text: string, imageCount = 0): void {
+	private reserve(content: TextResult["content"] | string): void {
 		this.accounting = withTokens(
 			this.accounting,
-			this.accounting.tokens +
-				Math.ceil(text.length / 4) +
-				imageCount * (ESTIMATED_IMAGE_CHARS / 4),
+			this.accounting.tokens + estimateTokens({ role: "user", content, timestamp: 0 }),
 		);
 	}
 	deliver(
@@ -99,7 +97,7 @@ export class PageReservations {
 		build: (chars: number) => TextResult,
 	): TextResult {
 		const result = build(this.size(ctx, request));
-		this.reserve(textOf(result), result.content.filter((part) => part.type === "image").length);
+		this.reserve(result.content);
 		return result;
 	}
 	error(ctx: PolicyContext, message: string): never {

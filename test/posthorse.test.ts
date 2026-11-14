@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFile, execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
@@ -22,6 +22,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, mock } from "node:test";
+import { promisify } from "node:util";
 import { createEditTool, SessionManager } from "@earendil-works/pi-coding-agent";
 import {
 	executeFixtureTool,
@@ -284,7 +285,7 @@ function pageContext(
 
 /** The file-qualified id search prints; 0.6 printed the whole digest (`legacy`), which still reads. */
 function archivedId(id: string, source: string, legacy = false): string {
-	const digest = createHash("sha256").update(source).digest("base64url");
+	const digest = hash("sha256", source, "base64url");
 	return `${id}@${legacy ? digest : digest.slice(0, 10)}`;
 }
 
@@ -4596,19 +4597,10 @@ await test("appends from concurrent Pi processes never merge records", async () 
 				await tools.get("notes").execute("id", { op: "append", path: "shared.md", content: letter.repeat(300) }, undefined, undefined, context);
 			}
 		`;
+		const execFileAsync = promisify(execFile);
 		await Promise.all(
-			["A", "B"].map(
-				(letter) =>
-					new Promise<void>((resolve, reject) => {
-						execFile(
-							process.execPath,
-							["--input-type=module", "-e", script, dir, letter],
-							(error, _stdout, stderr) =>
-								error
-									? reject(new Error(stderr !== "" ? stderr : error.message))
-									: resolve(),
-						);
-					}),
+			["A", "B"].map((letter) =>
+				execFileAsync(process.execPath, ["--input-type=module", "-e", script, dir, letter]),
 			),
 		);
 		const lines = readFileSync(join(dir, ".pi", "notes", "shared.md"), "utf8").split("\n");

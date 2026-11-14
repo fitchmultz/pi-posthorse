@@ -20,7 +20,8 @@ import {
 } from "./session-files.ts";
 
 export const historyParameters = Type.Object({
-	op: Type.Union([Type.Literal("search"), Type.Literal("read")], {
+	op: Type.Enum(["search", "read"], {
+		type: "string",
 		description: "Operation to perform",
 	}),
 	query: Type.Optional(Type.String({ description: "Case-insensitive text to find (search)" })),
@@ -276,7 +277,7 @@ async function archivedMatches(
 		);
 		skipped += recent.skipped;
 		for (const group of recent.groups) {
-			for (const hit of [...group].reverse()) {
+			for (const hit of group.toReversed()) {
 				accumulator.add(hit);
 			}
 		}

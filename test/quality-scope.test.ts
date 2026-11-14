@@ -103,7 +103,7 @@ await test("quality-machinery paths require the controls", async (t) => {
 					project.root,
 				);
 				assert.equal(plan.controlsRequired, true);
-				assert.match(plan.reason, new RegExp(path.replaceAll(".", "\\.")));
+				assert.match(plan.reason, new RegExp(RegExp.escape(path)));
 			} finally {
 				project.dispose();
 			}

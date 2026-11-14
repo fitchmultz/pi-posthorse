@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import {
 	copyFile,
 	lstat,
 	mkdir,
 	mkdtemp,
-	open,
 	readFile,
 	rename,
 	rm,
@@ -14,6 +13,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { errorCode } from "./contracts.ts";
 import { publishFile } from "./files.ts";
@@ -49,21 +49,10 @@ export function sameIdentity(left: NoteIdentity, right: NoteIdentity): boolean {
 	);
 }
 export async function fileDigest(path: string, signal?: AbortSignal): Promise<string> {
-	const file = await open(path, "r");
-	try {
-		const hash = createHash("sha256");
-		for await (const chunk of file.createReadStream({ autoClose: false })) {
-			signal?.throwIfAborted();
-			const bytes: unknown = chunk;
-			if (!(bytes instanceof Uint8Array)) {
-				throw new TypeError("Expected binary file data.");
-			}
-			hash.update(bytes);
-		}
-		return hash.digest("hex");
-	} finally {
-		await file.close();
-	}
+	signal?.throwIfAborted();
+	const hasher = createHash("sha256");
+	await pipeline(createReadStream(path, { signal }), hasher);
+	return hasher.digest("hex");
 }
 export async function readManifest(directory: string): Promise<ForkBinding | undefined> {
 	try {

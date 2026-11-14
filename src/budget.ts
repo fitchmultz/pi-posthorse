@@ -1,6 +1,5 @@
 import { estimateTokens, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-	ESTIMATED_IMAGE_CHARS,
 	MAX_HANDOFF_CHARS,
 	MAX_PAGE_CHARS,
 	PAGE_MARGIN_TOKENS,
@@ -178,12 +177,17 @@ export function freshPayloadChars(
 	const line = budget.state === "enabled" ? budget.rolloverAt : budget.contextWindow;
 	const reservedGuidance =
 		guidance === "rebuild" ? guidanceTokenCount(buildGuidance(ctx)) : guidanceTokens(ctx);
-	const promptTokens = Math.ceil(ctx.getSystemPrompt().length / 4) + reservedGuidance;
+	const promptTokens =
+		estimateTokens({ role: "system", content: ctx.getSystemPrompt(), timestamp: 0 }) +
+		reservedGuidance;
 	const pendingTokens = pendingMessages.reduce(
 		(total, message) =>
 			total +
-			Math.ceil(textOf(message).length / 4) +
-			imagesOf(message.content).length * (ESTIMATED_IMAGE_CHARS / 4),
+			estimateTokens({
+				role: "user",
+				content: [{ type: "text", text: textOf(message) }, ...imagesOf(message.content)],
+				timestamp: 0,
+			}),
 		0,
 	);
 	return Math.min(

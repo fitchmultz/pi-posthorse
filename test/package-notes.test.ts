@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import { syncBuiltinESMExports } from "node:module";
 import fs, {
 	existsSync,
@@ -20,13 +20,7 @@ import { test } from "node:test";
 import { notesDir } from "../src/files.ts";
 
 function projectStore(project: string, identity = "github.com/acme/tool"): string {
-	return join(
-		project,
-		".pi",
-		"package-notes",
-		createHash("sha256").update(identity).digest("hex"),
-		"notes",
-	);
+	return join(project, ".pi", "package-notes", hash("sha256", identity, "hex"), "notes");
 }
 function git(cwd: string, ...args: readonly string[]): void {
 	execFileSync("git", args, { cwd, stdio: "ignore" });

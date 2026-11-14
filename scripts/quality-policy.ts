@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { posix, relative, resolve } from "node:path";
 import { sourcePolicies } from "./quality-source.ts";
 import { inspectSuppressions } from "./quality-directives.ts";
-import { settingsProblems } from "./quality-settings.ts";
+import { settingsProblems, testProfileFiles } from "./quality-settings.ts";
 
 /** Only Git internals and npm dependencies are outside this handwritten repository inventory. */
 function inventory(root: string, dir = ""): string[] {
@@ -16,15 +16,10 @@ function inventory(root: string, dir = ""): string[] {
 	});
 }
 
-function isTest(file: string): boolean {
-	return (
-		/^test\/[^/]+\.ts$/u.test(file) ||
-		/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file) ||
-		/(?:^|\/)__tests__\//u.test(file)
-	);
-}
-
 export function checkPolicy(root: string): readonly string[] {
+	const testGlobs = testProfileFiles(root);
+	const isTest = (file: string): boolean =>
+		testGlobs.some((pattern) => posix.matchesGlob(file, pattern));
 	const files = inventory(root).toSorted();
 	const maintained = files.filter((file) => /\.[cm]?[jt]sx?$/u.test(file));
 	const problems = [...settingsProblems(root, files)];

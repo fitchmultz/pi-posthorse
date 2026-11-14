@@ -2,6 +2,7 @@ import {
 	AUTO_HANDOFF_PREFIX,
 	POSTHORSE_COMPACTION,
 	isRecord,
+	presentText,
 	type EntryLike,
 	type ProjectedEntry,
 } from "./contracts.ts";
@@ -87,15 +88,16 @@ export function contextStart(entries: readonly EntryLike[]): {
 	start: number;
 	boundary?: EntryLike;
 } {
-	for (let i = entries.length - 1; i >= 0; i--) {
-		const entry = entries[i];
-		if (entry?.type === "context_window") {
-			return { start: i + 1, boundary: entry };
-		}
-		if (entry?.type === "compaction") {
-			const kept = entries.findIndex((candidate) => candidate.id === entry.firstKeptEntryId);
-			return { start: kept >= 0 ? kept : i + 1, boundary: entry };
-		}
+	const index = entries.findLastIndex((entry) => classifyBoundary(entry) !== undefined);
+	const boundary = entries[index];
+	if (boundary === undefined) {
+		return { start: 0 };
 	}
-	return { start: 0 };
+	const firstKeptId =
+		boundary.type === "compaction" ? presentText(boundary.firstKeptEntryId) : undefined;
+	const kept =
+		firstKeptId === undefined
+			? -1
+			: entries.findIndex((candidate) => candidate.id === firstKeptId);
+	return { start: kept >= 0 ? kept : index + 1, boundary };
 }

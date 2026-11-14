@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import {
 	NOTE_RECEIPT,
 	isRecord,
@@ -72,21 +73,35 @@ function normalizeRelPath(raw: string): string {
 	return invalid ? "" : cleaned;
 }
 
+const CONFIG_DIR_PATTERN = RegExp.escape(CONFIG_DIR_NAME);
+const PACKAGE_NOTES_PATTERN = new RegExp(
+	`\\/${CONFIG_DIR_PATTERN}\\/package-notes\\/[0-9a-f]{64}\\/notes\\/(.+)$`,
+	"u",
+);
+const GLOBAL_NOTES_PATTERN = new RegExp(
+	`\\/${CONFIG_DIR_PATTERN}\\/(?:agent\\/)?notes\\/[^/]+\\/[^/]+\\/[^/]+\\/(.+)$`,
+	"u",
+);
+const RELATIVE_NOTES_PREFIX = new RegExp(`^(?:\\.\\/)?${CONFIG_DIR_PATTERN}\\/notes\\/`, "u");
+
 function matchMarkerPath(slash: string): string | undefined {
-	for (const marker of ["/.pi/notes/", "/posthorse-notes/"]) {
+	for (const marker of [`/${CONFIG_DIR_NAME}/notes/`, "/posthorse-notes/"]) {
 		const idx = slash.lastIndexOf(marker);
 		if (idx >= 0) {
 			return slash.slice(idx + marker.length);
 		}
 	}
-	if (slash.startsWith(".pi/notes/") || slash.startsWith("./.pi/notes/")) {
-		return slash.replace(/^(?:\.\/)?\.pi\/notes\//u, "");
+	if (
+		slash.startsWith(`${CONFIG_DIR_NAME}/notes/`) ||
+		slash.startsWith(`./${CONFIG_DIR_NAME}/notes/`)
+	) {
+		return slash.replace(RELATIVE_NOTES_PREFIX, "");
 	}
-	const pkgMatch = /\/\.pi\/package-notes\/[0-9a-f]{64}\/notes\/(.+)$/u.exec(slash);
+	const pkgMatch = PACKAGE_NOTES_PATTERN.exec(slash);
 	if (pkgMatch !== null) {
 		return pkgMatch[1];
 	}
-	return /\/\.pi\/(?:agent\/)?notes\/[^/]+\/[^/]+\/[^/]+\/(.+)$/u.exec(slash)?.[1];
+	return GLOBAL_NOTES_PATTERN.exec(slash)?.[1];
 }
 
 function absoluteSlashPath(slash: string): boolean {
@@ -95,7 +110,7 @@ function absoluteSlashPath(slash: string): boolean {
 
 /** Receipt lines are a storage format: parse exactly what the notes tool emits. */
 function receiptPattern(prefix: string): RegExp {
-	return new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}([^\\r\\n]+)$`, "mu");
+	return new RegExp(`^${RegExp.escape(prefix)}([^\\r\\n]+)$`, "mu");
 }
 const receiptPatterns: readonly (readonly [RegExp, ContentTouchKind])[] = [
 	[receiptPattern(NOTE_RECEIPT.wrote), "full-write"],
@@ -412,7 +427,7 @@ export function collectTouches(
 	readonly defaultDir?: string | undefined;
 } {
 	const results = collectResultMap(entries);
-	const knownDirs = new Set([...directories, ...learnNotesDirs(entries, results)]);
+	const knownDirs = new Set(directories).union(learnNotesDirs(entries, results));
 	const handledResultIds = new Set<string>();
 	const touches: NoteTouch[] = [];
 	for (const item of entries) {

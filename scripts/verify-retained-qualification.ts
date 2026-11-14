@@ -9,20 +9,15 @@ assert.ok(
 );
 const candidate = readObject(candidatePath);
 const qualification = readObject(qualificationPath);
-function equal(actual: unknown, expected: unknown, message: string): void {
-	if (actual !== expected) {
-		throw new Error(message);
-	}
-}
 assert.ok(objectValue(candidate.hosts) && objectValue(candidate.hosts[flavor]));
 assert.ok(objectValue(qualification.package) && objectValue(qualification.host));
 
-equal(qualification.result, "passed", "Host qualification did not pass");
-equal(qualification.source, candidate.source, "Host qualification used a different source");
-equal(qualification.sourceDirty, false, "Host qualification used a dirty source");
-equal(qualification.flavor, flavor, "Host qualification used a different flavor");
+assert.equal(qualification.result, "passed", "Host qualification did not pass");
+assert.equal(qualification.source, candidate.source, "Host qualification used a different source");
+assert.equal(qualification.sourceDirty, false, "Host qualification used a dirty source");
+assert.equal(qualification.flavor, flavor, "Host qualification used a different flavor");
 for (const key of ["name", "version", "sha256"]) {
-	equal(qualification.package[key], candidate[key], `Qualified package differs: ${key}`);
+	assert.equal(qualification.package[key], candidate[key], `Qualified package differs: ${key}`);
 }
 for (const key of [
 	"version",
@@ -31,6 +26,10 @@ for (const key of [
 	"runtimeLockSha256",
 	"runtimeGraphSha256",
 ]) {
-	equal(qualification.host[key], candidate.hosts[flavor][key], `Qualified host differs: ${key}`);
+	assert.equal(
+		qualification.host[key],
+		candidate.hosts[flavor][key],
+		`Qualified host differs: ${key}`,
+	);
 }
 console.log(`${flavor} qualification matches the retained candidate`);
