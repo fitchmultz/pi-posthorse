@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.30 - 2026-11-14
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- refactor: use native language, Node, TypeBox, and Pi SDK primitives (#220) ([16b7f33](https://github.com/fitchmultz/pi-posthorse/commit/16b7f33d4169855d28b5f82951aaea8abfbc6b38))
+
+### What's Changed
+
+- refactor: use native language, Node, TypeBox, and Pi SDK primitives by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/220
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.29...v0.10.30
+
 ## 0.10.29 - 2026-11-13
 
 <!-- npm-release:unreleased:start -->
