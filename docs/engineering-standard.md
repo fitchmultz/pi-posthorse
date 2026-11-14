@@ -1011,8 +1011,8 @@ Review and revisit trigger:
 
 Repository: `fitchmultz/pi-posthorse`. Adopted version: 5.2. Adoption starts from
 `8d8a1ffcf5b2bb7199ac9849bc9cd585f51b41bc`. Node 24 and the npm version declared in `package.json` own acceptance.
-The extension retains its Node ^24.22.3 || >=26.13.1 and Pi >=1.5.0 support floors. The locked
-Pi 1.5.0 cohort exercises that floor; separate CI lanes qualify the latest stable
+The extension retains its Node ^24.22.3 || >=26.13.1 and Pi >=1.5.2 support floors. The locked
+Pi 1.5.2 cohort exercises that floor; separate CI lanes qualify the latest stable
 official release and latest maintained fork commit with their actual SDK graphs.
 
 The qualified published tools are Oxlint 1.91.0, oxlint-tsgolint 7.0.2005,

@@ -27,7 +27,7 @@ These are Posthorse policy choices, not provider limits or a guarantee that ever
 
 ## Reserve and retention have different jobs
 
-Official Pi 1.5.0 and the maintained fork default to automatic compaction enabled,
+Official Pi 1.5.2 and the maintained fork default to automatic compaction enabled,
 `reserveTokens: 16384`, and `keepRecentTokens: 20000`.
 
 - `reserveTokens` determines the rollover threshold and therefore moves the reminder band.
@@ -70,8 +70,8 @@ no token countdown.
 
 ## Sources and executable coverage
 
-- Pi 1.5.0 [default settings](https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/src/core/settings-defaults.ts)
-  and [compaction settings](https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/docs/compaction.md#settings).
+- Pi 1.5.2 [default settings](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/src/core/settings-defaults.ts)
+  and [compaction settings](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/docs/compaction.md#settings).
 - Posthorse's [effective-policy adapter](../index.ts), [budget](../src/budget.ts), and
   [reminder delivery](../src/rollover.ts).
 - The budget-policy cases in [the unit suite](../test/posthorse.test.ts) check the first eligible
