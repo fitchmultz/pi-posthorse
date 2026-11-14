@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
@@ -22,23 +23,15 @@ const FIRST_SEARCH_BYTES = 256 * 1024 * 1024;
 const ARGUMENT_CHARS = 256 * 1024;
 /** Pi writes these keys first, so most lines yield window metadata without JSON.parse. */
 const ENTRY_HEAD = /^\{"type":"([^"\\]*)","id":"([^"\\]*)","parentId":(null|"[^"\\]*")[,}]/u;
+const execFileAsync = promisify(execFile);
 
-function execFileText(
+async function execFileText(
 	file: string,
 	args: readonly string[],
 	cwd: string,
 	signal?: AbortSignal,
 ): Promise<string> {
-	return new Promise((resolveOutput, reject) => {
-		execFile(file, args, { cwd, signal, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
-			if (error !== null) {
-				const failure: Error = error;
-				reject(failure);
-			} else {
-				resolveOutput(stdout);
-			}
-		});
-	});
+	return (await execFileAsync(file, args, { cwd, signal, maxBuffer: 64 * 1024 * 1024 })).stdout;
 }
 /** Label text normalization adds, and raw JSONL that every entry showing it contains. */
 const LABEL_SOURCES: readonly (readonly [label: string, needles: readonly string[]])[] = [

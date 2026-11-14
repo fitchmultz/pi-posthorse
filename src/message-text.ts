@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import { sep } from "node:path";
 import {
 	isRecord,
@@ -114,7 +114,7 @@ export function isRecoveryCall(part: unknown): boolean {
 }
 /** Ten base64url characters of SHA-256; legacy whole-digest keys start with these. */
 export function shortKey(text: string): string {
-	return createHash("sha256").update(text).digest("base64url").slice(0, 10);
+	return hash("sha256", text, "base64url").slice(0, 10);
 }
 /** Nested session files are subagent runs, whose input came from a parent agent. */
 export function sourceTag(source: string): string {

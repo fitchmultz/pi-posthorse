@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
+import { posix } from "node:path";
 import { parseArgs } from "node:util";
 
 const help = `Usage:
@@ -34,31 +35,28 @@ const git = (root: string, ...args: readonly string[]) =>
 		maxBuffer: 64 * 1024 * 1024,
 	});
 
+const matchesAny =
+	(patterns: readonly string[]) =>
+	(path: string): boolean =>
+		patterns.some((pattern) => posix.matchesGlob(path, pattern));
+
 // Exact paths the disposable negative controls do not prove; a path missing here keeps the controls required.
 const fastPaths: ReadonlyArray<readonly [string, (path: string) => boolean]> = [
-	[
-		"product source and tests",
-		(path) =>
-			path.startsWith("src/") ||
-			path.startsWith("test/") ||
-			path === "index.ts" ||
-			path === "ui.ts",
-	],
+	["product source and tests", matchesAny(["src/**", "test/**", "index.ts", "ui.ts"])],
 	[
 		"documentation and policy",
-		(path) =>
-			path.startsWith("docs/") ||
-			path.startsWith("ARTIFACTS/") ||
-			path.startsWith(".github/readme/") ||
-			[
-				"README.md",
-				"CHANGELOG.md",
-				"AGENTS.md",
-				"LICENSE",
-				"renovate.json",
-				"diagram.svg",
-				"diagram.png",
-			].includes(path),
+		matchesAny([
+			"docs/**",
+			"ARTIFACTS/**",
+			".github/readme/**",
+			"README.md",
+			"CHANGELOG.md",
+			"AGENTS.md",
+			"LICENSE",
+			"renovate.json",
+			"diagram.svg",
+			"diagram.png",
+		]),
 	],
 ];
 

@@ -1,7 +1,7 @@
 import { sdkEntry } from "./pi-loader.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { hash } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
@@ -1590,7 +1590,7 @@ await test("native loaded history reads only the selected content and preserves 
 	const branch = await h.call(persisted, { op: "search", query: "ABANDONED_NEEDLE" });
 	assert.match(textOf(branch), /No history matches/);
 	const source = relative(persisted.getSessionDir(), requireValue(persisted.getSessionFile()));
-	const qualified = `${abandoned}@${createHash("sha256").update(source).digest("base64url").slice(0, 10)}`;
+	const qualified = `${abandoned}@${hash("sha256", source, "base64url").slice(0, 10)}`;
 	let unselectedArguments = 0;
 	const stringify = JSON.stringify;
 	const serialization = t.mock.method(
@@ -1680,7 +1680,7 @@ await test("all-session history scopes project sessions and their nested subagen
 				const file = requireValue(other.getSessionFile());
 				const source = relative(manager.getSessionDir(), file);
 				return {
-					id: `${id}@${createHash("sha256").update(source).digest("base64url")}`,
+					id: `${id}@${hash("sha256", source, "base64url")}`,
 					file,
 				};
 			};

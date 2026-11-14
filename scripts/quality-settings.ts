@@ -65,7 +65,10 @@ function mappedLint(baseline: Configuration): Configuration {
 		throw new Error("Appendix A needs plugins and the test profile");
 	}
 	const plugins: readonly unknown[] = baseline.plugins;
-	const testFiles: readonly unknown[] = tests.files;
+	const testFiles = tests.files.filter((entry): entry is string => typeof entry === "string");
+	if (testFiles.length !== tests.files.length) {
+		throw new Error("Appendix A test profile files must be glob strings");
+	}
 	return {
 		...baseline,
 		plugins: [...plugins, "node"],
@@ -77,6 +80,18 @@ function mappedLint(baseline: Configuration): Configuration {
 			...otherProfiles,
 		],
 	};
+}
+
+export function testProfileFiles(root: string): readonly string[] {
+	const standard = readFileSync(resolve(root, "docs/engineering-standard.md"), "utf8");
+	const baseline = standardBlock(standard, "## Appendix A: Base Oxlint configuration");
+	const mapped = mappedLint(baseline);
+	const overrides: readonly unknown[] = Array.isArray(mapped.overrides) ? mapped.overrides : [];
+	const [first] = overrides;
+	if (!objectValue(first) || !Array.isArray(first.files)) {
+		throw new Error("Mapped lint configuration needs the test profile globs");
+	}
+	return first.files.filter((entry): entry is string => typeof entry === "string");
 }
 
 function differences(file: string, actual: Configuration, expected: Configuration): string[] {

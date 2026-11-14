@@ -13,8 +13,6 @@ export type SessionHost = {
 export type ToolInfo = {
 	readonly name: string;
 	readonly namespace?: unknown;
-	readonly description?: unknown;
-	readonly parameters?: unknown;
 };
 export type ToolRegistry = {
 	readonly getActiveTools: () => readonly string[];
@@ -54,8 +52,6 @@ export type ToolFacts = {
 	/** Registered names an active tool can carry without a namespace. */
 	readonly unnamespaced: ReadonlySet<string>;
 	readonly activeUnnamespaced: ReadonlySet<string>;
-	/** The one registry read both sets were derived from. */
-	readonly tools: readonly ToolInfo[];
 };
 /** Active tools share names with namespaced registrations, so capabilities read the intersected set. */
 export function toolFacts(pi: ToolRegistry): ToolFacts {
@@ -67,8 +63,7 @@ export function toolFacts(pi: ToolRegistry): ToolFacts {
 	return {
 		active,
 		unnamespaced,
-		activeUnnamespaced: new Set([...active].filter((name) => unnamespaced.has(name))),
-		tools,
+		activeUnnamespaced: active.intersection(unnamespaced),
 	};
 }
 export function ownerQuestionRegistered(pi: ToolRegistry): boolean {

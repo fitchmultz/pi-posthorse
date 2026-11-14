@@ -289,16 +289,10 @@ function withoutEmptyScope(params: NotesParams): NotesParams {
 	return presentText(scope) === undefined ? unscoped : params;
 }
 const notesParameters = Type.Object({
-	op: Type.Union(
-		[
-			Type.Literal("list"),
-			Type.Literal("read"),
-			Type.Literal("write"),
-			Type.Literal("append"),
-			Type.Literal("search"),
-		],
-		{ description: "Operation to perform" },
-	),
+	op: Type.Enum(["list", "read", "write", "append", "search"], {
+		type: "string",
+		description: "Operation to perform",
+	}),
 	path: Type.Optional(
 		Type.String({
 			description:

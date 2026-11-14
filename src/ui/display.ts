@@ -21,17 +21,11 @@ export const displaySchema = Type.Union([
 	Type.Object({
 		kind: Type.Literal("context"),
 		usage: Type.Optional(usageSchema),
-		rollover: Type.Optional(
-			Type.Union([
-				Type.Literal("enabled"),
-				Type.Literal("disabled"),
-				Type.Literal("unsupported"),
-			]),
-		),
+		rollover: Type.Optional(Type.Enum(["enabled", "disabled", "unsupported"])),
 		rolloverAt: Type.Optional(Type.Number()),
 	}),
 	Type.Object({
-		kind: Type.Union([Type.Literal("notes-list"), Type.Literal("notes-search")]),
+		kind: Type.Enum(["notes-list", "notes-search"]),
 		count: Type.Number(),
 		headerLength: Type.Optional(Type.Number()),
 		page: Type.Optional(pageRangeSchema),
@@ -43,11 +37,7 @@ export const displaySchema = Type.Union([
 		headerLength: Type.Optional(Type.Number()),
 	}),
 	Type.Object({
-		kind: Type.Union([
-			Type.Literal("note-write"),
-			Type.Literal("note-append"),
-			Type.Literal("new-context"),
-		]),
+		kind: Type.Enum(["note-write", "note-append", "new-context"]),
 	}),
 	Type.Object({
 		kind: Type.Literal("history-search"),

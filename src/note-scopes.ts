@@ -50,13 +50,7 @@ const touchSchema = Type.Object({
 		Type.Object({
 			...addressSchema.properties,
 			seed: Type.Optional(seedSchema),
-			kind: Type.Union([
-				Type.Literal("read"),
-				Type.Literal("write"),
-				Type.Literal("clear"),
-				Type.Literal("delete"),
-				Type.Literal("adopt"),
-			]),
+			kind: Type.Enum(["read", "write", "clear", "delete", "adopt"]),
 		}),
 	),
 });

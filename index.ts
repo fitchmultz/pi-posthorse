@@ -6,6 +6,7 @@
  */
 import {
 	SettingsManager,
+	estimateTokens,
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
@@ -14,8 +15,6 @@ import { policySnapshot } from "./src/budget.ts";
 import type { CompactionPolicy, PolicyReader } from "./src/contracts.ts";
 import { createWindowGuidance } from "./src/guidance.ts";
 import { registerHistory } from "./src/history.ts";
-import { toolFacts } from "./src/host.ts";
-import { safeJsonStringify } from "./src/message-text.ts";
 import { registerNotes } from "./src/notes.ts";
 import { createNotesStore } from "./src/note-store.ts";
 import { registerNoteGuards } from "./src/note-guards.ts";
@@ -23,21 +22,14 @@ import { PageReservations } from "./src/paging.ts";
 import { registerRollover } from "./src/rollover.ts";
 
 function activeToolTokens(pi: ExtensionAPI): number {
-	const { active, tools } = toolFacts(pi);
-	return tools
+	const active = new Set(pi.getActiveTools());
+	const toolsAdded = pi
+		.getAllTools()
 		.filter((tool) => active.has(tool.name))
-		.reduce(
-			(total, tool) =>
-				total +
-				Math.ceil(
-					safeJsonStringify({
-						name: tool.name,
-						description: tool.description,
-						parameters: tool.parameters,
-					}).length / 4,
-				),
-			0,
-		);
+		.map(({ name, description, parameters }) => ({ name, description, parameters }));
+	return toolsAdded.length === 0
+		? 0
+		: estimateTokens({ role: "system", content: "", toolsAdded, timestamp: 0 });
 }
 /** Use Pi's live effective settings by default; SDK hosts can inject a policy reader. */
 export function createPosthorse(getPolicy?: PolicyReader): (pi: ExtensionAPI) => void {

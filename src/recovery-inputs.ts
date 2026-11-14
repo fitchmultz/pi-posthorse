@@ -81,7 +81,7 @@ function anchors(records: readonly RecoveryRecord[]): {
 	others: RecoveryRecord[];
 } {
 	const firstOwner = records.find((record) => record.label === "owner input") ?? records[0];
-	const latestOwner = [...records].reverse().find((record) => record.kind === "owner");
+	const latestOwner = records.findLast((record) => record.kind === "owner");
 	const latestOverall = records.at(-1);
 	const selected = new Set([firstOwner, latestOwner, latestOverall]);
 	return {

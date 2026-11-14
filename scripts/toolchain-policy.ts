@@ -1,16 +1,8 @@
-import { readFileSync } from "node:fs";
 import { findPackageJSON } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { isRecord } from "../src/contracts.ts";
+import { readObject } from "./quality-settings.ts";
 
-function manifest(file: string): Readonly<Record<string, unknown>> {
-	const value: unknown = JSON.parse(readFileSync(file, "utf8"));
-	if (!isRecord(value)) {
-		throw new Error(`${file}: expected a package manifest`);
-	}
-	return value;
-}
 function npmIdentity(): string {
 	const cli = process.env.npm_execpath;
 	if (cli === undefined || cli === "") {
@@ -22,14 +14,14 @@ function npmIdentity(): string {
 	if (file === undefined) {
 		throw new Error(`Toolchain policy: cannot resolve the invoking npm package from ${cli}.`);
 	}
-	const actual = manifest(file);
+	const actual = readObject(file);
 	if (actual.name !== "npm" || typeof actual.version !== "string") {
 		throw new Error(`Toolchain policy: ${file} is not an identifiable npm installation.`);
 	}
 	return `npm@${actual.version}`;
 }
 function verifyToolchain(root: string): void {
-	const expected = manifest(resolve(root, "package.json")).packageManager;
+	const expected = readObject(resolve(root, "package.json")).packageManager;
 	if (typeof expected !== "string") {
 		throw new Error(
 			"Toolchain policy: package.json packageManager must declare the repository's npm version.",

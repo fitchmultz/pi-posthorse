@@ -194,13 +194,7 @@ export class NoteDiscovery {
 		session: SessionNotes,
 		options: ComparisonOptions,
 	): Promise<DiscoveredNote[]> {
-		const groups = new Map<string, DiscoveredNote[]>();
-		for (const file of files) {
-			const key = `${noteKey(file.lineage)}\0${file.size}`;
-			const group = groups.get(key) ?? [];
-			group.push(file);
-			groups.set(key, group);
-		}
+		const groups = Map.groupBy(files, (file) => `${noteKey(file.lineage)}\0${file.size}`);
 		const selected: DiscoveredNote[] = [];
 		for (const group of groups.values()) {
 			if (group.length === 1) {

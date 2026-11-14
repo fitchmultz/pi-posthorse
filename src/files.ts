@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { hash, randomUUID } from "node:crypto";
 import {
 	createReadStream,
 	existsSync,
@@ -24,7 +24,7 @@ import {
 	type FileHandle,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { errorCode } from "./contracts.ts";
 
 async function lstatOrMissing(path: string) {
@@ -230,13 +230,13 @@ function projectPackageNotes(root: string, cwd: string): string | undefined {
 		if (existsSync(join(dir, ".git")) && realpathSync(dir) === root) {
 			checkout = dir;
 		}
-		if (basename(dir) !== "git" || basename(dirname(dir)) !== ".pi") {
+		if (basename(dir) !== "git" || basename(dirname(dir)) !== CONFIG_DIR_NAME) {
 			continue;
 		}
 		const path = packageRelativePath(dir, checkout);
 		if (path !== undefined) {
 			// Flat full keys keep arbitrary Git URL prefix paths out of one another's note stores.
-			const key = createHash("sha256").update(path.split(sep).join("/")).digest("hex");
+			const key = hash("sha256", path.replaceAll(sep, "/"), "hex");
 			moved = join(realpathSync(dirname(dir)), "package-notes", key, "notes");
 		}
 	}
@@ -279,7 +279,7 @@ function migrationTarget(moved: string): string {
 /** The notes directory for `cwd`, moving any notes found inside a Pi package checkout. */
 export function notesDir(cwd: string): string {
 	const root = notesRoot(cwd);
-	const local = join(root, ".pi", "notes");
+	const local = join(root, CONFIG_DIR_NAME, "notes");
 	const moved = packageNotes(root, cwd);
 	if (moved === undefined) {
 		return local;
