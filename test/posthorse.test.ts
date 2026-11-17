@@ -4969,6 +4969,109 @@ await test("automatic recovery tracks session notes across tools, codemode, cont
 	assert.doesNotMatch(restored, /verified effect at entry observed-receipt/);
 });
 
+await test("a task note written in the automatic chain supersedes the older checkpoint", () => {
+	const reset: EntryLike = {
+		type: "compaction",
+		id: "explicit-reset",
+		summary: `SUPERSEDED_HANDOFF_START ${"h".repeat(3_000)} SUPERSEDED_HANDOFF_TAIL`,
+		firstKeptEntryId: null,
+		details: { posthorse: 1, reason: "explicit" },
+	};
+	const automatic: EntryLike = {
+		type: "compaction",
+		id: "auto-1",
+		summary: "Automatic context rollover recovery record.",
+		firstKeptEntryId: null,
+		details: { posthorse: 1, reason: "threshold" },
+	};
+	const ownerText = `OWNER_START ${"o".repeat(3_000)} OWNER_TAIL`;
+	const ownerMessage = { role: "user", content: ownerText };
+	const owner: EntryLike = {
+		type: "message",
+		id: "owner",
+		timestamp: "2026-11-16T10:00:00Z",
+		message: ownerMessage,
+	};
+	const notesCall = (
+		id: string,
+		args: Readonly<Record<string, unknown>>,
+		receipt: string,
+	): EntryLike[] => [
+		{
+			type: "message",
+			id: `${id}-call`,
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id,
+						name: "notes",
+						arguments: { path: "task.md", ...args },
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: `${id}-receipt`,
+			message: {
+				role: "toolResult",
+				toolName: "notes",
+				toolCallId: id,
+				isError: false,
+				content: receipt,
+			},
+		},
+	];
+	const wrote = "Wrote /workspace/.pi/notes/task.md";
+	const write = notesCall("write", { op: "write", content: "Goal: rotate the secret." }, wrote);
+	const clear = notesCall("clear", { op: "write", content: "" }, wrote);
+	const read = notesCall(
+		"read",
+		{ op: "read" },
+		"File: /workspace/.pi/notes/task.md\nGoal: rotate the secret.",
+	);
+	// Pi projects only the current window. A 6,000-character record quotes the owner input in
+	// full only when no checkpoint shares its room.
+	const recordFor = (entries: readonly EntryLike[]) =>
+		buildAutoHandoff(entries, [{ sourceEntry: owner, messages: [ownerMessage] }], 6_000, {
+			ownerQuestionRegistered: false,
+		});
+	const pointers = "Earlier automatic records skipped (not nested; use history read): auto-1";
+	const activeNote =
+		"- Active note (written): task.md (/workspace/.pi/notes/task.md) [compacted at entry write-call — read this note now]";
+
+	const superseded = recordFor([reset, ...write, automatic, owner]);
+	assert.ok(superseded.length <= 6_000);
+	assert.doesNotMatch(superseded, /older checkpoint|SUPERSEDED_HANDOFF|explicit-reset/u);
+	assert.ok(superseded.includes(`Task notes in this session:\n${activeNote}\n`));
+	assert.ok(superseded.includes(ownerText), "the omitted checkpoint takes none of the room");
+	assert.ok(superseded.endsWith(`${ownerText}\n\n${pointers}`));
+
+	const checkpoint =
+		/\n\n\[older checkpoint; possibly stale \| context-window entry explicit-reset\]\nSUPERSEDED_HANDOFF_START h+\n… middle omitted …\nh+ SUPERSEDED_HANDOFF_TAIL\n\n/u;
+	for (const [chain, entries, notes] of [
+		["no note", [reset, automatic, owner], undefined],
+		[
+			"a note only read",
+			[reset, ...read, automatic, owner],
+			"- Referenced note (read): task.md (/workspace/.pi/notes/task.md) [compacted at entry read-call]",
+		],
+		["a note written before the chain", [...write, reset, automatic, owner], undefined],
+		["a cleared note", [reset, ...write, ...clear, automatic, owner], undefined],
+	] as const) {
+		const kept = recordFor(entries);
+		assert.ok(kept.length <= 6_000, chain);
+		assert.match(kept, checkpoint, chain);
+		assert.ok(kept.endsWith(`SUPERSEDED_HANDOFF_TAIL\n\n${pointers}`), chain);
+		assert.ok(!kept.includes(ownerText), `${chain}: the checkpoint shares the room`);
+		assert.doesNotMatch(kept, /Active note \(written\)/u, chain);
+		assert.equal(kept.includes("Task notes in this session:"), notes !== undefined, chain);
+		assert.ok(notes === undefined || kept.includes(`\n${notes}\n`), chain);
+	}
+});
+
 await test("note guards associate a move only with the immediately preceding update header", () => {
 	for (const newline of ["\n", "\r\n", "\r"]) {
 		const patch = (headers: readonly string[]) =>

@@ -196,26 +196,23 @@ function sessionNotes(
 			sources.notes === undefined ? defaultDir : scopeDirectory(sources.notes.binding),
 	};
 }
+/**
+ * The task notes a chain wrote or read. `primaryNotePath` names the most recently written note
+ * the chain has not since cleared, and `section` renders the note lines that fit a character budget.
+ */
 export function sessionNotesEvidence(
 	chainEntries: readonly EntryLike[],
 	allEntries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
-	options: NoteSources & {
-		readonly span: RetainedSpan | undefined;
-		readonly maxChars: number;
-	},
-): { readonly section: string | undefined; readonly primaryNotePath: string | undefined } {
-	const { span, maxChars } = options;
+	options: NoteSources & { readonly span: RetainedSpan | undefined },
+): {
+	readonly primaryNotePath: string | undefined;
+	readonly section: (maxChars: number) => string | undefined;
+} {
+	const { span } = options;
 	const { all, notesDirectory } = sessionNotes(chainEntries, allEntries, projected, options);
-	if (all.length === 0) {
-		return { section: undefined, primaryNotePath: undefined };
-	}
 	const written = all.filter((note) => note.kind === "written").slice(0, MAX_WRITTEN_NOTES);
 	const primary = written[0];
-	const primaryNotePath =
-		primary === undefined
-			? undefined
-			: (pathElsewhere(primary, notesDirectory) ?? primary.absPath ?? primary.notePath);
 	const readOnly = all.filter((note) => note.kind === "read").slice(0, MAX_READ_NOTES);
 	const lines = [
 		...written.map((note) => formatWrittenNoteLine(note, span, notesDirectory)),
@@ -223,15 +220,20 @@ export function sessionNotesEvidence(
 	];
 	const header = "Task notes in this session:";
 	const action = formatNotesAction(primary, span, notesDirectory);
-	const selected: string[] = [];
-	for (const line of lines) {
-		if ([header, ...selected, line, action].join("\n").length <= maxChars) {
-			selected.push(line);
-		}
-	}
 	return {
-		section: selected.length === 0 ? undefined : [header, ...selected, action].join("\n"),
-		primaryNotePath,
+		primaryNotePath:
+			primary === undefined
+				? undefined
+				: (pathElsewhere(primary, notesDirectory) ?? primary.absPath ?? primary.notePath),
+		section: (maxChars) => {
+			const selected: string[] = [];
+			for (const line of lines) {
+				if ([header, ...selected, line, action].join("\n").length <= maxChars) {
+					selected.push(line);
+				}
+			}
+			return selected.length === 0 ? undefined : [header, ...selected, action].join("\n");
+		},
 	};
 }
 export function renderSessionNotes(
@@ -243,5 +245,7 @@ export function renderSessionNotes(
 		readonly maxChars: number;
 	},
 ): string | undefined {
-	return sessionNotesEvidence(chainEntries, allEntries, projected, options).section;
+	return sessionNotesEvidence(chainEntries, allEntries, projected, options).section(
+		options.maxChars,
+	);
 }
