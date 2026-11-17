@@ -198,7 +198,8 @@ function sessionNotes(
 }
 /**
  * The task notes a chain wrote or read. `primaryNotePath` names the most recently written note
- * the chain has not since cleared, and `section` renders the note lines that fit a character budget.
+ * the chain has not since cleared. `section` renders the note lines that fit a character budget;
+ * every rendered section ends with an instruction that names that note.
  */
 export function sessionNotesEvidence(
 	chainEntries: readonly EntryLike[],

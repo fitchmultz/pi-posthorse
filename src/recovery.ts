@@ -229,23 +229,32 @@ function chainNotes(
 		}),
 	};
 }
-/** The preamble, with the notes section in the room the record's required parts leave. */
+/**
+ * The preamble with its notes section, and the older checkpoint the record still quotes. A note
+ * written in the chain is newer than everything the checkpoint that opened the chain describes.
+ * A section that names such a note therefore replaces the checkpoint, and no room is held for
+ * it. A record too small for that section keeps the checkpoint.
+ */
 function rolloverPreamble(
 	notes: ChainNotes,
 	reserveParts: readonly (string | undefined)[],
+	checkpoint: EntryLike | undefined,
 	maxChars: number,
-): string {
+): { readonly preamble: string; readonly checkpoint: EntryLike | undefined } {
 	const base = buildRolloverPreamble(notes.span);
-	const reserved = joined([base, ...reserveParts]).length;
-	return joined([
-		base,
-		notes.section(
+	const section = (kept?: EntryLike) => {
+		const reserved = joined([base, ...reserveParts, priorCheckpoint(kept, 0)]).length;
+		return notes.section(
 			Math.min(
 				MAX_NOTES_SECTION_CHARS,
 				Math.max(0, maxChars - reserved - HANDOFF_OVERHEAD_RESERVE),
 			),
-		),
-	]);
+		);
+	};
+	const superseding = notes.primaryNotePath === undefined ? undefined : section();
+	return superseding === undefined
+		? { preamble: joined([base, section(checkpoint)]), checkpoint }
+		: { preamble: joined([base, superseding]), checkpoint: undefined };
 }
 /** Raw owner anchors and projected tool evidence have distinct provenance and share one bounded payload. */
 export function buildAutoRecovery(
@@ -264,10 +273,6 @@ export function buildAutoRecovery(
 		retained,
 		maxChars,
 	});
-	const notes = chainNotes(entries, projected, { retained, notes: options.notes });
-	// A task note written in the chain is newer than everything the checkpoint that opened the
-	// chain describes, so the record quotes that checkpoint only when the chain has no such note.
-	const priorWindow = notes.primaryNotePath === undefined ? history.checkpoint : undefined;
 	const emptyInputHeader =
 		retained.size > 0
 			? "No discarded owner or visible coordination inputs were selected for this recovery record."
@@ -282,11 +287,16 @@ export function buildAutoRecovery(
 		inputHeader,
 		...fixed.map((record) => formatRecord(record, 0)),
 		header,
-		priorCheckpoint(priorWindow, 0),
 		skippedRecords(history.skipped, 0),
 	];
-	const preamble = rolloverPreamble(notes, reserveParts, maxChars);
-	const minimum = [preamble, ...reserveParts];
+	const notes = chainNotes(entries, projected, { retained, notes: options.notes });
+	const { preamble, checkpoint: priorWindow } = rolloverPreamble(
+		notes,
+		reserveParts,
+		history.checkpoint,
+		maxChars,
+	);
+	const minimum = [preamble, ...reserveParts, priorCheckpoint(priorWindow, 0)];
 	const plan = planBatch(
 		batch,
 		header,

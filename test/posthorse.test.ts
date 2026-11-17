@@ -5034,13 +5034,15 @@ await test("a task note written in the automatic chain supersedes the older chec
 	);
 	// Pi projects only the current window. A 6,000-character record quotes the owner input in
 	// full only when no checkpoint shares its room.
-	const recordFor = (entries: readonly EntryLike[]) =>
-		buildAutoHandoff(entries, [{ sourceEntry: owner, messages: [ownerMessage] }], 6_000, {
+	const recordFor = (entries: readonly EntryLike[], maxChars = 6_000) =>
+		buildAutoHandoff(entries, [{ sourceEntry: owner, messages: [ownerMessage] }], maxChars, {
 			ownerQuestionRegistered: false,
 		});
 	const pointers = "Earlier automatic records skipped (not nested; use history read): auto-1";
 	const activeNote =
 		"- Active note (written): task.md (/workspace/.pi/notes/task.md) [compacted at entry write-call — read this note now]";
+	const readNote =
+		"- Referenced note (read): task.md (/workspace/.pi/notes/task.md) [compacted at entry read-call]";
 
 	const superseded = recordFor([reset, ...write, automatic, owner]);
 	assert.ok(superseded.length <= 6_000);
@@ -5049,15 +5051,41 @@ await test("a task note written in the automatic chain supersedes the older chec
 	assert.ok(superseded.includes(ownerText), "the omitted checkpoint takes none of the room");
 	assert.ok(superseded.endsWith(`${ownerText}\n\n${pointers}`));
 
+	// A record too small for the notes section keeps the checkpoint's history id.
+	const tight = recordFor([reset, ...write, automatic, owner], 1_500);
+	assert.ok(tight.length <= 1_500);
+	assert.doesNotMatch(tight, /Task notes in this session|task\.md/u);
+	assert.ok(
+		tight.endsWith(
+			`\n\n[owner input | 2026-11-16T10:00:00Z | entry owner]\n\n[older checkpoint; possibly stale | context-window entry explicit-reset]\n\n${pointers}`,
+		),
+	);
+
+	// A notes section too small to list the written note still tells the model to read it.
+	const longNote = `${"n".repeat(400)}.md`;
+	const named = recordFor([
+		reset,
+		...read,
+		...notesCall(
+			"long",
+			{ op: "write", path: longNote, content: "Goal: rotate the secret." },
+			`Wrote /workspace/.pi/notes/${longNote}`,
+		),
+		automatic,
+		owner,
+	]);
+	assert.doesNotMatch(named, /older checkpoint|SUPERSEDED_HANDOFF|Active note/u);
+	assert.ok(
+		named.includes(
+			`\n\nTask notes in this session:\n${readNote}\nRead ${longNote} (notes read or read on its path) before continuing to restore the saved goal, progress, decisions, and next steps, then keep that note current as work progresses.\n\n`,
+		),
+	);
+
 	const checkpoint =
 		/\n\n\[older checkpoint; possibly stale \| context-window entry explicit-reset\]\nSUPERSEDED_HANDOFF_START h+\n… middle omitted …\nh+ SUPERSEDED_HANDOFF_TAIL\n\n/u;
 	for (const [chain, entries, notes] of [
 		["no note", [reset, automatic, owner], undefined],
-		[
-			"a note only read",
-			[reset, ...read, automatic, owner],
-			"- Referenced note (read): task.md (/workspace/.pi/notes/task.md) [compacted at entry read-call]",
-		],
+		["a note only read", [reset, ...read, automatic, owner], readNote],
 		["a note written before the chain", [...write, reset, automatic, owner], undefined],
 		["a cleared note", [reset, ...write, ...clear, automatic, owner], undefined],
 	] as const) {
