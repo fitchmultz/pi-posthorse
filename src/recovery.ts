@@ -208,35 +208,53 @@ function sharedLimit(lengths: readonly number[], budget: number): number {
 	}
 	return MAX_RECOVERY_RECORD_CHARS;
 }
-function rolloverPreambleWithNotes(
+type ChainNotes = ReturnType<typeof sessionNotesEvidence> & {
+	readonly span: RetainedSpan | undefined;
+};
+/** Task notes of the current automatic chain, with the retained span their lines refer to. */
+function chainNotes(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
-	options: {
+	sources: {
 		readonly retained: ReadonlySet<string>;
-		readonly reserveParts: readonly (string | undefined)[];
 		readonly notes?: NotesRecovery | undefined;
-		readonly maxChars: number;
 	},
-): { readonly preamble: string; readonly primaryNotePath: string | undefined } {
-	const { retained, reserveParts, maxChars } = options;
-	const span = retainedSpan(entries.slice(contextStart(entries).start), retained);
-	const basePreamble = buildRolloverPreamble(span);
-	const reserveLen = joined([basePreamble, ...reserveParts]).length;
-	const { section, primaryNotePath } = sessionNotesEvidence(
-		entries.slice(automaticChainStart(entries)),
-		entries,
-		projected,
-		{
-			retained,
+): ChainNotes {
+	const span = retainedSpan(entries.slice(contextStart(entries).start), sources.retained);
+	return {
+		span,
+		...sessionNotesEvidence(entries.slice(automaticChainStart(entries)), entries, projected, {
+			...sources,
 			span,
-			notes: options.notes,
-			maxChars: Math.min(
+		}),
+	};
+}
+/**
+ * The preamble with its notes section, and the older checkpoint the record still quotes. A note
+ * written in the chain is newer than everything the checkpoint that opened the chain describes.
+ * A section that names such a note therefore replaces the checkpoint, and no room is held for
+ * it. A record too small for that section keeps the checkpoint.
+ */
+function rolloverPreamble(
+	notes: ChainNotes,
+	reserveParts: readonly (string | undefined)[],
+	checkpoint: EntryLike | undefined,
+	maxChars: number,
+): { readonly preamble: string; readonly checkpoint: EntryLike | undefined } {
+	const base = buildRolloverPreamble(notes.span);
+	const section = (kept?: EntryLike) => {
+		const reserved = joined([base, ...reserveParts, priorCheckpoint(kept, 0)]).length;
+		return notes.section(
+			Math.min(
 				MAX_NOTES_SECTION_CHARS,
-				Math.max(0, maxChars - reserveLen - HANDOFF_OVERHEAD_RESERVE),
+				Math.max(0, maxChars - reserved - HANDOFF_OVERHEAD_RESERVE),
 			),
-		},
-	);
-	return { preamble: joined([basePreamble, section]), primaryNotePath };
+		);
+	};
+	const superseding = notes.primaryNotePath === undefined ? undefined : section();
+	return superseding === undefined
+		? { preamble: joined([base, section(checkpoint)]), checkpoint }
+		: { preamble: joined([base, superseding]), checkpoint: undefined };
 }
 /** Raw owner anchors and projected tool evidence have distinct provenance and share one bounded payload. */
 export function buildAutoRecovery(
@@ -255,7 +273,6 @@ export function buildAutoRecovery(
 		retained,
 		maxChars,
 	});
-	const priorWindow = history.checkpoint;
 	const emptyInputHeader =
 		retained.size > 0
 			? "No discarded owner or visible coordination inputs were selected for this recovery record."
@@ -270,16 +287,16 @@ export function buildAutoRecovery(
 		inputHeader,
 		...fixed.map((record) => formatRecord(record, 0)),
 		header,
-		priorCheckpoint(priorWindow, 0),
 		skippedRecords(history.skipped, 0),
 	];
-	const { preamble, primaryNotePath } = rolloverPreambleWithNotes(entries, projected, {
-		retained,
+	const notes = chainNotes(entries, projected, { retained, notes: options.notes });
+	const { preamble, checkpoint: priorWindow } = rolloverPreamble(
+		notes,
 		reserveParts,
+		history.checkpoint,
 		maxChars,
-		notes: options.notes,
-	});
-	const minimum = [preamble, ...reserveParts];
+	);
+	const minimum = [preamble, ...reserveParts, priorCheckpoint(priorWindow, 0)];
 	const plan = planBatch(
 		batch,
 		header,
@@ -316,7 +333,7 @@ export function buildAutoRecovery(
 	);
 	return {
 		handoff: joined([...fixedParts, renderIndex(others, available), renderedBatch, prior]),
-		primaryNotePath,
+		primaryNotePath: notes.primaryNotePath,
 	};
 }
 export function buildAutoHandoff(
