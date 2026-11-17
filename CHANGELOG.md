@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.32 - 2026-11-17
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- fix: omit the older checkpoint when the rollover chain has a written task note (PPH-201) (#224) ([d0f29bd](https://github.com/fitchmultz/pi-posthorse/commit/d0f29bdffc64cf3a4a8029648443a80736efedb6))
+
+### What's Changed
+
+- fix: omit the older checkpoint when the rollover chain has a written task note (PPH-201) (1/1) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/224
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.31...v0.10.32
+
 ## 0.10.31 - 2026-11-14
 
 <!-- npm-release:unreleased:start -->
