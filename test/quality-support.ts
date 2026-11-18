@@ -40,11 +40,11 @@ export function fixture(options: FixtureOptions): {
 		for (const name of [
 			".bin",
 			"@types",
+			"@tsrs",
 			"@earendil-works",
-			"@oxlint-tsgolint",
 			"typescript",
 			"typebox",
-			"oxlint-tsgolint",
+			"tsrs",
 		]) {
 			symlinkSync(
 				join(repository, "node_modules", name),

@@ -1015,8 +1015,8 @@ The extension retains its Node ^24.22.3 || >=26.13.1 and Pi >=1.5.2 support floo
 Pi 1.5.2 cohort exercises that floor; separate CI lanes qualify the latest stable
 official release and latest maintained fork commit with their actual SDK graphs.
 
-The qualified published tools are Oxlint 1.91.0, oxlint-tsgolint 7.0.2005,
-Oxfmt 0.76.0, oxc-parser 0.157.0, and TypeScript 7.0.2. `package-lock.json`
+The qualified published tools are Oxlint 1.94.0, tsrs 7.1.0-beta.tsrs2 (Section 2 exception QX-012 replacing stable `oxlint-tsgolint`),
+Oxfmt 0.79.0, oxc-parser 0.157.0, and TypeScript 7.0.2. `package-lock.json`
 records their full installation. There is no custom semantic engine.
 
 `.oxlintrc.json` implements Appendix A with the Node plugin and the test-only
@@ -1088,7 +1088,7 @@ initialization, hooks, or suite scheduling acquires a contract that these tests 
 
 ### QX-011: Published import-cycle detection limits
 
-Protection: `import/no-cycle`, Oxlint 1.91.0. The baseline settings remain
+Protection: `import/no-cycle`, Oxlint 1.94.0. The baseline settings remain
 `ignoreTypes: false`, `ignoreExternal: false`, and
 `allowUnsafeDynamicCyclicDependency: false`. There is no rule disable,
 source exclusion, or custom engine.
@@ -1114,6 +1114,16 @@ as do the compiler, exact source coverage, and code review. External and dynamic
 module boundaries require review; this record does not establish their cycle safety. Run `npm run quality:probes`.
 A published importer change, a new runtime import boundary, or an actual cycle
 report requires requalification and reconsideration in the normal PR review.
+
+### QX-012: Prerelease `tsrs` type-aware backend in place of stable `oxlint-tsgolint`
+
+Protection and contract: Section 5.1 ("latest stable published releases of Oxlint, `oxlint-tsgolint`, Oxfmt");
+installed toolchain on 2026-11-18: Oxlint 1.94.0 (`2026-11-16T12:26Z`), `tsrs` 7.1.0-beta.tsrs2
+(`2026-11-16T11:59Z`), Oxfmt 0.79.0 (`2026-11-16T12:27Z`), TypeScript 7.0.2.
+
+`tsrs` publishes prereleases only (`dist-tags.latest` is `0.25.0-ts7.1.0-beta`, and `7.1.0-beta.tsrs2` is an untagged newer prerelease; stable `oxlint-tsgolint@7.0.2007` remains published on npm). In a matched A/B benchmark on `mitchs-m5-mbp` (Darwin arm64, `oxlint 1.94.0` running `oxlint --deny-warnings .`, median of 3 warm runs each via `OXLINT_TSGOLINT_PATH`), `oxlint-tsgolint@7.0.2007` took `0.61s` wall time and `860.0 MiB` maximum RSS vs `0.17s` wall time and `283.3 MiB` maximum RSS with `tsrs@7.1.0-beta.tsrs2` (`3.59x` slower, `3.04x` / `576.7 MiB` higher peak RSS; both exited `0`).
+
+Owner-approved substitution of `tsrs@7.1.0-beta.tsrs2`: Oxlint 1.94.0 auto-discovers `node_modules/.bin/tsrs-lint` and fails closed if missing, while every Appendix A rule, compiler option, and `QX-001`–`QX-011` safeguard remains unchanged. Requalified via `npm run verify` and `npm run quality:probes` (which exercises real type-aware lint diagnostics including `typescript/no-floating-promises` under `tsrs`) exiting 0 on 2026-11-18. Revisit on the first stable `tsrs` release, any `oxlint` upgrade changing backend discovery, or any type-aware diagnostic regression.
 
 ## References
 
