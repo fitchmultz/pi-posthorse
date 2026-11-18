@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.10.33 - 2026-11-18
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- ci: release through direct signed version commits (PEA-211) (#226) ([2767ab0](https://github.com/fitchmultz/pi-posthorse/commit/2767ab02a056c91dbf1a013a7baa5b9e9c57626c))
+
+### What's Changed
+
+- ci: release through direct signed version commits (PEA-211) (1/1) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/226
+- fix(ui,tools,ci): native Pi primitives, soft past-end offsets, and cached fork CI by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/227
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.32...v0.10.33
+
 ## 0.10.32 - 2026-11-17
 
 <!-- npm-release:unreleased:start -->
