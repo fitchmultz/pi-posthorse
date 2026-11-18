@@ -47,7 +47,9 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 		const previewText = leadingRows(preview, theme, "toolOutput", previewRows);
 		const expandHint = options.keyHint("app.tools.expand", "to expand");
 		let fullText: Text | undefined;
-		let cached: { readonly width: number; readonly lines: string[] } | undefined;
+		let cached:
+			| { readonly width: number; readonly lines: ReturnType<Component["render"]> }
+			| undefined;
 		const historyText = textBlock("Earlier conversation remains in history.", theme, "muted");
 		const messageLines = (inner: number, expanded: boolean): string[] => {
 			const title = `${expanded ? "▾" : "▸"} ${window ? "Context window started" : "Checkpoint reminder"}`;
