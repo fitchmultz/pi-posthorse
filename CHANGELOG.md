@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.35 - 2026-11-18
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- fix(ui): accept readonly Component.render rows (PIF-212) (#230) ([391c790](https://github.com/fitchmultz/pi-posthorse/commit/391c7905365b62cd56a04e4ac83e20d62650c142))
+
+### What's Changed
+
+- Accept readonly Component.render rows (PIF-212) (1/1) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/230
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.34...v0.10.35
+
 ## 0.10.34 - 2026-11-18
 
 <!-- npm-release:unreleased:start -->
