@@ -81,7 +81,7 @@ export function registerHistory(
 		label: "History",
 		...toolCards("history"),
 		description:
-			"Search or read earlier session entries, including previous context windows. search skips entries still in your active context and lists original content before recovery echoes, newest first; all=true also searches this project's other sessions and subagent runs. read takes an entry id exactly as search printed it and pages text and images.",
+			"Search or read earlier session entries, including previous context windows. search skips entries still in your active context and lists original content before recovery echoes, newest first; all=true also searches this project's other sessions and subagent runs. search pages with cursor; limit is a search result count only. read takes an entry id exactly as search printed it. Omit limit and continue with the returned offset and imageOffset, if shown.",
 		promptSnippet: "recover earlier conversation that left the active context window",
 		promptGuidelines: [
 			"Use history search first, then history read with the entry id exactly as printed",
