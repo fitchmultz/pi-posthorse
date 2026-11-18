@@ -78,7 +78,8 @@ not acceptance evidence; the required npm commands and CI check the committed de
 
 ## Exceptions and detection limits
 
-Appendix B records the published import checker's detection limits, QX-011. There are no
+Appendix B records the published import checker's detection limits, QX-011, and the
+maintainer-directed `tsrs` backend policy. There are no
 repository-specific rule allowances, inline lint suppressions, violation budgets, or grandfathered
 findings. Policy rejects actual lint and formatting suppression comments while leaving literal
 examples alone. Native unused-disable reporting remains active.

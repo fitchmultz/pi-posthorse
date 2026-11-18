@@ -1015,8 +1015,8 @@ The extension retains its Node ^24.22.3 || >=26.13.1 and Pi >=1.5.2 support floo
 Pi 1.5.2 cohort exercises that floor; separate CI lanes qualify the latest stable
 official release and latest maintained fork commit with their actual SDK graphs.
 
-The qualified published tools are Oxlint 1.91.0, oxlint-tsgolint 7.0.2005,
-Oxfmt 0.76.0, oxc-parser 0.157.0, and TypeScript 7.0.2. `package-lock.json`
+The qualified published tools are Oxlint 1.94.0, tsrs 7.1.0-beta.tsrs2 (maintainer-directed type-aware backend replacing stable `oxlint-tsgolint`),
+Oxfmt 0.79.0, oxc-parser 0.157.0, and TypeScript 7.0.2. `package-lock.json`
 records their full installation. There is no custom semantic engine.
 
 `.oxlintrc.json` implements Appendix A with the Node plugin and the test-only
@@ -1088,7 +1088,7 @@ initialization, hooks, or suite scheduling acquires a contract that these tests 
 
 ### QX-011: Published import-cycle detection limits
 
-Protection: `import/no-cycle`, Oxlint 1.91.0. The baseline settings remain
+Protection: `import/no-cycle`, Oxlint 1.94.0. The baseline settings remain
 `ignoreTypes: false`, `ignoreExternal: false`, and
 `allowUnsafeDynamicCyclicDependency: false`. There is no rule disable,
 source exclusion, or custom engine.
@@ -1114,6 +1114,42 @@ as do the compiler, exact source coverage, and code review. External and dynamic
 module boundaries require review; this record does not establish their cycle safety. Run `npm run quality:probes`.
 A published importer change, a new runtime import boundary, or an actual cycle
 report requires requalification and reconsideration in the normal PR review.
+
+### Maintainer-directed type-aware backend policy
+
+The maintainer explicitly directs this repository to use `tsrs@7.1.0-beta.tsrs2` (`tsrs-lint`)
+as the type-aware Oxlint backend in place of stable `oxlint-tsgolint`. For this repository,
+that owner direction supersedes Section 5.1's `oxlint-tsgolint` stable-release selection
+(mirroring "Maintainer-directed Node registration policy" above and documented in [AGENTS.md](../AGENTS.md)).
+The supplied standard above remains unchanged; this is an explicit maintainer toolchain policy,
+not a Section 2 quality exception claiming Section 2.1 harm against a repository performance limit
+(`docs/performance.md` sets no RSS or lint-duration ceiling for `oxlint-tsgolint@7.0.2007`).
+
+Installed toolchain on 2026-11-18: Oxlint 1.94.0 (`2026-11-16T12:26Z`), `tsrs` 7.1.0-beta.tsrs2
+(`2026-11-16T11:59Z`, `TypeScript 7.1.0-beta` `microsoft/TypeScript@3e9236361fa9`), Oxfmt 0.79.0
+(`2026-11-16T12:27Z`), `oxc-parser` 0.157.0, and TypeScript 7.0.2. Only `package.json` and
+`package-lock.json` `devDependencies` change; `.oxlintrc.json`, every Appendix A rule, `tsconfig.json`,
+the inline suppression prohibition, and `QX-011` safeguards remain intact, and `oxlint 1.94.0`
+auto-discovers `node_modules/.bin/tsrs-lint` and fails closed if missing.
+
+In a matched A/B benchmark on `mitchs-m5-mbp` (Darwin arm64, `oxlint 1.94.0` running
+`oxlint --deny-warnings .`, median of 3 warm runs each via `OXLINT_TSGOLINT_PATH`),
+stable `oxlint-tsgolint@7.0.2007` took `0.61s` wall time and `860.0 MiB` maximum RSS, whereas
+`tsrs@7.1.0-beta.tsrs2` took `0.17s` wall time and `283.3 MiB` maximum RSS (`tsrs` was `3.59x`
+faster and used `3.04x` / `576.7 MiB` lower peak RSS; both exited `0`). At code/lockfile revision
+`cb67c05`, `npm run verify` (provenance, `quality:policy`, `quality:config`, `lint`, `format:check`,
+`check`, `test`, `build`), `npm run quality:probes` (exercising real `typescript/no-floating-promises`
+diagnostics under `tsrs`), `./node_modules/.bin/tsc --noEmit` (`7.0.2`), and
+`./node_modules/.bin/tsrs --noEmit` (`7.1.0-beta`) all exited `0`.
+
+Lost detection and established assumptions: `tsrs@7.1.0-beta.tsrs2` targets `TypeScript 7.1.0-beta`
+(`microsoft/TypeScript@3e9236361fa9`) rather than pinned `TypeScript 7.0.2`, so edge-case
+type-aware lint inference could diverge from `oxlint-tsgolint@7.0.2007` or `tsc 7.0.2`, and routine
+`npm run verify` runs exercise `tsrs` only without re-checking parity against
+`oxlint-tsgolint@7.0.2007`. Canonical `tsc 7.0.2 --noEmit` (`npm run check`) remains separate
+and authoritative for compilation. Revisit on the first stable `tsrs` release, any `oxlint` upgrade
+changing backend discovery, any TypeScript bump changing version alignment, or any type-aware
+diagnostic regression.
 
 ## References
 

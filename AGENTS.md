@@ -3,7 +3,10 @@
 ## Code quality and acceptance
 
 Follow [Engineering standard 5.2](docs/engineering-standard.md). Its Appendix B owns the
-repository mappings and evidence-based quality exceptions. Preserve accurate contracts,
+repository mappings and evidence-based quality exceptions. For type-aware Oxlint execution,
+this repository follows the maintainer-directed `tsrs@7.1.0-beta.tsrs2` backend policy in
+Appendix B (superseding Section 5.1's `oxlint-tsgolint` selection while retaining canonical
+`tsc 7.0.2` checks). Preserve accurate contracts,
 assertions, lifecycle ownership, and source coverage while improving the implementation.
 
 Use Node 24, the npm version declared in `package.json`, and the committed lockfile.
