@@ -112,7 +112,9 @@ export class PageReservations {
 			const footer = (end: number) =>
 				`\n[chars ${offset}-${end}${more === true ? "; more matches follow" : ` of ${text.length}`}; continue with offset ${end}]`;
 			if (offset > 0 && offset >= text.length) {
-				this.error(ctx, "Offset is past the end; restart with offset 0.");
+				return textResult(
+					`Offset ${offset} is at or past the end (${text.length} chars); no more entries. Restart with offset 0.`,
+				);
 			}
 			const range = notesRange(rows, {
 				offset,

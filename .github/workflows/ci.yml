@@ -42,7 +42,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: e007829ba45938fbb3bdab83e5152771369bb656 # main
+  PI_AUTOMATION_REF: 3e744f52412c3669bd781ed5ea3e21567798352e # main
 
 jobs:
   quality:
@@ -52,9 +52,9 @@ jobs:
       source-ref: ${{ inputs.source-ref || github.sha }}
 
   resolve:
-    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@e007829ba45938fbb3bdab83e5152771369bb656 # main
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@3e744f52412c3669bd781ed5ea3e21567798352e # main
     with:
-      automation-ref: e007829ba45938fbb3bdab83e5152771369bb656 # main
+      automation-ref: 3e744f52412c3669bd781ed5ea3e21567798352e # main
       official-version: ${{ inputs.official-version }}
       fork-ref: ${{ inputs.fork-ref }}
 
@@ -91,6 +91,12 @@ jobs:
           path: automation
           persist-credentials: false
       - if: matrix.host == 'fork' && inputs.fork-artifact == ''
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: fork-cache
+        with:
+          path: ${{ runner.temp }}/fork-package
+          key: pi-fork-${{ runner.os }}-${{ runner.arch }}-${{ needs.resolve.outputs.fork-ref }}-${{ env.PI_AUTOMATION_REF }}
+      - if: matrix.host == 'fork' && inputs.fork-artifact == '' && steps.fork-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         id: fork
         with:
@@ -126,10 +132,10 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends fd-find ripgrep attr
-      - if: matrix.host == 'fork' && inputs.fork-artifact == ''
+      - if: matrix.host == 'fork' && inputs.fork-artifact == '' && steps.fork-cache.outputs.cache-hit != 'true'
         name: Use the reviewed npm version
         run: npm install --global "$(node -p 'require("./automation/package.json").packageManager')"
-      - if: matrix.host == 'fork' && inputs.fork-artifact == ''
+      - if: matrix.host == 'fork' && inputs.fork-artifact == '' && steps.fork-cache.outputs.cache-hit != 'true'
         name: Build the current fork
         working-directory: fork
         env:

@@ -6,17 +6,25 @@ import { test } from "node:test";
 import {
 	CustomMessageComponent,
 	SessionManager,
+	type Theme,
+	type ToolDefinition,
 	initTheme,
+	keyHint,
+	keyText,
 	ToolExecutionComponent,
 } from "@earendil-works/pi-coding-agent";
 import {
+	MouseRegion,
+	Text,
 	stripTerminalSequences,
 	visibleWidth,
 	TuiMainScreen,
 	ProcessTerminal,
+	type Keybinding,
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
 import { createPosthorse } from "../index.ts";
+import { hint } from "../src/ui/text.ts";
 import { executeFixtureTool, fixturePolicy, loadFixture, requireValue } from "./harness.ts";
 import { fixtureDisplay } from "./results.ts";
 
@@ -138,16 +146,47 @@ async function execute(
 	return executeFixtureTool(loaded.extension, name, args, ctx, { id: "tool-1" });
 }
 
-await test("all four native cards identify pending calls and tolerate malformed streamed arguments", async () => {
+function captureTheme(): Theme {
+	let captured: Theme | undefined;
+	new CustomMessageComponent(
+		{
+			role: "custom",
+			customType: "posthorse-reminder",
+			display: true,
+			timestamp: 0,
+			content: "probe",
+		},
+		(_message, _options, theme) => {
+			captured = theme;
+			return new Text("ok", 0, 0);
+		},
+		undefined,
+		0,
+	).render(80);
+	return requireValue(captured, "captured Pi theme");
+}
+
+await test("all four native cards render static clean calls, reuse lastComponent, and tolerate malformed streamed arguments", async () => {
+	const theme = captureTheme();
 	await Promise.all(
 		(
 			[
-				["notes", { op: "read", path: "plan.md" }, /Notes.*read.*plan\.md/],
-				["history", { op: "search", query: "relay", all: true }, /History.*search.*relay/],
-				["get_context_remaining", {}, /Context/],
-				["new_context", { handoff: "next station" }, /New context/],
+				[
+					"notes",
+					{ op: "read", path: "plan.md", offset: 120 },
+					/▸ Notes · read · plan\.md/,
+					/Offset: 120/,
+				],
+				[
+					"history",
+					{ op: "search", query: "relay", all: true },
+					/▸ History · search · “relay”/,
+					/Scope: all project sessions/,
+				],
+				["get_context_remaining", {}, /▸ Context budget/, null],
+				["new_context", { handoff: "next station" }, /▸ New context · request/, null],
 			] as const
-		).map(async ([name, args, expected]) => {
+		).map(async ([name, args, expected, expandedDetail]) => {
 			const definition = requireValue(renderers.tools.get(name));
 			assert.equal(
 				typeof definition.renderCall,
@@ -163,7 +202,73 @@ await test("all four native cards identify pending calls and tolerate malformed 
 			const component = card(name, args);
 			component.markExecutionStarted();
 			assert.match(text(component), expected);
-			assert.match(text(component), /running/i);
+			assert.doesNotMatch(text(component), /running|preparing|error/i);
+			const renderCall = requireValue(definition.renderCall);
+			type CallRenderCtx = Parameters<NonNullable<ToolDefinition["renderCall"]>>[2];
+			const makeCtx = (overrides: Partial<CallRenderCtx>): CallRenderCtx => ({
+				args,
+				toolCallId: "tool-1",
+				invalidate: () => {
+					/* Render fixture invalidation is a no-op. */
+				},
+				lastComponent: undefined,
+				state: {},
+				cwd: tmpdir(),
+				executionStarted: false,
+				argsComplete: false,
+				isPartial: true,
+				expanded: false,
+				showImages: true,
+				isError: false,
+				durationMs: undefined,
+				outputPad: 0,
+				keyText,
+				keyHint,
+				...overrides,
+			});
+			const initial = renderCall(
+				args,
+				theme,
+				makeCtx({ isPartial: true, executionStarted: false }),
+			);
+			const running = renderCall(
+				args,
+				theme,
+				makeCtx({ isPartial: true, executionStarted: true, lastComponent: initial }),
+			);
+			const errored = renderCall(
+				args,
+				theme,
+				makeCtx({ isPartial: false, isError: true, lastComponent: running }),
+			);
+			assert.equal(
+				running,
+				initial,
+				`${name} reuses lastComponent when static state matches`,
+			);
+			assert.equal(errored, initial, `${name} keeps the same static call component on error`);
+			assert.deepEqual(
+				errored.render(80),
+				initial.render(80),
+				`${name} call rendering ignores live isPartial/executionStarted/isError`,
+			);
+			const expanded = renderCall(
+				args,
+				theme,
+				makeCtx({ expanded: true, lastComponent: errored }),
+			);
+			assert.equal(expanded, initial, `${name} reuses lastComponent across collapse/expand`);
+			const expandedText = lines(expanded, 80).join("\n");
+			assert.match(expandedText, /▾ /);
+			if (expandedDetail !== null) {
+				assert.match(expandedText, expandedDetail);
+			}
+			const foreign = new Text("foreign", 0, 0);
+			assert.notEqual(
+				renderCall(args, theme, makeCtx({ lastComponent: foreign })),
+				foreign,
+				`${name} replaces foreign lastComponent instances`,
+			);
 			for (const malformed of [
 				undefined,
 				null,
@@ -281,10 +386,17 @@ await test("empty notes, no matches, actual errors, and submitted content stay d
 	const empty = card("notes", { op: "read", path: "empty.md" });
 	empty.updateResult(result(""));
 	assert.match(text(empty), /Empty note/);
+	const ok = card("notes", { op: "read", path: "missing.md" });
+	ok.updateResult(result("No note at missing.md. Use list.", undefined, false));
 	const error = card("notes", { op: "read", path: "missing.md" });
 	error.updateResult(result("No note at missing.md. Use list.", undefined, true));
-	assert.match(text(error), /error/i);
+	assert.doesNotMatch(text(error), /· error/i);
 	assert.match(text(error), /No note at missing\.md/);
+	assert.notEqual(
+		error.render(80).join("\n"),
+		ok.render(80).join("\n"),
+		"error results use error styling without altering the static call title",
+	);
 	const noMatches = card("history", { op: "search", query: "nothing" });
 	noMatches.updateResult(result('No history matches "nothing".'));
 	assert.match(text(noMatches), /No history matches/);
@@ -734,4 +846,120 @@ await test("owned reminders are compact, expandable, and sanitize terminal contr
 		/FIRST[ \t]*\n[ \t]*\n[ \t]*LAST/.test(text(blankBlocks)),
 		"reminders preserve valid empty blocks",
 	);
+});
+
+await test("expand hints format keyHint cleanly without doubling 'to expand' and degrade when unbound", () => {
+	const theme = captureTheme();
+	const boundKeyHint = `${theme.fg("dim", "ctrl+o")}${theme.fg("muted", " to expand")}`;
+	const hintLine = hint(theme, 80, boundKeyHint);
+	const plainHint = stripTerminalSequences(hintLine).trimEnd();
+	assert.equal(plainHint, "… ctrl+o to expand");
+	assert.doesNotMatch(plainHint, /to expand.*to expand/);
+	const unbound = stripTerminalSequences(
+		hint(theme, 80, keyHint("app.tools.expand", "to expand")),
+	);
+	assert.equal(unbound, "… details hidden");
+	assert.equal(stripTerminalSequences(hint(theme, 80, "")), "… details hidden");
+
+	const component = card("notes", { op: "read", path: "long.md" });
+	component.updateResult(result("line 1\nline 2\nline 3\nline 4\nline 5"));
+	assert.match(text(component, 80), /… details hidden/);
+
+	const renderResult = requireValue(renderers.tools.get("notes")?.renderResult);
+	type ResultRenderCtx = Parameters<NonNullable<ToolDefinition["renderResult"]>>[3];
+	const resultCtx: ResultRenderCtx = {
+		args: { op: "read", path: "long.md" },
+		toolCallId: "tool-1",
+		invalidate: () => {
+			/* Render fixture invalidation is a no-op. */
+		},
+		lastComponent: undefined,
+		state: {},
+		cwd: tmpdir(),
+		executionStarted: true,
+		argsComplete: true,
+		isPartial: false,
+		expanded: false,
+		showImages: true,
+		isError: false,
+		durationMs: 5,
+		outputPad: 0,
+		keyText: () => "ctrl+o",
+		keyHint: (_id, description) =>
+			`${theme.fg("dim", "ctrl+o")}${theme.fg("muted", ` ${description}`)}`,
+	};
+	const rendered = renderResult(
+		{
+			content: [{ type: "text", text: "line 1\nline 2\nline 3\nline 4\nline 5" }],
+			details: undefined,
+		},
+		{ expanded: false, isPartial: false },
+		theme,
+		resultCtx,
+	);
+	const collapsed = text(rendered, 80);
+	assert.match(collapsed, /… ctrl\+o to expand/);
+	assert.doesNotMatch(collapsed, /to expand.*to expand/);
+});
+
+await test("registerPosthorseMessages delegates clicks on compactView and keeps MouseRegion + invalidate on legacy hosts", () => {
+	const theme = captureTheme();
+	const renderer = requireValue(renderers.messages.get("posthorse-reminder"));
+	const message = {
+		role: "custom" as const,
+		customType: "posthorse-reminder",
+		display: true,
+		timestamp: 0,
+		content: "Line 1\nLine 2\nLine 3\nLine 4\nLine 5",
+	};
+	const legacyOptions = {
+		expanded: false,
+		outputPad: 0,
+		keyText: (_id: Keybinding) => "ctrl+o",
+		keyHint: (_id: Keybinding, description: string) => `ctrl+o ${description}`,
+	};
+	const legacy = requireValue(renderer(message, legacyOptions, theme));
+	if (!(legacy instanceof MouseRegion)) {
+		assert.fail("legacy Pi wraps message in MouseRegion");
+	}
+	assert.match(text(legacy), /▸ Checkpoint reminder/);
+	assert.doesNotMatch(text(legacy), /Line 5/);
+	assert.match(text(legacy), /… ctrl\+o to expand/);
+	assert.doesNotMatch(text(legacy), /to expand.*to expand/);
+	const leftClick: TuiMouseEvent = {
+		type: "click",
+		button: "left",
+		x: 2,
+		y: 1,
+		screenX: 2,
+		screenY: 1,
+		width: 80,
+		height: 10,
+		shift: false,
+		alt: false,
+		ctrl: false,
+	};
+	assert.equal(legacy.handleMouse({ ...leftClick, button: "right" }), undefined);
+	assert.equal(legacy.handleMouse(leftClick)?.handled, true);
+	assert.match(text(legacy), /▾ Checkpoint reminder/);
+	assert.match(text(legacy), /Line 5/);
+	assert.equal(legacy.handleMouse(leftClick)?.handled, true);
+	assert.match(text(legacy), /▸ Checkpoint reminder/);
+	assert.doesNotMatch(text(legacy), /Line 5/);
+
+	for (const compactView of [false, true]) {
+		const forkOptions = { ...legacyOptions, compactView };
+		const direct = requireValue(renderer(message, forkOptions, theme));
+		assert.equal(
+			direct instanceof MouseRegion,
+			false,
+			`compactView=${compactView} must not wrap in MouseRegion`,
+		);
+		assert.equal(
+			"handleMouse" in direct,
+			false,
+			`compactView=${compactView} lets clicks bubble to CustomMessageComponent`,
+		);
+		assert.match(text(direct), /▸ Checkpoint reminder/);
+	}
 });

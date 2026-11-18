@@ -116,7 +116,11 @@ async function readNote(
 	const text = readFileSync(path, "utf8");
 	const offset = params.offset ?? 0;
 	if (offset > 0 && offset >= text.length) {
-		throw new Error(`Offset ${offset} is past the end of ${relative} (${text.length} chars).`);
+		return pages.deliver(access.host(), {}, () =>
+			textResult(
+				`Offset ${offset} is past the end of ${relative} (${text.length} chars). Restart with offset 0.`,
+			),
+		);
 	}
 	const header =
 		target.kind === "own"
@@ -288,34 +292,37 @@ function withoutEmptyScope(params: NotesParams): NotesParams {
 	const { scope, ...unscoped } = params;
 	return presentText(scope) === undefined ? unscoped : params;
 }
-const notesParameters = Type.Object({
-	op: Type.Enum(["list", "read", "write", "append", "search"], {
-		type: "string",
-		description: "Operation to perform",
-	}),
-	path: Type.Optional(
-		Type.String({
-			description:
-				"Note or folder path relative to the notes directory (read also accepts a path in this session's notes directory)",
+const notesParameters = Type.Object(
+	{
+		op: Type.Enum(["list", "read", "write", "append", "search"], {
+			type: "string",
+			description: "Operation to perform",
 		}),
-	),
-	scope: Type.Optional(
-		Type.String({
-			description:
-				"Absolute scope selector from list/search; only for read/list/search. Omit for current notes and project-wide discovery.",
-		}),
-	),
-	content: Type.Optional(
-		Type.String({ description: "Full file content (write) or text to add (append)" }),
-	),
-	query: Type.Optional(Type.String({ description: "Substring to find in notes (search)" })),
-	offset: Type.Optional(
-		Type.Integer({
-			description: "Character offset for list/read/search (default 0)",
-			minimum: 0,
-		}),
-	),
-});
+		path: Type.Optional(
+			Type.String({
+				description:
+					"Note or folder path relative to the notes directory (read also accepts a path in this session's notes directory)",
+			}),
+		),
+		scope: Type.Optional(
+			Type.String({
+				description:
+					"Absolute scope selector from list/search; only for read/list/search. Omit for current notes and project-wide discovery.",
+			}),
+		),
+		content: Type.Optional(
+			Type.String({ description: "Full file content (write) or text to add (append)" }),
+		),
+		query: Type.Optional(Type.String({ description: "Substring to find in notes (search)" })),
+		offset: Type.Optional(
+			Type.Integer({
+				description: "Character offset for list/read/search (default 0)",
+				minimum: 0,
+			}),
+		),
+	},
+	{ additionalProperties: false },
+);
 export type NotesParams = Immutable<Static<typeof notesParameters>>;
 export function registerNotes(
 	pi: ExtensionAPI,

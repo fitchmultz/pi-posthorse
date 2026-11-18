@@ -78,9 +78,11 @@ export function leadingRows(
 	};
 }
 
-export function hint(theme: Theme, width: number, key: string): string {
-	return truncateToWidth(
-		theme.fg("dim", key.length > 0 ? `… ${key} to expand` : "… details hidden"),
-		width,
-	);
+export function hint(theme: Theme, width: number, keyHint: string): string {
+	const plain = stripTerminalSequences(keyHint).trim();
+	const text =
+		plain.length === 0 || plain === "to expand"
+			? theme.fg("dim", "… details hidden")
+			: `${theme.fg("dim", "… ")}${keyHint}`;
+	return truncateToWidth(text, width);
 }

@@ -19,41 +19,49 @@ import {
 	sessionWindowEntries,
 } from "./session-files.ts";
 
-export const historyParameters = Type.Object({
-	op: Type.Enum(["search", "read"], {
-		type: "string",
-		description: "Operation to perform",
-	}),
-	query: Type.Optional(Type.String({ description: "Case-insensitive text to find (search)" })),
-	id: Type.Optional(Type.String({ description: "Entry id exactly as search printed it (read)" })),
-	all: Type.Optional(
-		Type.Boolean({
-			description: "Also search this project's other sessions and subagent runs",
+export const historyParameters = Type.Object(
+	{
+		op: Type.Enum(["search", "read"], {
+			type: "string",
+			description: "Operation to perform",
 		}),
-	),
-	limit: Type.Optional(
-		Type.Integer({
-			description: "Maximum search results per page (default 10, max 50)",
-			minimum: 1,
-			maximum: 50,
-		}),
-	),
-	cursor: Type.Optional(
-		Type.String({
-			description: "Continuation from the previous search page; keep query and all unchanged",
-			maxLength: 512,
-		}),
-	),
-	offset: Type.Optional(
-		Type.Integer({ description: "Character offset for read (default 0)", minimum: 0 }),
-	),
-	imageOffset: Type.Optional(
-		Type.Integer({
-			description: "First image to return (read); use the value from the continuation",
-			minimum: 0,
-		}),
-	),
-});
+		query: Type.Optional(
+			Type.String({ description: "Case-insensitive text to find (search)" }),
+		),
+		id: Type.Optional(
+			Type.String({ description: "Entry id exactly as search printed it (read)" }),
+		),
+		all: Type.Optional(
+			Type.Boolean({
+				description: "Also search this project's other sessions and subagent runs",
+			}),
+		),
+		limit: Type.Optional(
+			Type.Integer({
+				description: "Maximum search results per page (default 10, max 50)",
+				minimum: 1,
+				maximum: 50,
+			}),
+		),
+		cursor: Type.Optional(
+			Type.String({
+				description:
+					"Continuation from the previous search page; keep query and all unchanged",
+				maxLength: 512,
+			}),
+		),
+		offset: Type.Optional(
+			Type.Integer({ description: "Character offset for read (default 0)", minimum: 0 }),
+		),
+		imageOffset: Type.Optional(
+			Type.Integer({
+				description: "First image to return (read); use the value from the continuation",
+				minimum: 0,
+			}),
+		),
+	},
+	{ additionalProperties: false },
+);
 export type HistoryParams = Immutable<Static<typeof historyParameters>>;
 export type HistorySource = {
 	readonly dir: string;

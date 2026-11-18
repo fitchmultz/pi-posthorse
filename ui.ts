@@ -17,16 +17,25 @@ interface ExpansionState {
 	expanded: boolean;
 }
 
+function localExpansion(
+	states: WeakMap<object, ExpansionState>,
+	message: object,
+	globalExpanded: boolean,
+): ExpansionState {
+	let state = states.get(message);
+	if (state === undefined || state.global !== globalExpanded) {
+		state = { global: globalExpanded, expanded: globalExpanded };
+		states.set(message, state);
+	}
+	return state;
+}
+
 /** Each saved message owns its click state; global expansion resets that local choice. */
 export function registerPosthorseMessages(pi: ExtensionAPI): void {
 	const states = new WeakMap<object, ExpansionState>();
 	const renderer: MessageRenderer = (message, options, theme) => {
-		let state = states.get(message);
-		if (state === undefined || state.global !== options.expanded) {
-			state = { global: options.expanded, expanded: options.expanded };
-			states.set(message, state);
-		}
-		const view = state;
+		const nativeToggle = "compactView" in options && options.compactView !== undefined;
+		const view = nativeToggle ? undefined : localExpansion(states, message, options.expanded);
 		const window = message.customType === LEGACY_WINDOW_TYPE;
 		const raw = textOf(message.content);
 		const handoffLabel = "\n\nHandoff from the previous window:\n";
@@ -36,46 +45,61 @@ export function registerPosthorseMessages(pi: ExtensionAPI): void {
 			: raw;
 		const previewRows = window ? 2 : 3;
 		const previewText = leadingRows(preview, theme, "toolOutput", previewRows);
-		const expandKey = options.keyText("app.tools.expand");
+		const expandHint = options.keyHint("app.tools.expand", "to expand");
 		let fullText: Text | undefined;
+		let cached: { readonly width: number; readonly lines: string[] } | undefined;
 		const historyText = textBlock("Earlier conversation remains in history.", theme, "muted");
+		const messageLines = (inner: number, expanded: boolean): string[] => {
+			const title = `${expanded ? "▾" : "▸"} ${window ? "Context window started" : "Checkpoint reminder"}`;
+			const heading = truncateToWidth(
+				theme.fg(window ? "customMessageLabel" : "warning", theme.bold(clean(title))),
+				inner,
+			);
+			const body = expanded
+				? (fullText ??= textBlock(raw, theme)).render(inner)
+				: [
+						...(window ? historyText.render(inner).slice(0, 2) : []),
+						...previewText(inner).slice(0, previewRows),
+						hint(theme, inner, expandHint),
+					];
+			return [heading, ...body];
+		};
 		const content: Component = {
 			invalidate() {
-				// Pi calls the renderer again on invalidation, so cached rows never outlive a theme.
+				fullText = undefined;
+				cached = undefined;
 			},
 			render(width) {
+				if (cached?.width === width) {
+					return cached.lines;
+				}
 				const padding = Math.min(
 					options.outputPad,
 					Math.max(0, Math.floor((width - 1) / 2)),
 				);
 				const inner = Math.max(1, width - padding * 2);
-				const title = `${view.expanded ? "▾" : "▸"} ${window ? "Context window started" : "Checkpoint reminder"}`;
-				const heading = truncateToWidth(
-					theme.fg(window ? "customMessageLabel" : "warning", theme.bold(clean(title))),
-					inner,
-				);
-				const body = view.expanded
-					? (fullText ??= textBlock(raw, theme)).render(inner)
-					: [
-							...(window ? historyText.render(inner).slice(0, 2) : []),
-							...previewText(inner).slice(0, previewRows),
-							hint(theme, inner, expandKey),
-						];
+				const rows = messageLines(inner, view?.expanded ?? options.expanded);
 				const box = new Box(padding, 1, (line) => theme.bg("customMessageBg", line));
 				box.addChild({
-					render: () => [heading, ...body],
+					render: () => rows,
 					invalidate() {
 						// The parent rebuilds this stateless box for every render.
 					},
 				});
-				return box.render(width);
+				const lines = box.render(width);
+				cached = { width, lines };
+				return lines;
 			},
 		};
+		if (view === undefined) {
+			return content;
+		}
 		return new MouseRegion(content, (event) => {
 			if (event.type !== "click" || event.button !== "left") {
 				return;
 			}
 			view.expanded = !view.expanded;
+			content.invalidate();
 			return { handled: true };
 		});
 	};
