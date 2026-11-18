@@ -20,6 +20,7 @@ import {
 	visibleWidth,
 	TuiMainScreen,
 	ProcessTerminal,
+	type Component,
 	type Keybinding,
 	type TuiMouseEvent,
 } from "@earendil-works/pi-tui";
@@ -78,14 +79,14 @@ function card(name: string, args: unknown = {}) {
 	);
 }
 
-function lines(component: { readonly render: (width: number) => string[] }, width = 80) {
+function lines(component: Pick<Component, "render">, width = 80) {
 	const rendered = component.render(width);
 	for (const line of rendered) {
 		assert.ok(visibleWidth(line) <= width, `row exceeds ${width} columns`);
 	}
 	return rendered.map((line) => stripTerminalSequences(line).trimEnd());
 }
-const text = (component: { readonly render: (width: number) => string[] }, width = 80) =>
+const text = (component: Pick<Component, "render">, width = 80) =>
 	lines(component, width).join("\n");
 const result = (value: string, details?: unknown, isError = false) => ({
 	content: [{ type: "text", text: value }],
