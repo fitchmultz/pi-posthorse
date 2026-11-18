@@ -114,22 +114,22 @@ export function searchPage(
 function readOffsets(
 	item: WindowedEntry,
 	params: HistoryParams,
-): { readonly offset: number; readonly imageOffset: number } {
+	shownId: string,
+): { readonly offset: number; readonly imageOffset: number } | string {
 	const offset = params.offset ?? 0;
 	const imageOffset = params.imageOffset ?? (offset === 0 ? 0 : item.images.length);
-	const id = params.id ?? "";
+	const restart =
+		item.images.length > 0
+			? "Restart with offset 0 and imageOffset 0."
+			: "Restart with offset 0.";
 	if (imageOffset > item.images.length) {
-		throw new Error(
-			`Image offset ${imageOffset} is past the end of history entry "${id}" (${item.images.length} images).`,
-		);
+		return `Image offset ${imageOffset} is past the end of history entry "${shownId}" (${item.images.length} images). ${restart}`;
 	}
 	if (
 		offset > item.text.length ||
 		(offset === item.text.length && imageOffset === item.images.length)
 	) {
-		throw new Error(
-			`Offset ${offset} is past the end of history entry "${id}" (${item.text.length} chars).`,
-		);
+		return `Offset ${offset} is past the end of history entry "${shownId}" (${item.text.length} chars). ${restart}`;
 	}
 	return { offset, imageOffset };
 }
@@ -143,7 +143,11 @@ export function historyReadPage(
 	source = "",
 ): TextResult {
 	const shownId = shownEntryId(item, params.id, source);
-	const { offset, imageOffset } = readOffsets(item, params);
+	const offsets = readOffsets(item, params, shownId);
+	if (typeof offsets === "string") {
+		return access.pages.deliver(access.host, {}, () => textResult(offsets));
+	}
+	const { offset, imageOffset } = offsets;
 	const firstImage = imageOffset < item.images.length ? 1 : 0;
 	return access.pages.deliver(access.host, { imageCount: firstImage }, (chars) => {
 		const imageEnd = Math.min(

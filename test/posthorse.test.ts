@@ -39,6 +39,7 @@ import type { EntryLike } from "../src/contracts.ts";
 import { noteOperations } from "../src/note-tool-effects.ts";
 import type { PosthorseDisplay } from "../ui.ts";
 import { Type, type TSchema } from "typebox";
+import { Check } from "typebox/value";
 
 type ContextInput = Readonly<Omit<TestContext, "sessionManager">> & {
 	readonly sessionManager: Readonly<TestContext["sessionManager"]>;
@@ -2671,10 +2672,17 @@ await test("history image continuations preserve order and text, even near the r
 			}
 			assert.equal(recoveredText, `[user] ${text}\n[13 images: image/png]`);
 			assert.deepEqual(recoveredImages, images);
-			await assert.rejects(
-				run(tools, "history", { op: "read", id: "images", imageOffset: 14 }, context),
-				/Image offset 14 is past the end/,
+			const pastImage = await run(
+				tools,
+				"history",
+				{ op: "read", id: "images", imageOffset: 14 },
+				context,
 			);
+			assert.equal(
+				toolText(pastImage),
+				'Image offset 14 is past the end of history entry "images" (13 images). Restart with offset 0 and imageOffset 0.',
+			);
+			assert.equal(pastImage.content.length, 1);
 			const tight = usageContext(context, 32_000, 14_117);
 			const page = await run(
 				tools,
@@ -3065,7 +3073,14 @@ await test("mixed search/list/read outputs and no-match results share one reserv
 			requireValue(handlers.get("turn_start"))({}, context);
 			// Complete this sibling batch before resetting its shared reservation for the next order.
 			const results = await Promise.allSettled([
-				run(tools, first, { op: "search", query: "needle", limit: 50 }, context),
+				run(
+					tools,
+					first,
+					first === "history"
+						? { op: "search", query: "needle", limit: 50 }
+						: { op: "search", query: "needle" },
+					context,
+				),
 				run(tools, "notes", { op: "list" }, context),
 				run(tools, "notes", { op: "read", path: "long.md" }, context),
 				run(tools, "history", { op: "read", id: "entry-0" }, context),
@@ -3981,7 +3996,10 @@ await test("long notes page fully, empty writes clear, appends stay separated, a
 		);
 		const third = toolText(await notes({ op: "read", path: "big.md", offset: pageChars * 2 }));
 		assert.equal(third, header + body.slice(pageChars * 2));
-		await assert.rejects(notes({ op: "read", path: "big.md", offset: 85_000 }), /past the end/);
+		assert.equal(
+			toolText(await notes({ op: "read", path: "big.md", offset: 85_000 })),
+			"Offset 85000 is past the end of big.md (85000 chars). Restart with offset 0.",
+		);
 
 		await notes({ op: "write", path: "big.md", content: "" });
 		assert.equal(readFileSync(join(dir, ".pi", "notes", "big.md"), "utf8"), "");
@@ -5285,4 +5303,154 @@ await test("automatic recovery ignores relative file-tool note paths whose worki
 		/Referenced note \(read\): absolute\.md \(\/workspace\/\.pi\/notes\/absolute\.md\)/u,
 	);
 	assert.doesNotMatch(handoff, /relative\.md/u);
+});
+
+await test("past-end offsets on notes list, search, read, and history read return soft guidance", async () => {
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-posthorse-soft-offsets-")));
+	try {
+		const { tools, context: base } = await setup();
+		const branch = [
+			{
+				type: "message",
+				id: "text-entry",
+				message: { role: "user", content: "alpha beta" },
+			},
+			{
+				type: "message",
+				id: "mixed-entry",
+				message: {
+					role: "user",
+					content: [
+						{ type: "text", text: "with pic" },
+						{ type: "image", mimeType: "image/png", data: "AA==" },
+					],
+				},
+			},
+		];
+		const context = branchContext({ ...base, cwd: dir }, { branch });
+		await run(tools, "notes", { op: "write", path: "note.md", content: "hello" }, context);
+		await run(tools, "notes", { op: "write", path: "empty.md", content: "" }, context);
+
+		assert.equal(
+			toolText(
+				await run(tools, "notes", { op: "read", path: "note.md", offset: 99 }, context),
+			),
+			"Offset 99 is past the end of note.md (5 chars). Restart with offset 0.",
+		);
+		assert.equal(
+			toolText(
+				await run(tools, "notes", { op: "read", path: "empty.md", offset: 1 }, context),
+			),
+			"Offset 1 is past the end of empty.md (0 chars). Restart with offset 0.",
+		);
+
+		const listed = toolText(await run(tools, "notes", { op: "list" }, context));
+		const listBodyLen = listed.slice(
+			`Notes directory: ${join(dir, ".pi", "notes")}\n`.length,
+		).length;
+		assert.equal(
+			toolText(await run(tools, "notes", { op: "list", offset: listBodyLen }, context)),
+			`Offset ${listBodyLen} is at or past the end (${listBodyLen} chars); no more entries. Restart with offset 0.`,
+		);
+
+		const searched = toolText(
+			await run(tools, "notes", { op: "search", query: "hello" }, context),
+		);
+		assert.equal(
+			toolText(
+				await run(
+					tools,
+					"notes",
+					{ op: "search", query: "hello", offset: searched.length + 10 },
+					context,
+				),
+			),
+			`Offset ${searched.length + 10} is at or past the end (${searched.length} chars); no more entries. Restart with offset 0.`,
+		);
+
+		const textLen = "[user] alpha beta".length;
+		assert.equal(
+			toolText(
+				await run(
+					tools,
+					"history",
+					{ op: "read", id: "text-entry", offset: textLen },
+					context,
+				),
+			),
+			`Offset ${textLen} is past the end of history entry "text-entry" (${textLen} chars). Restart with offset 0.`,
+		);
+		assert.equal(
+			toolText(
+				await run(
+					tools,
+					"history",
+					{ op: "read", id: "text-entry", offset: textLen + 5 },
+					context,
+				),
+			),
+			`Offset ${textLen + 5} is past the end of history entry "text-entry" (${textLen} chars). Restart with offset 0.`,
+		);
+		assert.equal(
+			toolText(
+				await run(
+					tools,
+					"history",
+					{ op: "read", id: "text-entry", imageOffset: 1 },
+					context,
+				),
+			),
+			'Image offset 1 is past the end of history entry "text-entry" (0 images). Restart with offset 0.',
+		);
+
+		const mixedLen = "[user] with pic\n[1 image: image/png]".length;
+		assert.equal(
+			toolText(
+				await run(
+					tools,
+					"history",
+					{ op: "read", id: "mixed-entry", offset: mixedLen, imageOffset: 1 },
+					context,
+				),
+			),
+			`Offset ${mixedLen} is past the end of history entry "mixed-entry" (${mixedLen} chars). Restart with offset 0 and imageOffset 0.`,
+		);
+		const remainingImage = await run(
+			tools,
+			"history",
+			{ op: "read", id: "mixed-entry", offset: mixedLen, imageOffset: 0 },
+			context,
+		);
+		assert.equal(remainingImage.content.length, 2);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+await test("notes, history, and new_context tool schemas disallow unknown extra properties", async () => {
+	const { toolDefinitions } = await setup();
+	const byName = new Map(toolDefinitions.map((tool) => [tool.name, tool]));
+	const cases = [
+		{
+			name: "notes",
+			valid: { op: "list" },
+			invalid: { op: "list", unknownExtra: true },
+		},
+		{
+			name: "history",
+			valid: { op: "search", query: "needle" },
+			invalid: { op: "search", query: "needle", unknownExtra: 1 },
+		},
+		{
+			name: "new_context",
+			valid: { handoff: "continue" },
+			invalid: { handoff: "continue", unknownExtra: "nope" },
+		},
+	] as const;
+	for (const { name, valid, invalid } of cases) {
+		const schema = requireValue(byName.get(name)?.parameters, `${name} schema`);
+		assert.equal(record(schema).additionalProperties, false, `${name} additionalProperties`);
+		assert.equal(Check(schema, valid), true, `${name} accepts valid input`);
+		assert.equal(Check(schema, invalid), false, `${name} rejects extra properties`);
+	}
 });

@@ -29,13 +29,6 @@ const titles: Readonly<Record<ToolName, string>> = {
 	new_context: "New context",
 };
 
-interface CallState {
-	readonly isError: boolean;
-	readonly isPartial: boolean;
-	readonly executionStarted: boolean;
-	readonly expanded: boolean;
-}
-
 function callTarget(name: ToolName, args: Readonly<Record<string, unknown>>): string {
 	if (args.op === "search") {
 		return ` · “${argument(args.query, "query")}”`;
@@ -44,16 +37,6 @@ function callTarget(name: ToolName, args: Readonly<Record<string, unknown>>): st
 		return ` · ${argument(args.path, "path")}`;
 	}
 	return name === "history" && args.op === "read" ? ` · ${argument(args.id, "id")}` : "";
-}
-
-function callStatus(state: CallState): string {
-	if (state.isError) {
-		return " · error";
-	}
-	if (!state.isPartial) {
-		return "";
-	}
-	return state.executionStarted ? " · running" : " · preparing";
 }
 
 function callDetails(name: ToolName, args: Readonly<Record<string, unknown>>): string {
@@ -75,11 +58,51 @@ function callDetails(name: ToolName, args: Readonly<Record<string, unknown>>): s
 	return [scope, ...offsets].filter((part) => part.length > 0).join(" · ");
 }
 
+class CallHeader implements Component {
+	private heading = "";
+	private details = "";
+	private expanded = false;
+	private cached: { readonly width: number; readonly lines: string[] } | undefined;
+
+	update(heading: string, details: string, expanded: boolean): void {
+		if (this.heading === heading && this.details === details && this.expanded === expanded) {
+			return;
+		}
+		this.heading = heading;
+		this.details = details;
+		this.expanded = expanded;
+		this.invalidate();
+	}
+
+	invalidate(): void {
+		this.cached = undefined;
+	}
+
+	render(width: number): string[] {
+		if (this.cached?.width === width) {
+			return this.cached.lines;
+		}
+		const lines = this.expanded
+			? [
+					...new Text(this.heading, 0, 0).render(width),
+					...(this.details.length > 0 ? new Text(this.details, 0, 0).render(width) : []),
+				]
+			: [truncateToWidth(this.heading.replace(/\s+/g, " "), width)];
+		this.cached = { width, lines };
+		return lines;
+	}
+}
+
+interface CallContext {
+	readonly expanded: boolean;
+	readonly lastComponent: Component | undefined;
+}
+
 function callComponent(
 	name: ToolName,
 	args: Readonly<Record<string, unknown>>,
 	theme: Theme,
-	state: CallState,
+	context: CallContext,
 ): Component {
 	let action = "";
 	if (name === "notes" || name === "history") {
@@ -87,28 +110,15 @@ function callComponent(
 	} else if (name === "new_context") {
 		action = " · request";
 	}
-	let marker = "▸";
-	if (state.isPartial) {
-		marker = "…";
-	} else if (state.expanded) {
-		marker = "▾";
-	}
-	const label = `${marker} ${titles[name]}${action}${callStatus(state)}${callTarget(name, args)}`;
-	return {
-		invalidate() {
-			// Stateless layout is recomputed with the current width on every render.
-		},
-		render(width) {
-			const heading = theme.fg(state.isError ? "error" : "toolTitle", theme.bold(label));
-			if (!state.expanded) {
-				return [truncateToWidth(heading.replace(/\s+/g, " "), width)];
-			}
-			return [
-				...new Text(heading, 0, 0).render(width),
-				...textBlock(callDetails(name, args), theme, "muted").render(width),
-			];
-		},
-	};
+	const marker = context.expanded ? "▾" : "▸";
+	const label = `${marker} ${titles[name]}${action}${callTarget(name, args)}`;
+	const heading = theme.fg("toolTitle", theme.bold(label));
+	const detailsText = callDetails(name, args);
+	const details = detailsText.length > 0 ? theme.fg("muted", clean(detailsText)) : "";
+	const component =
+		context.lastComponent instanceof CallHeader ? context.lastComponent : new CallHeader();
+	component.update(heading, details, context.expanded);
+	return component;
 }
 
 interface ResultFacts {
@@ -121,7 +131,7 @@ interface ResultFacts {
 	readonly expanded: boolean;
 	readonly imageCount: number;
 	readonly showImages: boolean;
-	readonly expandKey: string;
+	readonly expandHint: string;
 }
 
 function submittedText(facts: ResultFacts): string {
@@ -315,7 +325,7 @@ function collapsedView(
 			...summaryRows,
 			...shown,
 			...attachments,
-			...(hidden ? [hint(theme, width, facts.expandKey)] : []),
+			...(hidden ? [hint(theme, width, facts.expandHint)] : []),
 		];
 	};
 }
@@ -349,7 +359,7 @@ export function toolCards(name: ToolName): Pick<ToolDefinition, "renderCall" | "
 					expanded,
 					imageCount: result.content.filter((part) => part.type === "image").length,
 					showImages: context.showImages,
-					expandKey: context.keyText("app.tools.expand"),
+					expandHint: context.keyHint("app.tools.expand", "to expand"),
 				},
 				theme,
 			);

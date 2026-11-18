@@ -58,14 +58,17 @@ export function registerContextTools(
 		description:
 			"Optionally request a deliberate clean context reset once the current foreground tools succeed; retains no prior messages, unlike automatic rollover. Not required after a notes reminder. Background work continues. Earlier conversation stays recoverable through history. Put continuation state in handoff, or save fuller state in notes first.",
 		promptSnippet: "optionally request a clean context reset with an optional handoff",
-		parameters: Type.Object({
-			handoff: Type.Optional(
-				Type.String({
-					description: "What the fresh window needs to continue, as readable prose",
-					maxLength: MAX_HANDOFF_CHARS,
-				}),
-			),
-		}),
+		parameters: Type.Object(
+			{
+				handoff: Type.Optional(
+					Type.String({
+						description: "What the fresh window needs to continue, as readable prose",
+						maxLength: MAX_HANDOFF_CHARS,
+					}),
+				),
+			},
+			{ additionalProperties: false },
+		),
 		async execute(...[id, { handoff }, , , ctx]) {
 			const trimmed = handoff?.trim();
 			const limit = freshPayloadChars(policy(ctx), activeToolTokens());
