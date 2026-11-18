@@ -20,7 +20,7 @@ import {
 } from "./session-files.ts";
 
 const DEFAULT_SEARCH_LIMIT = 10;
-const MAX_SEARCH_LIMIT = 50;
+export const MAX_SEARCH_LIMIT = 50;
 
 export const historyParameters = Type.Object(
 	{
@@ -42,6 +42,7 @@ export const historyParameters = Type.Object(
 		limit: Type.Optional(
 			Type.Integer({
 				description: `Search only: maximum results per page (1–${MAX_SEARCH_LIMIT}, default ${DEFAULT_SEARCH_LIMIT}). Omit for read; use its returned offset and imageOffset, if shown.`,
+				minimum: 1,
 			}),
 		),
 		cursor: Type.Optional(
@@ -329,7 +330,7 @@ export async function historyMatches(
 	fail: (message: string) => never,
 ): Promise<HistoryMatches> {
 	const limit = params.limit ?? DEFAULT_SEARCH_LIMIT;
-	if (limit < 1 || limit > MAX_SEARCH_LIMIT) {
+	if (limit > MAX_SEARCH_LIMIT) {
 		fail(`History search limit must be between 1 and ${MAX_SEARCH_LIMIT} results per page.`);
 	}
 	const query = requireValue(params.query, "query", params.op).toLowerCase();

@@ -8,7 +8,7 @@ import {
 import { textResult, type TextResult } from "./ui/display.ts";
 import { excerpt, shortKey, sourceTag } from "./message-text.ts";
 import { cursorFor as cursorAt } from "./history-cursor.ts";
-import type { HistoryMatches, HistoryParams } from "./history-search.ts";
+import { MAX_SEARCH_LIMIT, type HistoryMatches, type HistoryParams } from "./history-search.ts";
 import type { PageAccess } from "./paging.ts";
 
 type Continuation<Position> =
@@ -170,8 +170,12 @@ export function historyReadPage(
 			continuation.kind === "more"
 				? `\nMore remains; call history read with id "${shownId}" and offset ${continuation.next.offset}${item.images.length > 0 ? ` and imageOffset ${continuation.next.imageOffset}` : ""}.`
 				: "";
+		const limitHint =
+			(params.limit ?? 0) > MAX_SEARCH_LIMIT
+				? "\n[Omit limit for history read. It sets the search result count, not the read page size.]"
+				: "";
 		const header = `${item.entry.timestamp ?? ""}${sourceTag(source)} [window ${item.windowId}] [${shownId}] [chars ${offset}-${end} of ${item.text.length}] `;
-		return textResult(`${header}${item.text.slice(offset, end)}${more}`, images, {
+		return textResult(`${header}${item.text.slice(offset, end)}${more}${limitHint}`, images, {
 			kind: "history-read",
 			headerLength: header.length,
 			offset,

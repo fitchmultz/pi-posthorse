@@ -89,15 +89,10 @@ export function registerHistory(
 		parameters: historyParameters,
 		async execute(...[, params, signal, , ctx]) {
 			const source = historySource(ctx);
-			const fail = (message: string): never => pages.error(policy(ctx), message);
 			if (params.op === "search") {
+				const fail = (message: string): never => pages.error(policy(ctx), message);
 				const matches = await historyMatches(source, params, signal, fail);
 				return searchPage(matches, params, policy(ctx), pages);
-			}
-			if (params.limit !== undefined) {
-				fail(
-					"History read sets the page size automatically. Omit limit. To continue, use the returned offset and imageOffset, if shown, with the same id.",
-				);
 			}
 			const id = requireValue(params.id, "id", params.op);
 			const located = await findEntry(source, id, signal);
