@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.10.34 - 2026-11-18
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- chore(quality): adopt tsrs@7.1.0-beta.tsrs2 and bump oxlint/oxfmt (#228) ([82b2156](https://github.com/fitchmultz/pi-posthorse/commit/82b21564db1fe778432811dc19149899ad0bd0b5))
+
+### What's Changed
+
+- chore(quality): adopt tsrs@7.1.0-beta.tsrs2 and bump oxlint/oxfmt by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/228
+- Explain history read and search paging (PPH-202) (1/1) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/229
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.33...v0.10.34
+
 ## 0.10.33 - 2026-11-18
 
 <!-- npm-release:unreleased:start -->
