@@ -19,6 +19,9 @@ import {
 	sessionWindowEntries,
 } from "./session-files.ts";
 
+const DEFAULT_SEARCH_LIMIT = 10;
+const MAX_SEARCH_LIMIT = 50;
+
 export const historyParameters = Type.Object(
 	{
 		op: Type.Enum(["search", "read"], {
@@ -38,9 +41,7 @@ export const historyParameters = Type.Object(
 		),
 		limit: Type.Optional(
 			Type.Integer({
-				description: "Maximum search results per page (default 10, max 50)",
-				minimum: 1,
-				maximum: 50,
+				description: `Search only: maximum results per page (1–${MAX_SEARCH_LIMIT}, default ${DEFAULT_SEARCH_LIMIT}). Omit for read; use its returned offset and imageOffset, if shown.`,
 			}),
 		),
 		cursor: Type.Optional(
@@ -51,7 +52,10 @@ export const historyParameters = Type.Object(
 			}),
 		),
 		offset: Type.Optional(
-			Type.Integer({ description: "Character offset for read (default 0)", minimum: 0 }),
+			Type.Integer({
+				description: "Read only: character offset from the previous page (default 0)",
+				minimum: 0,
+			}),
 		),
 		imageOffset: Type.Optional(
 			Type.Integer({
@@ -324,8 +328,11 @@ export async function historyMatches(
 	signal: AbortSignal | undefined,
 	fail: (message: string) => never,
 ): Promise<HistoryMatches> {
+	const limit = params.limit ?? DEFAULT_SEARCH_LIMIT;
+	if (limit < 1 || limit > MAX_SEARCH_LIMIT) {
+		fail(`History search limit must be between 1 and ${MAX_SEARCH_LIMIT} results per page.`);
+	}
 	const query = requireValue(params.query, "query", params.op).toLowerCase();
-	const limit = params.limit ?? 10;
 	const key = shortKey(JSON.stringify([query, params.all === true]));
 	let cursor: HistoryCursor | undefined;
 	try {

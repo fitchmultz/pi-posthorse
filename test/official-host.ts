@@ -474,6 +474,54 @@ for (const order of ["before", "after"]) {
 	});
 }
 
+await test("history explains search and read paging through Pi's tool validation", async (t) => {
+	const h = await fixture(t, { fileExtension: true });
+	const body = `PAGING_NEWER ${"x".repeat(45_000)} PAGING_END`;
+	h.sessionManager.appendMessage({ role: "user", content: "PAGING_HIT first", timestamp: 1 });
+	h.sessionManager.appendMessage({ role: "user", content: "PAGING_HIT second", timestamp: 2 });
+	const id = h.sessionManager.appendMessage({ role: "user", content: body, timestamp: 3 });
+	h.faux.setResponses([
+		toolTurn(fauxToolCall("new_context", { handoff: "Test the history paging contract." })),
+		toolTurn(fauxToolCall("history", { op: "search", query: "PAGING_HIT", limit: 51 })),
+		toolTurn(fauxToolCall("history", { op: "search", query: "PAGING_HIT", limit: 1 })),
+		() => {
+			const result = toolResult(h, "history");
+			assert.equal(result.isError, false);
+			assert.match(textOf(result), /PAGING_HIT second/);
+			assert.doesNotMatch(textOf(result), /PAGING_HIT first/);
+			const cursor = requireValue(
+				textOf(result).match(/continue with cursor "([^"]+)"/)?.[1],
+			);
+			return toolTurn(
+				fauxToolCall("history", { op: "search", query: "PAGING_HIT", limit: 1, cursor }),
+			);
+		},
+		toolTurn(fauxToolCall("history", { op: "read", id, limit: 12_000 })),
+		toolTurn(fauxToolCall("history", { op: "read", id })),
+		() => {
+			const result = toolResult(h, "history");
+			assert.equal(result.isError, false);
+			assert.match(textOf(result), /PAGING_NEWER/);
+			assert.doesNotMatch(textOf(result), /PAGING_END/);
+			const offset = Number(requireValue(textOf(result).match(/and offset (\d+)\./)?.[1]));
+			return toolTurn(fauxToolCall("history", { op: "read", id, offset }));
+		},
+		fauxAssistantMessage("Recovered."),
+	]);
+	await h.session.prompt("Verify history paging.");
+	const [badSearch, , nextSearch, badRead, , finalRead] = toolResults(
+		h.sessionManager,
+		"history",
+	);
+	assert.equal(requireValue(badRead).isError, true);
+	assert.match(textOf(badRead), /omit limit.*offset.*imageOffset/i);
+	assert.equal(requireValue(badSearch).isError, true);
+	assert.match(textOf(badSearch), /history search limit must be between 1 and 50/i);
+	assert.match(textOf(nextSearch), /PAGING_HIT first/);
+	assert.equal(requireValue(finalRead).isError, false);
+	assert.match(textOf(finalRead), /PAGING_END$/);
+});
+
 await test("oversized tool output rolls over without credentials and repeated resets do not nest recovery", async (t) => {
 	const h = await fixture(t, { extension: (pi) => registerDump(pi, { image: FIXTURE_PNG }) });
 	const requests: TranscriptMessages[] = [];
