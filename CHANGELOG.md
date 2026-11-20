@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.36 - 2026-11-20
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- feat(recovery): improve rollover preamble, secondary note cues, and superseded coordination events (PPH-204) (#231) ([3f34f35](https://github.com/fitchmultz/pi-posthorse/commit/3f34f3522b4a583b98c23f9ee75fe67af2de2a3e))
+
+### What's Changed
+
+- feat(recovery): improve rollover preamble, secondary note cues, and superseded coordination events (PPH-204) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/231
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.35...v0.10.36
+
 ## 0.10.35 - 2026-11-18
 
 <!-- npm-release:unreleased:start -->
