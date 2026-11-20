@@ -749,7 +749,7 @@ await test("fork recovery names a note it wrote in another scope by its path", a
 	const boundaries = posthorseBoundaries(child.sessionManager);
 	assert.equal(boundaries.length, 2);
 	const listed = requireValue(
-		/^- Active note \(written\): (\S+) \[[^\]]* — read this note on its path now\]$/mu.exec(
+		/^- Earlier note \(written\): (\S+) \[compacted in an earlier window at entry \S+; not in window — read on its path only if still relevant\]$/mu.exec(
 			requireValue(boundaries.at(-1)).summary,
 		)?.[1],
 	);

@@ -2,6 +2,7 @@ import { OWNER_QUESTION_TOOL, type EntryLike, type ProjectedEntry } from "./cont
 import { chainsAncestry, contextStart } from "./boundary.ts";
 import { contextEdits } from "./history-entries.ts";
 import { toolCalls } from "./message-text.ts";
+import { supersededCoordinationMap, type Supersession } from "./recovery-coordination.ts";
 import {
 	formatRecord,
 	MAX_RECOVERY_RECORD_CHARS,
@@ -55,6 +56,7 @@ function ownerRecords(
 	entries: readonly EntryLike[],
 	projected: readonly ProjectedEntry[],
 	ownerQuestionRegistered: boolean,
+	superseded?: ReadonlyMap<string, Supersession>,
 ): RecoveryRecord[] {
 	const calls = new Map(
 		projected.flatMap(({ messages }) =>
@@ -72,6 +74,7 @@ function ownerRecords(
 			ownerQuestionRegistered &&
 				call?.name === OWNER_QUESTION_TOOL &&
 				call.namespace === undefined,
+			entry.id === undefined ? undefined : superseded?.get(entry.id),
 		);
 		return record === undefined ? [] : [record];
 	});
@@ -80,9 +83,12 @@ function anchors(records: readonly RecoveryRecord[]): {
 	fixed: RecoveryRecord[];
 	others: RecoveryRecord[];
 } {
-	const firstOwner = records.find((record) => record.label === "owner input") ?? records[0];
+	const firstOwner =
+		records.find((record) => record.label === "owner input") ??
+		records.find((record) => record.supersededBy === undefined) ??
+		records[0];
 	const latestOwner = records.findLast((record) => record.kind === "owner");
-	const latestOverall = records.at(-1);
+	const latestOverall = records.findLast((record) => record.supersededBy === undefined);
 	const selected = new Set([firstOwner, latestOwner, latestOverall]);
 	return {
 		fixed: records.filter((record) => selected.has(record)),
@@ -234,11 +240,13 @@ export function recoveryInputs(
 			maxChars,
 		},
 	);
+	const superseded = supersededCoordinationMap(entries, projected, { retained });
 	const { fixed, others } = anchors(
 		ownerRecords(
 			projectedCurrent(entries, projected, undefined, retained),
 			projected,
 			ownerQuestionRegistered,
+			superseded,
 		),
 	);
 	return { fixed: [...carried, ...fixed], others, checkpoint, skipped };

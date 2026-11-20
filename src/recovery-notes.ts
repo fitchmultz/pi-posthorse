@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { contextStart } from "./boundary.ts";
 import type { EntryLike, ProjectedEntry } from "./contracts.ts";
 import { sessionNoteTouches, scopeRecoveryTouches, type NotesRecovery } from "./note-evidence.ts";
 import { scopeDirectory } from "./note-scopes.ts";
@@ -96,32 +97,88 @@ function formatNoteLabel(note: TrackedNote, elsewhere: string | undefined): stri
 		? `${note.notePath} (${note.absPath})`
 		: note.notePath;
 }
-function formatWrittenNoteLine(
+type WrittenNoteOptions = {
+	readonly span: RetainedSpan | undefined;
+	readonly notesDirectory: string | undefined;
+	readonly isPrimary: boolean;
+	readonly inCurrentWindow: boolean;
+};
+function formatPrimaryNoteProof(
 	note: WrittenNote,
 	span: RetainedSpan | undefined,
-	notesDirectory: string | undefined,
+	how: string,
 ): string {
-	const elsewhere = pathElsewhere(note, notesDirectory);
-	const label = formatNoteLabel(note, elsewhere);
-	const how = elsewhere === undefined ? "" : " on its path";
 	const { proof } = note;
 	if (proof.kind === "effect-only") {
-		return `- Active note (written): ${label} [verified effect at entry ${note.entryId}; full content is not retained — read this note${how} now]`;
+		return `[verified effect at entry ${note.entryId}; full content is not retained — read this note${how} now]`;
 	}
 	if (span === undefined) {
-		return `- Active note (written): ${label} [compacted at entry ${note.entryId} — read this note${how} now]`;
+		return `[compacted at entry ${note.entryId} — read this note${how} now]`;
 	}
 	switch (proof.kind) {
 		case "full": {
 			const updated =
 				proof.updatedAt === undefined ? "" : `, updated at entry ${proof.updatedAt}`;
-			return `- Active note (written): ${label} [latest full write is in the retained tail above at entry ${proof.entryId}${updated}]`;
+			return `[latest full write is in the retained tail above at entry ${proof.entryId}${updated}]`;
 		}
 		case "partial":
-			return `- Active note (written): ${label} [only partial edits are in the retained tail above at entry ${proof.entryId} — read full note${how} now]`;
+			return `[only partial edits are in the retained tail above at entry ${proof.entryId} — read full note${how} now]`;
 		case "compacted":
-			return `- Active note (written): ${label} [compacted before entry ${span.firstId} — read this note${how} now]`;
+			return `[compacted before entry ${span.firstId} — read this note${how} now]`;
 	}
+}
+function formatSecondaryCompactedProof(
+	note: WrittenNote,
+	span: RetainedSpan | undefined,
+	inCurrentWindow: boolean,
+	how: string,
+): string {
+	if (!inCurrentWindow) {
+		return `[compacted in an earlier window at entry ${note.entryId}; not in window — read${how} only if still relevant]`;
+	}
+	if (span !== undefined) {
+		return `[compacted before entry ${span.firstId}; not in window — read${how} only if still relevant]`;
+	}
+	return `[compacted at entry ${note.entryId}; not in window — read${how} only if still relevant]`;
+}
+function formatSecondaryNoteProof(
+	note: WrittenNote,
+	options: {
+		readonly span: RetainedSpan | undefined;
+		readonly inCurrentWindow: boolean;
+		readonly how: string;
+	},
+): string {
+	const { span, inCurrentWindow, how } = options;
+	const { proof } = note;
+	if (proof.kind === "effect-only") {
+		return `[verified effect at entry ${note.entryId}; full content is not in window — read${how} only if still relevant]`;
+	}
+	if (span === undefined || proof.kind === "compacted") {
+		return formatSecondaryCompactedProof(note, span, inCurrentWindow, how);
+	}
+	if (proof.kind === "full") {
+		const updated =
+			proof.updatedAt === undefined ? "" : `, updated at entry ${proof.updatedAt}`;
+		return `[latest full write is in the retained tail above at entry ${proof.entryId}${updated}]`;
+	}
+	return `[only partial edits are in the retained tail above at entry ${proof.entryId} — read full note${how} only if still relevant]`;
+}
+function formatWrittenNoteLine(note: WrittenNote, options: WrittenNoteOptions): string {
+	const elsewhere = pathElsewhere(note, options.notesDirectory);
+	const label = formatNoteLabel(note, elsewhere);
+	const how = elsewhere === undefined ? "" : " on its path";
+	if (options.isPrimary) {
+		return `- Active note (written): ${label} ${formatPrimaryNoteProof(note, options.span, how)}`;
+	}
+	const prefix = options.inCurrentWindow
+		? "- Active note (written):"
+		: "- Earlier note (written):";
+	return `${prefix} ${label} ${formatSecondaryNoteProof(note, {
+		span: options.span,
+		inCurrentWindow: options.inCurrentWindow,
+		how,
+	})}`;
 }
 function formatReadNoteLine(
 	note: ReadNote,
@@ -215,8 +272,20 @@ export function sessionNotesEvidence(
 	const written = all.filter((note) => note.kind === "written").slice(0, MAX_WRITTEN_NOTES);
 	const primary = written[0];
 	const readOnly = all.filter((note) => note.kind === "read").slice(0, MAX_READ_NOTES);
+	const currentWindowIds = new Set(
+		chainEntries
+			.slice(contextStart(chainEntries).start)
+			.flatMap((entry) => (entry.id !== undefined && entry.id !== "" ? [entry.id] : [])),
+	);
 	const lines = [
-		...written.map((note) => formatWrittenNoteLine(note, span, notesDirectory)),
+		...written.map((note, index) =>
+			formatWrittenNoteLine(note, {
+				span,
+				notesDirectory,
+				isPrimary: index === 0,
+				inCurrentWindow: currentWindowIds.has(note.entryId),
+			}),
+		),
 		...readOnly.map((note) => formatReadNoteLine(note, span, notesDirectory)),
 	];
 	const header = "Task notes in this session:";

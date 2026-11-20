@@ -1,5 +1,6 @@
 import { isReminderType, OWNER_QUESTION_TOOL, type EntryLike } from "./contracts.ts";
 import { boundedBlock, contentText, imageSummary, imagesOf } from "./message-text.ts";
+import type { Supersession } from "./recovery-coordination.ts";
 
 export const MAX_RECOVERY_RECORD_CHARS = 4_000;
 export type RecoveryRecord = {
@@ -8,6 +9,7 @@ export type RecoveryRecord = {
 	readonly kind: "owner" | "coordination";
 	readonly label: string;
 	readonly text: string;
+	readonly supersededBy?: Supersession | undefined;
 };
 type RecordSource = {
 	readonly kind: RecoveryRecord["kind"];
@@ -49,15 +51,17 @@ function recordSource(entry: EntryLike, ownerQuestion: boolean): RecordSource | 
 	}
 	return;
 }
-export function recoveryRecord(
-	entry: EntryLike,
-	ownerQuestion: boolean,
-): RecoveryRecord | undefined {
-	const source = recordSource(entry, ownerQuestion);
-	if (source === undefined) {
-		return undefined;
-	}
-	const id = entry.id?.slice(0, 120) ?? "unknown";
+function supersessionSuffix(supersededBy: Supersession): string {
+	return supersededBy.inRetainedTail
+		? `; superseded by entry ${supersededBy.byEntryId} in retained tail`
+		: `; superseded by later entry ${supersededBy.byEntryId}`;
+}
+function recordLabel(source: RecordSource, supersededBy: Supersession | undefined): string {
+	return supersededBy === undefined
+		? source.label
+		: `${source.label}${supersessionSuffix(supersededBy)}`;
+}
+function recordBody(source: RecordSource, id: string): string {
 	const text = contentText(source.content).trim();
 	const summary =
 		source.label === "owner answer via ask_question"
@@ -66,12 +70,28 @@ export function recoveryRecord(
 	const body = [text, summary === "" ? "" : `${summary} — recover with history read id ${id}`]
 		.filter((part) => part !== "")
 		.join("\n");
+	return body === "" ? "(non-text content; recover the entry from history)" : body;
+}
+export function recoveryRecord(
+	entry: EntryLike,
+	ownerQuestion: boolean,
+	supersededBy?: Supersession,
+): RecoveryRecord | undefined {
+	const source = recordSource(entry, ownerQuestion);
+	if (source === undefined) {
+		return undefined;
+	}
+	const id = entry.id?.slice(0, 120) ?? "unknown";
+	const coordinationSupersession = source.kind === "coordination" ? supersededBy : undefined;
 	return {
 		id,
 		timestamp: entry.timestamp?.slice(0, 80) ?? "unknown time",
 		kind: source.kind,
-		label: source.label,
-		text: body === "" ? "(non-text content; recover the entry from history)" : body,
+		label: recordLabel(source, coordinationSupersession),
+		text: recordBody(source, id),
+		...(coordinationSupersession === undefined
+			? {}
+			: { supersededBy: coordinationSupersession }),
 	};
 }
 export function formatRecord(record: RecoveryRecord, limit: number): string {
