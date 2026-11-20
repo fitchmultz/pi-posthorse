@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.37 - 2026-11-20
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- chore(deps): raise Pi floor to 1.6.0 and standardize wildcard Pi peers (PEA-222) (#232) ([de476d5](https://github.com/fitchmultz/pi-posthorse/commit/de476d598b488a666e7bad06f299ab454c7e222c))
+
+### What's Changed
+
+- chore: bump Pi floor to 1.6.0 and standardize wildcard Pi peers (PEA-222) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/232
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.36...v0.10.37
+
 ## 0.10.36 - 2026-11-20
 
 <!-- npm-release:unreleased:start -->
