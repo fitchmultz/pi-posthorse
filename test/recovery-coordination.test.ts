@@ -53,6 +53,7 @@ function toolPair(
 		readonly details?: unknown;
 		readonly content?: string;
 		readonly isError?: boolean;
+		readonly namespace?: string;
 	},
 ): EntryLike[] {
 	return [
@@ -62,7 +63,15 @@ function toolPair(
 			timestamp: "2026-11-16T10:01:00Z",
 			message: {
 				role: "assistant",
-				content: [{ type: "toolCall", id: callId, name: toolName, arguments: args }],
+				content: [
+					{
+						type: "toolCall",
+						id: callId,
+						name: toolName,
+						namespace: result.namespace,
+						arguments: args,
+					},
+				],
 			},
 		},
 		{
@@ -72,6 +81,7 @@ function toolPair(
 			message: {
 				role: "toolResult",
 				toolName,
+				namespace: result.namespace,
 				toolCallId: callId,
 				isError: result.isError === true,
 				content: result.content ?? JSON.stringify(result.details ?? {}),
@@ -90,6 +100,10 @@ function bgCompleteEntry(
 		readonly commandPreview?: string;
 		readonly tail?: string;
 	}[],
+	options?: {
+		readonly details?: unknown;
+		readonly hasCustomDetails?: boolean;
+	},
 ): EntryLike {
 	const blocks = jobs.map((job) => {
 		const summary = JSON.stringify({
@@ -106,10 +120,13 @@ function bgCompleteEntry(
 		timestamp: "2026-11-16T10:02:00Z",
 		customType: "background-command-complete",
 		display: true,
-		details: {
-			jobIds: jobs.map((job) => job.id),
-			jobs: jobs.map(({ id: jobId, status }) => ({ id: jobId, status })),
-		},
+		details:
+			options?.hasCustomDetails === true
+				? options.details
+				: {
+						jobIds: jobs.map((job) => job.id),
+						jobs: jobs.map(({ id: jobId, status }) => ({ id: jobId, status })),
+					},
 		content: `Background commands finished:\n${blocks.join("\n\n")}`,
 	};
 }
@@ -131,34 +148,54 @@ function customEntry(
 	};
 }
 
-await test("watch-pr failed notice is superseded by later succeeded notice without output tail and demoted in handoff", () => {
+await test("background-command-complete is superseded by later notice or targeted single-job status/cancel for the same structured job ID", () => {
 	const entries: EntryLike[] = [
-		ownerEntry("u1", "Fix PR 42 and wait for checks."),
-		bgCompleteEntry("bg-fail", [
-			{
-				id: "job-1",
-				status: "failed",
-				exitCode: 3,
-				commandPreview:
-					"node /skills/watch-pr/scripts/watch-pr.mjs https://github.com/FitchMultz/Pi-Posthorse/pull/42 --interval 60",
-				tail: "BLOCKED: 1 unresolved review thread\npr: https://github.com/FitchMultz/Pi-Posthorse/pull/42",
-			},
+		ownerEntry("u1", "Track background jobs."),
+		bgCompleteEntry(
+			"bg-unknown",
+			[{ id: "j1", status: "unknown", tail: "STALE_UNKNOWN_BODY" }],
+			{ hasCustomDetails: true, details: { jobIds: ["j1"] } },
+		),
+		bgCompleteEntry("bg-resolved", [{ id: "j1", status: "succeeded" }], {
+			hasCustomDetails: true,
+			details: { jobs: [{ id: "j1", status: "succeeded" }] },
+		}),
+		bgCompleteEntry("bg-status-target", [
+			{ id: "j2", status: "failed", tail: "STALE_STATUS_BODY" },
 		]),
-		bgCompleteEntry("bg-pass", [
-			{
-				id: "job-2",
-				status: "succeeded",
-				exitCode: 0,
-				commandPreview:
-					"node /skills/watch-pr/scripts/watch-pr.mjs --repo fitchmultz/pi-posthorse 42 --timeout 3600",
-			},
+		...toolPair(
+			"status-call",
+			"status-res",
+			"c2",
+			"background_command",
+			{ action: "status", id: "j2" },
+			{ details: { id: "j2", status: "failed", exitCode: 1 } },
+		),
+		bgCompleteEntry("bg-cancel-target", [
+			{ id: "j3", status: "timed_out", tail: "STALE_CANCEL_BODY" },
 		]),
+		...toolPair(
+			"cancel-call",
+			"cancel-res",
+			"c3",
+			"background_command",
+			{ action: "cancel", id: "j3" },
+			{ details: { id: "j3", status: "cancelled" } },
+		),
 	];
-	const retained = new Set(["bg-pass"]);
+	const retained = new Set(["bg-resolved", "cancel-res"]);
 	const projected = projectEntries(entries);
 	const map = supersededCoordinationMap(entries, projected, { retained });
-	assert.deepEqual(map.get("bg-fail"), { byEntryId: "bg-pass", inRetainedTail: true });
-	assert.equal(map.get("bg-pass"), undefined);
+	assert.deepEqual(map.get("bg-unknown"), { byEntryId: "bg-resolved", inRetainedTail: true });
+	assert.equal(map.get("bg-resolved"), undefined);
+	assert.deepEqual(map.get("bg-status-target"), {
+		byEntryId: "status-res",
+		inRetainedTail: false,
+	});
+	assert.deepEqual(map.get("bg-cancel-target"), {
+		byEntryId: "cancel-res",
+		inRetainedTail: true,
+	});
 
 	const handoff = buildAutoHandoff(entries, projected, 20_000, {
 		ownerQuestionRegistered: false,
@@ -166,191 +203,114 @@ await test("watch-pr failed notice is superseded by later succeeded notice witho
 	});
 	assert.match(
 		handoff,
-		/Other current-window inputs, oldest first \(recover with history read\):\n\[visible background-command-complete coordination input \(not direct owner input\); superseded by entry bg-pass in retained tail \| 2026-11-16T10:02:00Z \| entry bg-fail\]/,
+		/\[visible background-command-complete coordination input \(not direct owner input\); superseded by entry bg-resolved in retained tail \| 2026-11-16T10:02:00Z \| entry bg-unknown\]/,
 	);
-	assert.doesNotMatch(handoff, /BLOCKED: 1 unresolved review thread/);
+	assert.match(
+		handoff,
+		/\[visible background-command-complete coordination input \(not direct owner input\); superseded by later entry status-res \| 2026-11-16T10:02:00Z \| entry bg-status-target\]/,
+	);
+	assert.match(
+		handoff,
+		/\[visible background-command-complete coordination input \(not direct owner input\); superseded by entry cancel-res in retained tail \| 2026-11-16T10:02:00Z \| entry bg-cancel-target\]/,
+	);
+	assert.doesNotMatch(handoff, /STALE_UNKNOWN_BODY|STALE_STATUS_BODY|STALE_CANCEL_BODY/);
 });
 
-await test("watch-pr notice is superseded by non-error background_command start for same PR and by terminal status/cancel", () => {
-	const entries: EntryLike[] = [
-		ownerEntry("u1", "Watch PR 99."),
-		bgCompleteEntry("bg-fail-1", [
+await test("list-form background_command status never supersedes a failed notice while targeted single-job status or cancel does", () => {
+	const base: EntryLike[] = [
+		ownerEntry("u1", "Run the full test suite."),
+		bgCompleteEntry("bg-fail", [
 			{
-				id: "job-a",
+				id: "j1",
 				status: "failed",
-				exitCode: 4,
-				commandPreview: "node /skills/watch-pr/scripts/watch-pr.mjs 99",
-				tail: "BLOCKED: checks failed\npr: https://github.com/owner/repo/pull/99",
+				exitCode: 1,
+				commandPreview: "npm test",
+				tail: "FAIL_UNIT_REGRESSION_J1",
 			},
 		]),
 		...toolPair(
-			"start-call",
-			"start-res",
-			"c1",
+			"list-status-call",
+			"list-status-res",
+			"c-list",
 			"background_command",
-			{
-				action: "start",
-				command:
-					"node /skills/watch-pr/scripts/watch-pr.mjs --repo OWNER/REPO --interval 60 99 --timeout 3600",
-			},
-			{
-				details: {
-					id: "job-b",
-					status: "starting",
-					command:
-						"node /skills/watch-pr/scripts/watch-pr.mjs --repo OWNER/REPO --interval 60 99 --timeout 3600",
-					cwd: "/repo",
-				},
-			},
-		),
-		bgCompleteEntry("bg-other", [
-			{ id: "job-c", status: "failed", exitCode: 1, commandPreview: "npm test" },
-		]),
-		...toolPair(
-			"status-call",
-			"status-res",
-			"c2",
-			"background_command",
-			{ action: "status", id: "job-c" },
-			{ details: { id: "job-c", status: "failed", exitCode: 1 } },
-		),
-		bgCompleteEntry("bg-cancel-target", [
-			{ id: "job-d", status: "unknown", exitCode: 1, commandPreview: "npm run watch" },
-		]),
-		...toolPair(
-			"cancel-call",
-			"cancel-res",
-			"c3",
-			"background_command",
-			{ action: "cancel", id: "job-d" },
-			{ details: { id: "job-d", status: "cancelled" } },
+			{ action: "status" },
+			{ details: { jobs: [{ id: "j1", status: "failed" }], total: 1 } },
 		),
 	];
-	const map = supersededCoordinationMap(entries, projectEntries(entries), {
-		retained: new Set(["cancel-res"]),
+	const baseProjected = projectEntries(base);
+	assert.equal(
+		supersededCoordinationMap(base, baseProjected, { retained: new Set() }).get("bg-fail"),
+		undefined,
+	);
+	const unSupersededHandoff = buildAutoHandoff(base, baseProjected, 20_000, {
+		ownerQuestionRegistered: false,
+		retainedEntryIds: new Set(["list-status-call", "list-status-res"]),
 	});
-	assert.deepEqual(map.get("bg-fail-1"), { byEntryId: "start-res", inRetainedTail: false });
-	assert.deepEqual(map.get("bg-other"), { byEntryId: "status-res", inRetainedTail: false });
-	assert.deepEqual(map.get("bg-cancel-target"), {
-		byEntryId: "cancel-res",
-		inRetainedTail: true,
+	assert.match(unSupersededHandoff, /FAIL_UNIT_REGRESSION_J1/);
+	assert.doesNotMatch(unSupersededHandoff, /superseded by/);
+
+	const withSingleStatus: EntryLike[] = [
+		...base,
+		...toolPair(
+			"single-status-call",
+			"single-status-res",
+			"c-single",
+			"background_command",
+			{ action: "status", id: "j1" },
+			{ details: { id: "j1", status: "failed" } },
+		),
+	];
+	const singleProjected = projectEntries(withSingleStatus);
+	assert.deepEqual(
+		supersededCoordinationMap(withSingleStatus, singleProjected, {
+			retained: new Set(["single-status-res"]),
+		}).get("bg-fail"),
+		{ byEntryId: "single-status-res", inRetainedTail: true },
+	);
+	const supersededHandoff = buildAutoHandoff(withSingleStatus, singleProjected, 20_000, {
+		ownerQuestionRegistered: false,
+		retainedEntryIds: new Set(["single-status-call", "single-status-res"]),
 	});
+	assert.doesNotMatch(supersededHandoff, /FAIL_UNIT_REGRESSION_J1/);
+	assert.match(
+		supersededHandoff,
+		/Other current-window inputs, oldest first \(recover with history read\):\n\[visible background-command-complete coordination input \(not direct owner input\); superseded by entry single-status-res in retained tail \| 2026-11-16T10:02:00Z \| entry bg-fail\]/,
+	);
+
+	const withCancel: EntryLike[] = [
+		...base,
+		...toolPair(
+			"single-cancel-call",
+			"single-cancel-res",
+			"c-cancel",
+			"background_command",
+			{ action: "cancel", id: "j1" },
+			{ details: { id: "j1", status: "cancelled" } },
+		),
+	];
+	assert.deepEqual(
+		supersededCoordinationMap(withCancel, projectEntries(withCancel), {
+			retained: new Set(),
+		}).get("bg-fail"),
+		{ byEntryId: "single-cancel-res", inRetainedTail: false },
+	);
 });
 
-await test("exact (cwd, trimmedCommand) from earlier start receipts supersedes across windows but never on different cwd/command or without start receipt", () => {
-	const earlierCompaction: EntryLike = {
-		type: "compaction",
-		id: "comp-1",
-		summary: "Automatic context rollover recovery record.",
-		firstKeptEntryId: null,
-		details: { posthorse: 1, reason: "threshold" },
-	};
-	const entries: EntryLike[] = [
+await test("multi-job background batch is superseded only when every structured job ID in the batch is superseded", () => {
+	const base: EntryLike[] = [
+		ownerEntry("u1", "Check two background jobs."),
+		bgCompleteEntry("bg-batch", [
+			{ id: "j1", status: "failed", tail: "FAIL_J1" },
+			{ id: "j2", status: "failed", tail: "FAIL_J2" },
+		]),
 		...toolPair(
 			"s1-call",
 			"s1-res",
-			"s1",
+			"c1",
 			"background_command",
-			{ action: "start", command: "npm test" },
-			{ details: { id: "j1", status: "starting", command: "  npm test  ", cwd: "/repo/a" } },
+			{ action: "status", id: "j1" },
+			{ details: { id: "j1", status: "failed" } },
 		),
-		earlierCompaction,
-		ownerEntry("u1", "Run tests."),
-		bgCompleteEntry("bg-1", [{ id: "j1", status: "failed", commandPreview: "npm test" }]),
-		...toolPair(
-			"s2-call",
-			"s2-res",
-			"s2",
-			"background_command",
-			{ action: "start", command: "npm test" },
-			{ details: { id: "j2", status: "starting", command: "npm test", cwd: "/repo/b" } },
-		),
-		bgCompleteEntry("bg-diff-cwd", [
-			{ id: "j2", status: "succeeded", commandPreview: "npm test" },
-		]),
-		...toolPair(
-			"s3-call",
-			"s3-res",
-			"s3",
-			"background_command",
-			{ action: "start", command: "npm run lint" },
-			{ details: { id: "j3", status: "starting", command: "npm run lint", cwd: "/repo/a" } },
-		),
-		bgCompleteEntry("bg-diff-cmd", [
-			{ id: "j3", status: "succeeded", commandPreview: "npm run lint" },
-		]),
-		bgCompleteEntry("bg-no-start-1", [
-			{ id: "j-nostart-1", status: "failed", commandPreview: "npm run verify" },
-		]),
-		bgCompleteEntry("bg-no-start-2", [
-			{ id: "j-nostart-2", status: "succeeded", commandPreview: "npm run verify" },
-		]),
-	];
-	// Before matching (cwd, command) completes, bg-1 is NOT superseded by different cwd or command.
-	const beforeMatch = supersededCoordinationMap(entries, projectEntries(entries), {
-		retained: new Set(),
-	});
-	assert.equal(beforeMatch.get("bg-1"), undefined);
-	assert.equal(beforeMatch.get("bg-no-start-1"), undefined);
-
-	// Starting the exact same (cwd, command) alone does NOT supersede bg-1 until it completes.
-	const withSameStart: EntryLike[] = [
-		...entries,
-		...toolPair(
-			"s4-call",
-			"s4-res",
-			"s4",
-			"background_command",
-			{ action: "start", command: "npm test" },
-			{ details: { id: "j4", status: "starting", command: "npm test", cwd: "/repo/a" } },
-		),
-	];
-	assert.equal(
-		supersededCoordinationMap(withSameStart, projectEntries(withSameStart), {
-			retained: new Set(),
-		}).get("bg-1"),
-		undefined,
-	);
-
-	// Once j4 completes, bg-1 IS superseded by bg-match.
-	const withCompletion: EntryLike[] = [
-		...withSameStart,
-		bgCompleteEntry("bg-match", [
-			{ id: "j4", status: "succeeded", commandPreview: "npm test" },
-		]),
-	];
-	assert.deepEqual(
-		supersededCoordinationMap(withCompletion, projectEntries(withCompletion), {
-			retained: new Set(["bg-match"]),
-		}).get("bg-1"),
-		{ byEntryId: "bg-match", inRetainedTail: true },
-	);
-});
-
-await test("multi-job background batch is superseded only when every job in the batch is superseded", () => {
-	const base: EntryLike[] = [
-		ownerEntry("u1", "Watch two PRs."),
-		bgCompleteEntry("bg-batch", [
-			{
-				id: "j-pr1",
-				status: "failed",
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/1",
-				tail: "pr: https://github.com/o/r/pull/1",
-			},
-			{
-				id: "j-pr2",
-				status: "failed",
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/2",
-				tail: "pr: https://github.com/o/r/pull/2",
-			},
-		]),
-		bgCompleteEntry("bg-pr1-ok", [
-			{
-				id: "j-pr1-new",
-				status: "succeeded",
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/1",
-			},
-		]),
 	];
 	assert.equal(
 		supersededCoordinationMap(base, projectEntries(base), { retained: new Set() }).get(
@@ -361,20 +321,100 @@ await test("multi-job background batch is superseded only when every job in the 
 
 	const complete: EntryLike[] = [
 		...base,
-		bgCompleteEntry("bg-pr2-ok", [
-			{
-				id: "j-pr2-new",
-				status: "succeeded",
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/2",
-			},
-		]),
+		...toolPair(
+			"s2-call",
+			"s2-res",
+			"c2",
+			"background_command",
+			{ action: "cancel", id: "j2" },
+			{ details: { id: "j2", status: "cancelled" } },
+		),
 	];
 	assert.deepEqual(
 		supersededCoordinationMap(complete, projectEntries(complete), {
-			retained: new Set(["bg-pr2-ok"]),
+			retained: new Set(["s2-res"]),
 		}).get("bg-batch"),
-		{ byEntryId: "bg-pr2-ok", inRetainedTail: true },
+		{ byEntryId: "s2-res", inRetainedTail: true },
 	);
+});
+
+await test("text and command scraping are never used for background supersession", () => {
+	const entries: EntryLike[] = [
+		ownerEntry("u1", "Verify no guessing."),
+		// Notice missing structured IDs: content mentions j-missing, but details has no IDs.
+		bgCompleteEntry("bg-unstructured", [{ id: "j-missing", status: "failed" }], {
+			hasCustomDetails: true,
+			details: {},
+		}),
+		...toolPair(
+			"status-missing-call",
+			"status-missing-res",
+			"cm1",
+			"background_command",
+			{ action: "status", id: "j-missing" },
+			{ details: { id: "j-missing", status: "failed" } },
+		),
+		// Notice with structured ID, followed by tool result with JSON text only (no structured details).
+		bgCompleteEntry("bg-text-only-status", [{ id: "j-text", status: "failed" }]),
+		...toolPair(
+			"text-status-call",
+			"text-status-res",
+			"ct1",
+			"background_command",
+			{ action: "status", id: "j-text" },
+			{ content: JSON.stringify({ id: "j-text", status: "failed" }) },
+		),
+		// Different job IDs for identical commands (including watch-pr and same start cwd/command) never supersede.
+		...toolPair(
+			"start-1-call",
+			"start-1-res",
+			"cs1",
+			"background_command",
+			{ action: "start", command: "node watch-pr.mjs https://github.com/o/r/pull/42" },
+			{
+				details: {
+					id: "j-pr-1",
+					status: "starting",
+					command: "node watch-pr.mjs https://github.com/o/r/pull/42",
+					cwd: "/repo",
+				},
+			},
+		),
+		bgCompleteEntry("bg-pr-1", [
+			{
+				id: "j-pr-1",
+				status: "failed",
+				commandPreview: "node watch-pr.mjs https://github.com/o/r/pull/42",
+				tail: "pr: https://github.com/o/r/pull/42",
+			},
+		]),
+		...toolPair(
+			"start-2-call",
+			"start-2-res",
+			"cs2",
+			"background_command",
+			{ action: "start", command: "node watch-pr.mjs https://github.com/o/r/pull/42" },
+			{
+				details: {
+					id: "j-pr-2",
+					status: "starting",
+					command: "node watch-pr.mjs https://github.com/o/r/pull/42",
+					cwd: "/repo",
+				},
+			},
+		),
+		bgCompleteEntry("bg-pr-2", [
+			{
+				id: "j-pr-2",
+				status: "succeeded",
+				commandPreview: "node watch-pr.mjs https://github.com/o/r/pull/42",
+			},
+		]),
+	];
+	const map = supersededCoordinationMap(entries, projectEntries(entries), {
+		retained: new Set(),
+	});
+	assert.equal(map.size, 0);
 });
 
 await test("agent-escalation and agent-completion follow exact supersession rules", () => {
@@ -466,63 +506,55 @@ await test("agent-escalation and agent-completion follow exact supersession rule
 	assert.equal(map.get("comp-7"), undefined);
 });
 
-await test("zero-false-positive guards: different PR, error toolResult, context-edited superseder, and non-coordination types", () => {
+await test("guards reject errors, non-terminal statuses, namespaced tools, omitted entries, and non-coordination types", () => {
 	const entries: EntryLike[] = [
 		ownerEntry("u1", "Check guards."),
-		bgCompleteEntry("bg-pr42", [
-			{
-				id: "j42",
-				status: "failed",
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/42",
-				tail: "pr: https://github.com/o/r/pull/42",
-			},
-		]),
-		// Different PR number
-		bgCompleteEntry("bg-pr43", [
-			{
-				id: "j43",
-				status: "succeeded",
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/43",
-			},
-		]),
-		// Error start for PR 42 must NOT supersede
+		bgCompleteEntry("bg-j1", [{ id: "j1", status: "failed" }]),
+		// Error status for j1 must NOT supersede.
 		...toolPair(
-			"err-start-call",
-			"err-start-res",
+			"err-status-call",
+			"err-status-res",
 			"es1",
 			"background_command",
-			{
-				action: "start",
-				command: "node .../watch-pr.mjs https://github.com/o/r/pull/42",
-			},
-			{ isError: true, content: "Failed to start" },
+			{ action: "status", id: "j1" },
+			{ isError: true, details: { id: "j1", status: "failed" } },
 		),
-		// Non-terminal status for j42 must NOT supersede
+		// Non-terminal status for j1 must NOT supersede.
 		...toolPair(
 			"run-status-call",
 			"run-status-res",
 			"rs1",
 			"background_command",
-			{ action: "status", id: "j42" },
-			{ details: { id: "j42", status: "running" } },
+			{ action: "status", id: "j1" },
+			{ details: { id: "j1", status: "running" } },
 		),
-		// Context-edited (omitted) later completion for PR 42 must NOT supersede
-		bgCompleteEntry("bg-pr42-omitted", [
-			{
-				id: "j42-later",
-				status: "succeeded",
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/42",
-			},
-		]),
-		// Non-watch-pr command mentioning PR 42 URL must NOT supersede
-		bgCompleteEntry("bg-non-watch", [
-			{
-				id: "j-echo",
-				status: "succeeded",
-				commandPreview: "echo https://github.com/o/r/pull/42",
-			},
-		]),
-		// Agent escalation with error agent_runs must NOT supersede
+		// Namespaced background_command must NOT supersede.
+		...toolPair(
+			"ns-status-call",
+			"ns-status-res",
+			"ns1",
+			"background_command",
+			{ action: "status", id: "j1" },
+			{ namespace: "other", details: { id: "j1", status: "failed" } },
+		),
+		// Omitted via projection must NOT supersede.
+		bgCompleteEntry("bg-j1-omitted", [{ id: "j1", status: "succeeded" }]),
+		// Omitted via context_edit (replacement: null) must NOT supersede.
+		...toolPair(
+			"edit-omit-call",
+			"edit-omit-res",
+			"eo1",
+			"background_command",
+			{ action: "status", id: "j1" },
+			{ details: { id: "j1", status: "failed" } },
+		),
+		{
+			type: "context_edit",
+			id: "omit-edit-1",
+			targetId: "edit-omit-res",
+			replacement: null,
+		},
+		// Agent escalation with error agent_runs or omitted assistant call must NOT supersede.
 		customEntry("esc-err", "agent-escalation", "Paused", { id: "run-err" }),
 		...toolPair(
 			"err-run-call",
@@ -532,7 +564,15 @@ await test("zero-false-positive guards: different PR, error toolResult, context-
 			{ action: "continue", id: "run-err", prompt: "Retry" },
 			{ isError: true, content: "Run not found" },
 		),
-		// Never-superseded customTypes
+		...toolPair(
+			"omitted-run-call",
+			"omitted-run-res",
+			"or1",
+			"agent_runs",
+			{ action: "continue", id: "run-err", prompt: "Retry" },
+			{ content: "Continued" },
+		),
+		// Never-superseded customTypes.
 		customEntry("ic-1", "intercom_message", "Hello", { id: "same" }),
 		customEntry("ic-2", "intercom_message", "Hello again", { id: "same" }),
 		customEntry("cm-1", "codemode-background", "Done 1", { id: "same" }),
@@ -540,9 +580,41 @@ await test("zero-false-positive guards: different PR, error toolResult, context-
 		customEntry("unk-1", "custom-alert", "Alert 1", { id: "same" }),
 		customEntry("unk-2", "custom-alert", "Alert 2", { id: "same" }),
 	];
-	const projected = projectEntries(entries, new Set(["bg-pr42-omitted"]));
+	const projected = projectEntries(entries, new Set(["bg-j1-omitted", "omitted-run-call"]));
 	const map = supersededCoordinationMap(entries, projected, { retained: new Set() });
 	assert.equal(map.size, 0);
+});
+
+await test("context-edited replacements use replacement entry IDs for both superseded and superseder entries", () => {
+	const entries: EntryLike[] = [
+		ownerEntry("u1", "Handle edited notice."),
+		bgCompleteEntry("bg-orig", [{ id: "j1", status: "failed", tail: "ORIG_FAIL" }]),
+		{
+			type: "context_edit",
+			id: "bg-edit",
+			targetId: "bg-orig",
+			replacement: { content: "EDITED_FAIL" },
+		},
+		...toolPair(
+			"status-call",
+			"status-orig",
+			"c1",
+			"background_command",
+			{ action: "status", id: "j1" },
+			{ details: { id: "j1", status: "failed" } },
+		),
+		{
+			type: "context_edit",
+			id: "status-edit",
+			targetId: "status-orig",
+			replacement: { content: "EDITED_STATUS" },
+		},
+	];
+	const map = supersededCoordinationMap(entries, projectEntries(entries), {
+		retained: new Set(["status-orig"]),
+	});
+	assert.deepEqual(map.get("bg-edit"), { byEntryId: "status-edit", inRetainedTail: true });
+	assert.equal(map.get("bg-orig"), undefined);
 });
 
 await test("anchors promotes still-active earlier failure to fixed when later coordination event is superseded", () => {
@@ -553,8 +625,7 @@ await test("anchors promotes still-active earlier failure to fixed when later co
 				id: "j-active",
 				status: "failed",
 				exitCode: 4,
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/1",
-				tail: "ACTIVE_FAILURE_PR1\npr: https://github.com/o/r/pull/1",
+				tail: "ACTIVE_FAILURE_J1",
 			},
 		]),
 		bgCompleteEntry("bg-stale-failure", [
@@ -562,28 +633,27 @@ await test("anchors promotes still-active earlier failure to fixed when later co
 				id: "j-stale",
 				status: "failed",
 				exitCode: 3,
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/2",
-				tail: "STALE_FAILURE_PR2\npr: https://github.com/o/r/pull/2",
+				tail: "STALE_FAILURE_J2",
 			},
 		]),
-		bgCompleteEntry("bg-pr2-pass", [
-			{
-				id: "j-pr2-pass",
-				status: "succeeded",
-				exitCode: 0,
-				commandPreview: "node .../watch-pr.mjs https://github.com/o/r/pull/2",
-			},
-		]),
+		...toolPair(
+			"status-call",
+			"status-res",
+			"c-stale",
+			"background_command",
+			{ action: "status", id: "j-stale" },
+			{ details: { id: "j-stale", status: "failed", exitCode: 3 } },
+		),
 	];
 	const handoff = buildAutoHandoff(entries, projectEntries(entries), 20_000, {
 		ownerQuestionRegistered: false,
-		retainedEntryIds: new Set(["bg-pr2-pass"]),
+		retainedEntryIds: new Set(["status-call", "status-res"]),
 	});
 	// Active earlier failure is promoted to fixed (full body quoted); stale later failure is demoted to others.
-	assert.match(handoff, /ACTIVE_FAILURE_PR1/);
-	assert.doesNotMatch(handoff, /STALE_FAILURE_PR2/);
+	assert.match(handoff, /ACTIVE_FAILURE_J1/);
+	assert.doesNotMatch(handoff, /STALE_FAILURE_J2/);
 	assert.match(
 		handoff,
-		/Other current-window inputs, oldest first \(recover with history read\):\n\[visible background-command-complete coordination input \(not direct owner input\); superseded by entry bg-pr2-pass in retained tail \| 2026-11-16T10:02:00Z \| entry bg-stale-failure\]/,
+		/Other current-window inputs, oldest first \(recover with history read\):\n\[visible background-command-complete coordination input \(not direct owner input\); superseded by entry status-res in retained tail \| 2026-11-16T10:02:00Z \| entry bg-stale-failure\]/,
 	);
 });
