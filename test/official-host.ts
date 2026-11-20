@@ -982,9 +982,10 @@ for (const { reason, asynchronous } of [
 		assert.match(
 			boundary.summary,
 			new RegExp(
-				`Context rolled over after entry .*entries ${requireValue(ids.prose)} through .* above are the carried-over recent tail`,
+				`Context rolled over after entry .*entries ${requireValue(ids.prose)} through .* above are the carried-over recent tail from before this rollover\\. Their inputs and tool evidence are not repeated in this record; new messages follow below\\. Start the new context window from here\\.`,
 			),
 		);
+		assert.doesNotMatch(boundary.summary, /Recent messages follow separately/);
 		assert.match(textOf(toolResult(h, "history")), /skipped.*context/i);
 		assert.match(textOf(toolResult(h, "history")), /^No history matches/);
 		assert.deepEqual(

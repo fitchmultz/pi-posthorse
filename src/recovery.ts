@@ -41,7 +41,7 @@ function buildRolloverPreamble(span: RetainedSpan | undefined): string {
 		span.firstId === span.lastId
 			? `entry ${span.firstId} above is the carried-over recent turn`
 			: `entries ${span.firstId} through ${span.lastId} above are the carried-over recent tail`;
-	return `${PREAMBLE}\n${RETAINED_MARKER_PREFIX}${span.lastId}. Earlier turns before entry ${span.firstId} were compacted into session history; ${range} from before this rollover. Recent messages follow separately; their inputs and tool evidence are not repeated in this record. Start the new context window from here.`;
+	return `${PREAMBLE}\n${RETAINED_MARKER_PREFIX}${span.lastId}. Earlier turns before entry ${span.firstId} were compacted into session history; ${range} from before this rollover. Their inputs and tool evidence are not repeated in this record; new messages follow below. Start the new context window from here.`;
 }
 function priorCheckpoint(entry: EntryLike | undefined, limit: number): string | undefined {
 	const handoff = windowHandoff(entry)?.trim();

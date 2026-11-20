@@ -4859,8 +4859,9 @@ await test("automatic recovery tracks session notes across tools, codemode, cont
 	);
 	assert.match(
 		partialRetained,
-		/Context rolled over after entry retained-partial-res\. Earlier turns before entry retained-partial-call were compacted into session history; entries retained-partial-call through retained-partial-res above are the carried-over recent tail/,
+		/Context rolled over after entry retained-partial-res\. Earlier turns before entry retained-partial-call were compacted into session history; entries retained-partial-call through retained-partial-res above are the carried-over recent tail from before this rollover\. Their inputs and tool evidence are not repeated in this record; new messages follow below\. Start the new context window from here\./,
 	);
+	assert.doesNotMatch(partialRetained, /Recent messages follow separately/);
 	assert.match(
 		partialRetained,
 		/- Active note \(written\): pi-durable-pr\.md \(\/workspace\/\.pi\/notes\/pi-durable-pr\.md\) \[only partial edits are in the retained tail above at entry retained-partial-call — read full note now\]/,
@@ -5116,6 +5117,219 @@ await test("a task note written in the automatic chain supersedes the older chec
 		assert.equal(kept.includes("Task notes in this session:"), notes !== undefined, chain);
 		assert.ok(notes === undefined || kept.includes(`\n${notes}\n`), chain);
 	}
+});
+
+await test("rollover preamble copy distinguishes single-entry, multi-entry, and retain-none rollovers", () => {
+	const ownerMessage = { role: "user", content: "Keep going." };
+	const owner: EntryLike = {
+		type: "message",
+		id: "single-retained",
+		timestamp: "2026-11-16T10:00:00Z",
+		message: ownerMessage,
+	};
+	const single = buildAutoHandoff(
+		[owner],
+		[{ sourceEntry: owner, messages: [ownerMessage] }],
+		20_000,
+		{ ownerQuestionRegistered: false, retainedEntryIds: new Set(["single-retained"]) },
+	);
+	assert.match(
+		single,
+		/Context rolled over after entry single-retained\. Earlier turns before entry single-retained were compacted into session history; entry single-retained above is the carried-over recent turn from before this rollover\. Their inputs and tool evidence are not repeated in this record; new messages follow below\. Start the new context window from here\./,
+	);
+	assert.doesNotMatch(single, /Recent messages follow separately/);
+
+	const retainNone = buildAutoHandoff(
+		[owner],
+		[{ sourceEntry: owner, messages: [ownerMessage] }],
+		20_000,
+		{ ownerQuestionRegistered: false },
+	);
+	assert.doesNotMatch(
+		retainNone,
+		/Context rolled over after entry|new messages follow below|Recent messages follow separately/,
+	);
+});
+
+await test("secondary written notes soften directives by recency while primary note stays imperative", () => {
+	const notesWrite = (id: string, path: string, content = "state"): EntryLike[] => [
+		{
+			type: "message",
+			id: `${id}-call`,
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id,
+						name: "notes",
+						arguments: { op: "write", path, content },
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: `${id}-res`,
+			message: {
+				role: "toolResult",
+				toolName: "notes",
+				toolCallId: id,
+				isError: false,
+				content: `Wrote /workspace/.pi/notes/${path}`,
+			},
+		},
+	];
+	const editFile = (id: string, path: string): EntryLike[] => [
+		{
+			type: "message",
+			id: `${id}-call`,
+			message: {
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						id,
+						name: "edit",
+						arguments: { path, oldText: "old", newText: "new" },
+					},
+				],
+			},
+		},
+		{
+			type: "message",
+			id: `${id}-res`,
+			message: {
+				role: "toolResult",
+				toolName: "edit",
+				toolCallId: id,
+				isError: false,
+				content: "Edited",
+			},
+		},
+	];
+	const observedWrite = (id: string, path: string): EntryLike => ({
+		type: "message",
+		id,
+		message: {
+			role: "toolResult",
+			toolName: "codemode",
+			toolCallId: id,
+			isError: false,
+			content: "Saved",
+			nestedCalls: {
+				calls: [
+					{
+						name: "notes",
+						arguments: { op: "write", path, content: "nested" },
+						result: `Wrote /workspace/.pi/notes/${path}`,
+					},
+				],
+			},
+		},
+	});
+	const rollover1: EntryLike = {
+		type: "compaction",
+		id: "auto-rollover-1",
+		summary: "Automatic context rollover recovery record.",
+		firstKeptEntryId: null,
+		details: { posthorse: 1, reason: "threshold" },
+	};
+	const retainedTurn: EntryLike = {
+		type: "message",
+		id: "tail-msg",
+		message: { role: "user", content: "Latest message." },
+	};
+	const project = (list: readonly EntryLike[]) =>
+		list.flatMap((sourceEntry) =>
+			sourceEntry.message === undefined
+				? []
+				: [{ sourceEntry, messages: [sourceEntry.message] }],
+		);
+
+	// Scenario 1: earlier-window secondary (own + cross-scope), current-window compacted secondary, primary.
+	const multiWindow: EntryLike[] = [
+		...notesWrite("w1-own", "earlier-own.md"),
+		...editFile("w1-cross", "/other/.pi/notes/cross.md"),
+		rollover1,
+		...notesWrite("w2-sec", "current-sec.md"),
+		...notesWrite("w2-primary", "primary.md"),
+		retainedTurn,
+	];
+	const withTail = buildAutoHandoff(multiWindow, project(multiWindow), 20_000, {
+		ownerQuestionRegistered: false,
+		retainedEntryIds: new Set(["tail-msg"]),
+	});
+	assert.match(
+		withTail,
+		/^- Active note \(written\): primary\.md \(\/workspace\/\.pi\/notes\/primary\.md\) \[compacted before entry tail-msg — read this note now\]$/mu,
+	);
+	assert.match(
+		withTail,
+		/^- Active note \(written\): current-sec\.md \(\/workspace\/\.pi\/notes\/current-sec\.md\) \[compacted before entry tail-msg; not in window — read only if still relevant\]$/mu,
+	);
+	assert.match(
+		withTail,
+		/^- Earlier note \(written\): \/other\/\.pi\/notes\/cross\.md \[compacted in an earlier window at entry w1-cross-call; not in window — read on its path only if still relevant\]$/mu,
+	);
+	assert.match(
+		withTail,
+		/^- Earlier note \(written\): earlier-own\.md \(\/workspace\/\.pi\/notes\/earlier-own\.md\) \[compacted in an earlier window at entry w1-own-call; not in window — read only if still relevant\]$/mu,
+	);
+	assert.match(
+		withTail,
+		/^Read primary\.md \(notes read or read on its path\) before continuing/mu,
+	);
+
+	// Retain-none secondary in current window uses "compacted at entry ...; not in window".
+	const withoutTail = buildAutoHandoff(multiWindow, project(multiWindow), 20_000, {
+		ownerQuestionRegistered: false,
+	});
+	assert.match(
+		withoutTail,
+		/^- Active note \(written\): primary\.md \(\/workspace\/\.pi\/notes\/primary\.md\) \[compacted at entry w2-primary-call — read this note now\]$/mu,
+	);
+	assert.match(
+		withoutTail,
+		/^- Active note \(written\): current-sec\.md \(\/workspace\/\.pi\/notes\/current-sec\.md\) \[compacted at entry w2-sec-call; not in window — read only if still relevant\]$/mu,
+	);
+	assert.match(
+		withoutTail,
+		/^- Earlier note \(written\): earlier-own\.md \(\/workspace\/\.pi\/notes\/earlier-own\.md\) \[compacted in an earlier window at entry w1-own-call; not in window — read only if still relevant\]$/mu,
+	);
+
+	// Scenario 2: secondary full, partial, and effect-only proofs in the current window.
+	const proofMix: EntryLike[] = [
+		...notesWrite("full-sec", "full-sec.md"),
+		...editFile("partial-sec", "/workspace/.pi/notes/partial-sec.md"),
+		observedWrite("effect-sec", "effect-sec.md"),
+		...notesWrite("top-primary", "top-primary.md"),
+	];
+	const mixed = buildAutoHandoff(proofMix, project(proofMix), 20_000, {
+		ownerQuestionRegistered: false,
+		retainedEntryIds: new Set([
+			"full-sec-call",
+			"full-sec-res",
+			"partial-sec-call",
+			"partial-sec-res",
+		]),
+	});
+	assert.match(
+		mixed,
+		/^- Active note \(written\): top-primary\.md \(\/workspace\/\.pi\/notes\/top-primary\.md\) \[compacted before entry full-sec-call — read this note now\]$/mu,
+	);
+	assert.match(
+		mixed,
+		/^- Active note \(written\): effect-sec\.md \(\/workspace\/\.pi\/notes\/effect-sec\.md\) \[verified effect at entry effect-sec; full content is not in window — read only if still relevant\]$/mu,
+	);
+	assert.match(
+		mixed,
+		/^- Active note \(written\): partial-sec\.md \(\/workspace\/\.pi\/notes\/partial-sec\.md\) \[only partial edits are in the retained tail above at entry partial-sec-call — read full note only if still relevant\]$/mu,
+	);
+	assert.match(
+		mixed,
+		/^- Active note \(written\): full-sec\.md \(\/workspace\/\.pi\/notes\/full-sec\.md\) \[latest full write is in the retained tail above at entry full-sec-call\]$/mu,
+	);
 });
 
 await test("note guards associate a move only with the immediately preceding update header", () => {
