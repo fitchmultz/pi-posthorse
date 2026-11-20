@@ -8,6 +8,13 @@ const CI = ".github/workflows/ci.yml";
 const RELEASE = ".github/workflows/npm-release.yml";
 const VERSION = ".github/workflows/npm-version.yml";
 const SHARED_WORKFLOWS = "fitchmultz/.github/.github/workflows/";
+const PI_SCOPE = "@earendil-works/";
+const PI_CODING_AGENT = "@earendil-works/pi-coding-agent";
+const REQUIRED_PI_PACKAGES: readonly string[] = [
+	"@earendil-works/pi-ai",
+	PI_CODING_AGENT,
+	"@earendil-works/pi-tui",
+];
 
 function field(value: unknown, ...keys: readonly string[]): unknown {
 	return keys.reduce<unknown>(
@@ -26,7 +33,7 @@ function workflow(root: string, file: string): Configuration {
 	}
 	return value;
 }
-function mismatch(path: string, actual: unknown, expected: string): string[] {
+function mismatch(path: string, actual: unknown, expected: string | boolean): string[] {
 	return actual === expected
 		? []
 		: [
@@ -136,7 +143,7 @@ function cohortRuleProblems(rule: Configuration, range: string): string[] {
 	return [
 		...problems,
 		...mismatch(
-			"renovate.json:Pi development-cohort allowedVersions (use package.json peerDependencies floor)",
+			`renovate.json:Pi development-cohort allowedVersions (use package.json devDependencies.${PI_CODING_AGENT} floor)`,
 			rule.allowedVersions,
 			range,
 		),
@@ -172,18 +179,50 @@ function independentRange(rule: unknown): boolean {
 			!name.toLowerCase().startsWith("@earendil-works/"),
 	);
 }
-function floorProblems(manifest: Configuration, renovate: Configuration): string[] {
-	const range = field(manifest, "peerDependencies", "@earendil-works/pi-coding-agent");
-	if (typeof range !== "string" || !/^>=\d+\.\d+\.\d+$/u.test(range)) {
-		return [
-			"package.json:peerDependencies coding-agent must declare the supported >=x.y.z floor",
-		];
+function piPackageNames(section: unknown): readonly string[] {
+	const declared = objectValue(section)
+		? Object.keys(section).filter((name) => name.startsWith(PI_SCOPE))
+		: [];
+	return [...new Set([...REQUIRED_PI_PACKAGES, ...declared])].toSorted();
+}
+function piPeerProblems(manifest: Configuration): string[] {
+	const peers = field(manifest, "peerDependencies");
+	const peerMeta = field(manifest, "peerDependenciesMeta");
+	const problems: string[] = [];
+	for (const name of piPackageNames(peers)) {
+		problems.push(
+			...mismatch(
+				`package.json:peerDependencies.${name} (Pi peers must use wildcard "*")`,
+				field(peers, name),
+				"*",
+			),
+			...mismatch(
+				`package.json:peerDependenciesMeta.${name}.optional (Pi peers must be optional)`,
+				field(peerMeta, name, "optional"),
+				true,
+			),
+		);
 	}
-	const problems = mismatch(
-		"package.json:peerDependencies.@earendil-works/pi-tui (use coding-agent's support floor)",
-		field(manifest, "peerDependencies", "@earendil-works/pi-tui"),
-		range,
-	);
+	return problems;
+}
+function piDevCohortProblems(manifest: Configuration, version: string): string[] {
+	const devDeps = field(manifest, "devDependencies");
+	const problems: string[] = [];
+	for (const name of piPackageNames(devDeps)) {
+		if (name === PI_CODING_AGENT) {
+			continue;
+		}
+		problems.push(
+			...mismatch(
+				`package.json:devDependencies.${name} (use ${PI_CODING_AGENT}'s support-floor baseline)`,
+				field(devDeps, name),
+				version,
+			),
+		);
+	}
+	return problems;
+}
+function renovateFloorProblems(renovate: Configuration, range: string): string[] {
 	const rules = field(renovate, "packageRules");
 	const entries: readonly unknown[] = Array.isArray(rules) ? rules : [];
 	const cohort = entries.filter(
@@ -195,12 +234,10 @@ function floorProblems(manifest: Configuration, renovate: Configuration): string
 	const [primary] = cohort;
 	if (primary === undefined || cohort.length !== 1) {
 		return [
-			...problems,
 			"renovate.json: expected one Pi development-cohort rule matching package.json's support floor",
 		];
 	}
 	return [
-		...problems,
 		...cohortRuleProblems(primary, range),
 		...entries.flatMap((rule, index) =>
 			rule === primary || independentRange(rule)
@@ -209,6 +246,21 @@ function floorProblems(manifest: Configuration, renovate: Configuration): string
 						`renovate.json:packageRules[${index}].allowedVersions may override the Pi floor; use the single Pi cohort rule, literal non-Pi package names, or a non-npm manager`,
 					],
 		),
+	];
+}
+function floorProblems(manifest: Configuration, renovate: Configuration): string[] {
+	const problems = piPeerProblems(manifest);
+	const baseline = field(manifest, "devDependencies", PI_CODING_AGENT);
+	if (typeof baseline !== "string" || !/^\d+\.\d+\.\d+$/u.test(baseline)) {
+		return [
+			...problems,
+			`package.json:devDependencies.${PI_CODING_AGENT} must declare the exact x.y.z Pi support-floor baseline`,
+		];
+	}
+	return [
+		...problems,
+		...piDevCohortProblems(manifest, baseline),
+		...renovateFloorProblems(renovate, `>=${baseline}`),
 	];
 }
 /** GitHub requires literal reusable-workflow refs; validate their relationship, not their current SHA. */
@@ -242,6 +294,8 @@ if (import.meta.main) {
 		console.error(problems.join("\n"));
 		process.exitCode = 1;
 	} else {
-		console.log("Configuration policy: shared automation refs and support floors agree.");
+		console.log(
+			"Configuration policy: shared automation refs, Pi wildcard peers, and support floors agree.",
+		);
 	}
 }

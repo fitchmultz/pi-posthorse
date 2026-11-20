@@ -49,9 +49,20 @@ function configurationFixture() {
 		},
 		[VERSION]: { jobs: { reconcile: shared("npm-release-bump.yml") } },
 		"package.json": {
+			devDependencies: {
+				"@earendil-works/pi-ai": "1.4.0",
+				"@earendil-works/pi-coding-agent": "1.4.0",
+				"@earendil-works/pi-tui": "1.4.0",
+			},
 			peerDependencies: {
-				"@earendil-works/pi-coding-agent": ">=1.4.0",
-				"@earendil-works/pi-tui": ">=1.4.0",
+				"@earendil-works/pi-ai": "*",
+				"@earendil-works/pi-coding-agent": "*",
+				"@earendil-works/pi-tui": "*",
+			},
+			peerDependenciesMeta: {
+				"@earendil-works/pi-ai": { optional: true },
+				"@earendil-works/pi-coding-agent": { optional: true },
+				"@earendil-works/pi-tui": { optional: true },
 			},
 		},
 		"renovate.json": {
@@ -107,12 +118,12 @@ await test("configuration policy accepts a coherent future pin and support-floor
 			["jobs", "qualification", "steps", 0, "with", "ref"],
 			NEXT_REF,
 		);
-		for (const name of ["pi-coding-agent", "pi-tui"]) {
+		for (const name of ["pi-ai", "pi-coding-agent", "pi-tui"]) {
 			change(
 				project.root,
 				"package.json",
-				["peerDependencies", `@earendil-works/${name}`],
-				">=2.0.0",
+				["devDependencies", `@earendil-works/${name}`],
+				"2.0.0",
 			);
 		}
 		change(project.root, "renovate.json", ["packageRules", 0, "allowedVersions"], ">=2.0.0");
@@ -123,7 +134,10 @@ await test("configuration policy accepts a coherent future pin and support-floor
 		);
 		assert.equal(result.status, 0, result.stderr);
 		assert.equal(result.signal, null);
-		assert.match(result.stdout, /shared automation refs and support floors agree/u);
+		assert.match(
+			result.stdout,
+			/shared automation refs, Pi wildcard peers, and support floors agree/u,
+		);
 	} finally {
 		project.dispose();
 	}
@@ -204,7 +218,7 @@ await test("configuration CLI rejects the historical stale support floor rather 
 		assert.equal(result.stdout, "");
 		assert.match(
 			result.stderr,
-			/^renovate\.json:Pi development-cohort allowedVersions .*package\.json peerDependencies floor/u,
+			/^renovate\.json:Pi development-cohort allowedVersions .*package\.json devDependencies\.@earendil-works\/pi-coding-agent floor/u,
 		);
 		assert.doesNotMatch(result.stderr, /SyntaxError|TypeError|ERR_MODULE_NOT_FOUND/u);
 	} finally {
@@ -212,24 +226,134 @@ await test("configuration CLI rejects the historical stale support floor rather 
 	}
 });
 
-await test("the TUI peer cannot silently declare a different support floor", () => {
-	const project = configurationFixture();
-	try {
-		change(
-			project.root,
-			"package.json",
-			["peerDependencies", "@earendil-works/pi-tui"],
-			">=2.0.0",
-		);
-		const problems = checkConfiguration(project.root);
-		assert.equal(problems.length, 1);
-		assert.match(
-			problems[0] ?? "",
-			/^package\.json:peerDependencies\.@earendil-works\/pi-tui .*coding-agent's support floor/u,
-		);
-	} finally {
-		project.dispose();
-	}
+await test("Pi devDependencies cannot drift from the coding-agent support-floor baseline", async (t) => {
+	const cases: readonly (readonly [name: string, value: string, pattern: RegExp])[] = [
+		[
+			"@earendil-works/pi-coding-agent",
+			"^1.4.0",
+			/^package\.json:devDependencies\.@earendil-works\/pi-coding-agent must declare the exact x\.y\.z Pi support-floor baseline$/u,
+		],
+		[
+			"@earendil-works/pi-tui",
+			"2.0.0",
+			/^package\.json:devDependencies\.@earendil-works\/pi-tui .*support-floor baseline/u,
+		],
+		[
+			"@earendil-works/pi-ai",
+			"2.0.0",
+			/^package\.json:devDependencies\.@earendil-works\/pi-ai .*support-floor baseline/u,
+		],
+		[
+			"@earendil-works/pi-agent-core",
+			"2.0.0",
+			/^package\.json:devDependencies\.@earendil-works\/pi-agent-core .*support-floor baseline/u,
+		],
+	];
+	await Promise.all(
+		cases.map(async ([name, value, pattern]) => {
+			await t.test(`${name}=${value}`, () => {
+				const project = configurationFixture();
+				try {
+					change(project.root, "package.json", ["devDependencies", name], value);
+					const problems = checkConfiguration(project.root);
+					assert.equal(problems.length, 1, problems.join("\n"));
+					assert.match(problems[0] ?? "", pattern);
+				} finally {
+					project.dispose();
+				}
+			});
+		}),
+	);
+});
+
+await test("Pi peerDependencies must remain optional wildcard entries", async (t) => {
+	const cases: readonly (readonly [
+		label: string,
+		mutate: (root: string) => void,
+		pattern: RegExp,
+	])[] = [
+		[
+			"coding-agent peer range",
+			(root) => {
+				change(
+					root,
+					"package.json",
+					["peerDependencies", "@earendil-works/pi-coding-agent"],
+					">=1.4.0",
+				);
+			},
+			/^package\.json:peerDependencies\.@earendil-works\/pi-coding-agent .*wildcard "\*"/u,
+		],
+		[
+			"tui peer range",
+			(root) => {
+				change(
+					root,
+					"package.json",
+					["peerDependencies", "@earendil-works/pi-tui"],
+					">=1.4.0",
+				);
+			},
+			/^package\.json:peerDependencies\.@earendil-works\/pi-tui .*wildcard "\*"/u,
+		],
+		[
+			"ai peer range",
+			(root) => {
+				change(
+					root,
+					"package.json",
+					["peerDependencies", "@earendil-works/pi-ai"],
+					">=1.4.0",
+				);
+			},
+			/^package\.json:peerDependencies\.@earendil-works\/pi-ai .*wildcard "\*"/u,
+		],
+		[
+			"extra Pi peer range",
+			(root) => {
+				change(
+					root,
+					"package.json",
+					["peerDependencies", "@earendil-works/pi-agent-core"],
+					">=1.4.0",
+				);
+				change(
+					root,
+					"package.json",
+					["peerDependenciesMeta", "@earendil-works/pi-agent-core"],
+					{ optional: true },
+				);
+			},
+			/^package\.json:peerDependencies\.@earendil-works\/pi-agent-core .*wildcard "\*"/u,
+		],
+		[
+			"non-optional Pi peer",
+			(root) => {
+				change(
+					root,
+					"package.json",
+					["peerDependenciesMeta", "@earendil-works/pi-tui", "optional"],
+					false,
+				);
+			},
+			/^package\.json:peerDependenciesMeta\.@earendil-works\/pi-tui\.optional .*must be optional/u,
+		],
+	];
+	await Promise.all(
+		cases.map(async ([label, mutate, pattern]) => {
+			await t.test(label, () => {
+				const project = configurationFixture();
+				try {
+					mutate(project.root);
+					const problems = checkConfiguration(project.root);
+					assert.equal(problems.length, 1, problems.join("\n"));
+					assert.match(problems[0] ?? "", pattern);
+				} finally {
+					project.dispose();
+				}
+			});
+		}),
+	);
 });
 
 await test("local Renovate rules cannot hide or override the single applicable Pi floor", async (t) => {
