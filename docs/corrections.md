@@ -49,8 +49,12 @@ Evidence:
 
 **Level: parsed configuration check.** `scripts/config-policy.ts` treats CI's
 `env.PI_AUTOMATION_REF` as the canonical immutable revision. Shared reusable-workflow references,
-their `automation-ref` inputs, and the automation checkout must follow it. The coding-agent peer
-range owns the support floor; the TUI peer and local Pi development-cohort policy must agree.
+their `automation-ref` inputs, and the automation checkout must follow it. The locked
+`devDependencies.@earendil-works/pi-coding-agent` baseline owns the support floor: every
+`@earendil-works/*` `devDependency` must match that exact `x.y.z` version and the local Renovate
+Pi development-cohort `allowedVersions` (`>=x.y.z`) must agree. All `@earendil-works/*`
+`peerDependencies` must stay optional wildcard `"*"` entries matching the Pi extension fleet
+convention.
 Diagnostics identify the file/property and the authority to use. Consistent future revision and
 floor changes remain valid; the current values are not frozen in a test.
 
@@ -75,8 +79,10 @@ Historical CLI proof:
 
 - Restoring both workflow files from `3f15d89^` makes the checker exit 1 with four release-ref
   mismatches. Restoring `3f15d89` makes the same command exit 0.
-- With the actual package/renovate files from `53083d4`, it exits 1 for `allowedVersions`.
-  Substituting the fixed `70550f6` Renovate file makes it exit 0.
+- Under the original peer-range policy, the actual package/renovate files from `53083d4` exited 1
+  for `allowedVersions` and substituting the fixed `70550f6` Renovate file exited 0. After
+  standardizing `@earendil-works/*` peers to optional `"*"`, the same stale-floor check runs
+  against `devDependencies.@earendil-works/pi-coding-agent`.
 
 Run the same checker locally and through normal acceptance:
 
@@ -87,8 +93,9 @@ npm run verify
 ```
 
 `test/quality-config.test.ts` exercises the real CLI, independent reference drift, a coherent
-future update, environment shadowing, stale or overriding floor rules, duplicate YAML authority
-keys and missing policy.
+future update, environment shadowing, Pi `devDependencies` cohort drift, non-wildcard or
+non-optional Pi peers, stale or overriding floor rules, duplicate YAML authority keys and missing
+policy.
 It uses disposable semantic fixtures, not snapshots or source-text matching.
 
 ## Declared tools are not necessarily the tools that ran

@@ -12,7 +12,7 @@ is checked before acceptance starts. [Development](development.md) describes iso
 | Command                  | Purpose                                                                                                                  |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `npm run quality:policy` | Standard settings, full source inventory, canonical compiler membership, profile boundaries, and directive authorization |
-| `npm run quality:config` | Shared workflow references and supported Pi dependency-floor coherence                                                   |
+| `npm run quality:config` | Shared workflow references, wildcard Pi peer policy, and supported Pi dependency-floor coherence                         |
 | `npm run quality:probes` | Installed native tools, compiler scope, source coverage, and exception controls                                          |
 | `npm run lint`           | Independent policy, configuration, and complete native lint checks                                                       |
 | `npm run lint:agent`     | The same gates with native agent-format lint output                                                                      |
