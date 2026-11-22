@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.10.38 - 2026-11-22
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- ci: refresh the shared automation pin to 1f78bd6 (PEA-225) (#233) ([63c575f](https://github.com/fitchmultz/pi-posthorse/commit/63c575f1a8e0bb769813bf2c3005ef83dc1b2bbf))
+
+### What's Changed
+
+- ci: refresh the shared automation pin to 1f78bd6 (PEA-225) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/233
+- ci: pin shared automation to 788061a and wire RELEASE_APP_PRIVATE_KEY by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/234
+- fix: preserve prompt prefix stability across reminder and guidance updates (PPH-205) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/235
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.37...v0.10.38
+
 ## 0.10.37 - 2026-11-20
 
 <!-- npm-release:unreleased:start -->
