@@ -2,8 +2,8 @@
 
 This study measures what agents did around 24,940 context boundaries in one person's Pi sessions.
 It answers three questions. Do agents use the notes, the history tool, and the recovery record as
-intended? What happens to the work after a rollover? What does a rollover cost compared with stock
-Pi compaction?
+intended? What happens to the work after a rollover? What does a rollover cost compared with
+official Pi compaction?
 
 The study is observational. It is not a controlled comparison on matched tasks, and it does not
 measure whether the work after a rollover was correct. [Limits](#limits) lists what the numbers
