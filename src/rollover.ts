@@ -22,11 +22,7 @@ import { registerContextTools } from "./context-tools.ts";
 import { registerGuidance, type WindowGuidance } from "./guidance.ts";
 import { ownerQuestionRegistered as ownerQuestionTool } from "./host.ts";
 import { safeJsonStringify } from "./message-text.ts";
-import {
-	hostMakesProviderSummary,
-	messagesHeldByProviderSummary,
-	type ProviderSummaryRequest,
-} from "./provider-summary.ts";
+import { hostMakesProviderSummary, type ProviderSummaryRequest } from "./provider-summary.ts";
 import { hasRetainedRolloverMarker } from "./recovery.ts";
 import { automaticRecovery } from "./retention.ts";
 import { ResetRequests, type ResetOutcome } from "./reset-requests.ts";
@@ -38,8 +34,9 @@ type RolloverResources = {
 };
 import {
 	createReminderLookup,
+	persistSuppressedReminders,
 	reminderDecision,
-	staleReminderPredicate,
+	reminderFilter,
 	type ReminderLookup,
 	type StaleReminderPredicate,
 } from "./reminders.ts";
@@ -117,13 +114,18 @@ function registerReminderFilter(
 	reminders: ReminderLookup,
 ): void {
 	pi.on("context_with_system", (event, ctx) => {
-		const stale = staleReminderPredicate(event.messages, ctx, policy(ctx), reminders);
-		const held = messagesHeldByProviderSummary(event.messages);
-		const removable = (message: (typeof event.messages)[number], index: number) =>
-			index >= held && stale(message);
+		const { stale, removable, newlySuppressedIds } = reminderFilter(
+			event.messages,
+			ctx,
+			policy(ctx),
+			reminders,
+		);
 		const filtered = event.messages.some(removable)
 			? event.messages.filter((message, index) => !removable(message, index))
 			: event.messages;
+		if (newlySuppressedIds.length > 0) {
+			persistSuppressedReminders(pi, newlySuppressedIds);
+		}
 		const ordered = chronologicalRetainedTail(filtered, ctx, stale);
 		if (ordered !== event.messages) {
 			return { messages: ordered };

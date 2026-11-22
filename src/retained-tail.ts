@@ -85,7 +85,7 @@ export function retainedTailEnd(
 		if (message === undefined || journal === undefined) {
 			break;
 		}
-		if (sameRetainedMessage(journal, message) || isOpaquePresentation(journal, message)) {
+		if (matchesProjectedMessage(journal, message)) {
 			expected += 1;
 			end = index + 1;
 		}
@@ -178,6 +178,11 @@ function isOpaquePresentation(journal: MessageLike, event: MessageLike): boolean
 		journal.timestamp !== undefined &&
 		event.timestamp === journal.timestamp
 	);
+}
+
+/** Whether `event` is the provider-context presentation of projected journal message `journal`. */
+export function matchesProjectedMessage(journal: MessageLike, event: MessageLike): boolean {
+	return sameRetainedMessage(journal, event) || isOpaquePresentation(journal, event);
 }
 
 /**

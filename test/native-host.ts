@@ -2192,6 +2192,53 @@ await test("a provider summary block keeps the leading guidance unchanged after 
 	assert.doesNotMatch(firstGuidance ?? "", /\bnew_context\b/u);
 });
 
+await test("a budget switch after a provider summary block keeps the signed prefix immutable", async (t) => {
+	const h = await providerSummaryHost(t, (pi) => {
+		pi.registerTool({
+			name: "pad",
+			label: "pad",
+			description: "Small local result",
+			parameters: { type: "object", properties: {} },
+			async execute() {
+				return { content: [{ type: "text", text: "pad ".repeat(2_000) }], details: {} };
+			},
+		});
+	});
+	if (h === undefined) {
+		return;
+	}
+	h.respond(() => fauxToolCall("pad", {}), 18);
+	await h.session.prompt("p".repeat(240_000));
+	const heldBeforeSwitch = h.heldAfterRollover();
+	h.settingsManager.applyOverrides({ compaction: { reserveTokens: 32_000 } });
+	const postSwitch: TranscriptMessages[] = [];
+	h.faux.setResponses([
+		(ctx) => {
+			postSwitch.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Switched after block.");
+		},
+		(ctx) => {
+			postSwitch.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Stable after switch.");
+		},
+	]);
+	await h.session.prompt("Continue with a different reserve.");
+	await h.session.prompt("Confirm the update stays anchored.");
+	assert.equal(postSwitch.length, 2);
+	assert.deepEqual(
+		requireValue(postSwitch[0]).slice(0, heldBeforeSwitch.length),
+		heldBeforeSwitch,
+		"a budget switch must not mutate the leading prompt or retained tail before the recovery record",
+	);
+	assert.deepEqual(
+		requireValue(postSwitch[1]).slice(0, requireValue(postSwitch[0]).length),
+		requireValue(postSwitch[0]),
+		"later turns keep the mid-conversation guidance update anchored in place",
+	);
+	assert.match(getCurrentSystemPrompt(requireValue(postSwitch[0])), /rollover line is 68,001/);
+	assert.match(getCurrentSystemPrompt(requireValue(postSwitch[1])), /rollover line is 68,001/);
+});
+
 await test("edited image recovery points to the replacement rather than the raw original", async (t) => {
 	let editId: string | undefined;
 	const h = await fixture(t, {
@@ -2424,13 +2471,24 @@ for (const mode of ["unforced", "forced", "forced-user-to-custom"]) {
 		} else {
 			assert.match(prompt, /CUSTOM_RUN_POLICY/);
 			assert.doesNotMatch(prompt, /OPAQUE_FORCED_POLICY/);
-			assert.equal(
-				request.filter(
-					(message) =>
-						message.role === "system" &&
-						typeof message.sections?.posthorse === "string",
-				).length,
-				1,
+			const posthorseSystems = request.filter(
+				(message) =>
+					message.role === "system" && typeof message.sections?.posthorse === "string",
+			);
+			assert.equal(posthorseSystems.length, 2);
+			const leadingSystem = requireValue(posthorseSystems[0]);
+			const updateSystem = requireValue(posthorseSystems[1]);
+			assert.ok(leadingSystem.role === "system" && updateSystem.role === "system");
+			assert.equal(leadingSystem, request[0]);
+			assert.match(
+				leadingSystem.sections?.posthorse ?? "",
+				/rollover line is 83,617 tokens used/,
+				"the leading system prompt keeps its original window guidance",
+			);
+			assert.match(
+				updateSystem.sections?.posthorse ?? "",
+				/rollover line is 68,001 tokens used/,
+				"the reserve change arrives as a mid-conversation system update",
 			);
 		}
 		assert.equal(request.filter((message) => textOf(message) === content).length, 1);
@@ -2869,32 +2927,273 @@ for (const { continuation, stopReason } of settlementCases) {
 	});
 }
 
-await test("public enabled-to-disabled policy removes the active reminder but keeps its journal entry", async (t) => {
+await test("public enabled-to-disabled policy preserves already-sent reminders and filters unsent trailing reminders", async (t) => {
 	const h = await fixture(t);
+	const requests: TranscriptMessages[] = [];
 	h.faux.setResponses([
-		toolTurn(fauxToolCall("get_context_remaining", {})),
-		fauxAssistantMessage("Checkpoint reminder received"),
+		(ctx) => {
+			requests.push(structuredClone(ctx.messages));
+			return toolTurn(fauxToolCall("get_context_remaining", {}));
+		},
+		(ctx) => {
+			requests.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Checkpoint reminder received");
+		},
 	]);
 	await h.session.prompt("p".repeat(305_000));
 	const reminders = () => reminderEntries(h.sessionManager);
 	assert.equal(reminders().length, 1);
 	const original = structuredClone(reminders()[0]);
 	h.settingsManager.applyOverrides({ compaction: { enabled: false } });
-	let input: string | undefined;
 	h.faux.setResponses([
 		(ctx) => {
-			input = [
-				getCurrentSystemPrompt(ctx.messages),
-				...ctx.messages.filter((message) => message.role !== "system").map(textOf),
-			].join("\n");
+			requests.push(structuredClone(ctx.messages));
 			return fauxAssistantMessage("Done");
 		},
 	]);
 	await h.session.prompt("Continue without automatic rollover");
-	assert.ok(input !== undefined && input !== "");
-	assert.match(input, /Pi compaction is disabled/);
-	assert.doesNotMatch(input, /Routine task-note update\.|then call new_context now/);
+	assert.equal(requests.length, 3);
+	const withReminder = requireValue(requests[1]);
+	const afterDisable = requireValue(requests[2]);
+	assert.deepEqual(
+		afterDisable.slice(0, withReminder.length),
+		withReminder,
+		"disabling compaction must not delete an already-sent reminder or mutate the leading prompt",
+	);
+	assert.match(getCurrentSystemPrompt(afterDisable), /Pi compaction is disabled/);
 	assert.deepEqual(reminders(), [original]);
+
+	// A stale reminder in the trailing unsent tail (no subsequent assistant reply) is filtered out
+	// and stays omitted across subsequent assistant replies, re-enabling compaction, and disk resume.
+	const trailing = await fixture(t, {
+		enabled: false,
+		seed(manager) {
+			manager.appendMessage({ role: "user", content: "Earlier prompt.", timestamp: 1 });
+			manager.appendMessage(fauxAssistantMessage("Earlier reply."));
+			manager.appendCustomMessageEntry(
+				"posthorse-reminder",
+				"UNSENT_TRAILING_REMINDER",
+				true,
+				{ windowId: "initial", contextWindow: 100_000, reserveTokens: 16_384 },
+			);
+		},
+	});
+	const seededOriginal = structuredClone(reminderEntries(trailing.sessionManager)[0]);
+	const trailingRequests: TranscriptMessages[] = [];
+	const recordTrailing = (text: string) => (ctx: TranscriptContext) => {
+		trailingRequests.push(structuredClone(ctx.messages));
+		return fauxAssistantMessage(text);
+	};
+	trailing.faux.setResponses([recordTrailing("First reply without reminder.")]);
+	await trailing.session.prompt("Continue after unsent reminder.");
+	trailing.faux.setResponses([recordTrailing("Second reply keeps reminder out.")]);
+	await trailing.session.prompt("Follow-up after assistant reply.");
+
+	assert.equal(trailingRequests.length, 2);
+	const trailingReq1 = requireValue(trailingRequests[0]);
+	const trailingReq2 = requireValue(trailingRequests[1]);
+	assert.match(getCurrentSystemPrompt(trailingReq1), /Pi compaction is disabled/);
+	assert.doesNotMatch(JSON.stringify(trailingReq1), /UNSENT_TRAILING_REMINDER/);
+	assert.doesNotMatch(
+		JSON.stringify(trailingReq2),
+		/UNSENT_TRAILING_REMINDER/,
+		"an omitted trailing reminder must not reappear after the next assistant reply",
+	);
+	assert.deepEqual(
+		trailingReq2.slice(0, trailingReq1.length),
+		trailingReq1,
+		"omitting an unsent trailing reminder keeps subsequent requests strictly append-only",
+	);
+
+	// Re-enabling compaction and resuming from disk must keep the suppressed reminder out and keep
+	// mid-conversation guidance updates anchored without prefix drift.
+	const resumedTrailing = await resumeFixture(t, trailing, { enabled: true });
+	resumedTrailing.faux.setResponses([recordTrailing("Resumed with compaction re-enabled.")]);
+	await resumedTrailing.session.prompt("Continue after restart with compaction enabled.");
+	resumedTrailing.faux.setResponses([recordTrailing("Second resumed turn.")]);
+	await resumedTrailing.session.prompt("Verify prefix stays append-only after re-enable.");
+
+	assert.equal(trailingRequests.length, 4);
+	const resumedReq1 = requireValue(trailingRequests[2]);
+	const resumedReq2 = requireValue(trailingRequests[3]);
+	assert.doesNotMatch(
+		JSON.stringify(resumedReq1),
+		/UNSENT_TRAILING_REMINDER/,
+		"re-enabling compaction and resuming from disk must not re-insert a suppressed reminder",
+	);
+	assert.doesNotMatch(JSON.stringify(resumedReq2), /UNSENT_TRAILING_REMINDER/);
+	assert.deepEqual(
+		JSON.parse(JSON.stringify(resumedReq1.slice(0, trailingReq2.length))),
+		JSON.parse(JSON.stringify(trailingReq2)),
+		"resuming preserves the prefix with the reminder suppressed",
+	);
+	assert.deepEqual(
+		resumedReq2.slice(0, resumedReq1.length),
+		resumedReq1,
+		"anchored mid-conversation guidance updates stay stable when a suppression marker is present",
+	);
+	assert.match(getCurrentSystemPrompt(resumedReq1), /rollover line is 83,617 tokens used/);
+	assert.match(getCurrentSystemPrompt(resumedReq2), /rollover line is 83,617 tokens used/);
+	assert.deepEqual(reminderEntries(resumedTrailing.sessionManager), [seededOriginal]);
+});
+
+await test("non-provider-summary sessions keep prompt prefixes append-only across reminder updates and 272K/500K model switches", async (t) => {
+	const models = [
+		{ id: "gpt-272k", contextWindow: 272_000, maxTokens: 1000 },
+		{ id: "gpt-500k", contextWindow: 500_000, maxTokens: 1000 },
+	];
+	const h = await fixture(t, { models, reserveTokens: 16_384 });
+	const requests: TranscriptMessages[] = [];
+	const recordRequest = (response: AssistantMessage) => (ctx: TranscriptContext) => {
+		requests.push(structuredClone(ctx.messages));
+		return response;
+	};
+	// 272,000 - 16,384 = 255,616 usable; line at 255,617; reminder band starts at 230,056.
+	h.faux.setResponses([
+		recordRequest(toolTurn(fauxToolCall("get_context_remaining", {}))),
+		recordRequest(fauxAssistantMessage("Handled 272K reminder.")),
+	]);
+	await h.session.prompt("p".repeat(960_000));
+	assert.equal(requests.length, 2);
+	assert.equal(reminderEntries(h.sessionManager).length, 1);
+	assert.match(JSON.stringify(requests[1]), /Routine task-note update\./);
+
+	// Switch mid-session from 272K to 500K and send two turns on 500K.
+	await h.session.setModel(requireValue(h.faux.getModel("gpt-500k")));
+	h.faux.setResponses([recordRequest(fauxAssistantMessage("First 500K reply."))]);
+	await h.session.prompt("Continue on 500K.");
+	h.faux.setResponses([recordRequest(fauxAssistantMessage("Second 500K reply."))]);
+	await h.session.prompt("Stay on 500K.");
+
+	// Switch back to 272K in the same window.
+	await h.session.setModel(requireValue(h.faux.getModel("gpt-272k")));
+	h.faux.setResponses([recordRequest(fauxAssistantMessage("Back on 272K."))]);
+	await h.session.prompt("Return to 272K.");
+
+	assert.equal(requests.length, 5);
+	const [req0, req1, req2, req3, req4] = requests;
+	assert.ok(req0 && req1 && req2 && req3 && req4);
+	// Every subsequent request must keep the entire prior request as an exact byte-for-byte prefix.
+	assert.deepEqual(req1.slice(0, req0.length), req0, "turn 2 extends turn 1");
+	assert.deepEqual(
+		req2.slice(0, req1.length),
+		req1,
+		"switching 272K -> 500K preserves the leading system prompt and already-sent 272K reminder",
+	);
+	assert.deepEqual(
+		req3.slice(0, req2.length),
+		req2,
+		"staying on 500K keeps the mid-conversation guidance update anchored in place",
+	);
+	assert.deepEqual(
+		req4.slice(0, req3.length),
+		req3,
+		"switching back 500K -> 272K appends a new system update without mutating earlier messages",
+	);
+	assert.match(getCurrentSystemPrompt(req0), /Configured context capacity: 272,000 tokens/);
+	assert.match(getCurrentSystemPrompt(req2), /Configured context capacity: 500,000 tokens/);
+	assert.match(getCurrentSystemPrompt(req3), /Configured context capacity: 500,000 tokens/);
+	assert.match(getCurrentSystemPrompt(req4), /Configured context capacity: 272,000 tokens/);
+	assert.doesNotMatch(getCurrentSystemPrompt(req4), /500,000 tokens/);
+
+	// Restart/resume must replay the exact same prefix and anchored mid-conversation updates.
+	const resumed = await resumeFixture(t, h, { models, reserveTokens: 16_384 });
+	await resumed.session.setModel(requireValue(resumed.faux.getModel("gpt-272k")));
+	let resumedRequest: TranscriptMessages | undefined;
+	resumed.faux.setResponses([
+		(ctx) => {
+			resumedRequest = structuredClone(ctx.messages);
+			return toolTurn(
+				fauxToolCall("new_context", { handoff: "Start fresh after switches." }),
+			);
+		},
+		(ctx) => {
+			requests.push(structuredClone(ctx.messages));
+			return fauxAssistantMessage("Fresh window.");
+		},
+	]);
+	await resumed.session.prompt("Continue after restart, then reset.");
+	assert.ok(resumedRequest !== undefined);
+	assert.deepEqual(
+		JSON.parse(JSON.stringify(resumedRequest.slice(0, req4.length))),
+		JSON.parse(JSON.stringify(req4)),
+		"resuming from disk replays the exact prefix and anchored guidance updates",
+	);
+	const postReset = requireValue(requests[5]);
+	const resetHead = requireValue(postReset[0]);
+	assert.ok(resetHead.role === "system");
+	assert.match(
+		resetHead.sections?.posthorse ?? "",
+		/Configured context capacity: 272,000 tokens/,
+	);
+	assert.equal(
+		postReset.filter(
+			(message) =>
+				message.role === "system" && typeof message.sections?.posthorse === "string",
+		).length,
+		1,
+		"a fresh window starts with only the leading guidance section and no prior mid-window updates",
+	);
+});
+
+await test("non-provider-summary rollover with a retained tail anchors post-rollover guidance switches cleanly", async (t) => {
+	const h = await fixture(t, {
+		keepRecentTokens: 20_000,
+		extension(pi) {
+			pi.registerTool({
+				name: "pad",
+				label: "pad",
+				description: "Moderate output",
+				parameters: { type: "object", properties: {} },
+				async execute() {
+					return { content: [{ type: "text", text: "pad ".repeat(4_000) }], details: {} };
+				},
+			});
+		},
+	});
+	const requests: TranscriptMessages[] = [];
+	const recordTurn = (response: AssistantMessage) => (ctx: TranscriptContext) => {
+		requests.push(structuredClone(ctx.messages));
+		return response;
+	};
+	const isRecordMessage = (message: TranscriptMessages[number]) =>
+		textOf(message).includes(RECOVERY_RECORD);
+	h.faux.setResponses(
+		Array.from({ length: 14 }, () => (ctx: TranscriptContext) => {
+			requests.push(structuredClone(ctx.messages));
+			return ctx.messages.some(isRecordMessage)
+				? fauxAssistantMessage("Post-rollover turn 1.")
+				: toolTurn(fauxToolCall("pad", {}));
+		}),
+	);
+	await h.session.prompt("p".repeat(240_000));
+	assert.equal(posthorseBoundaries(h.sessionManager).length, 1);
+	const postRolloverTurn1 = requireValue(requests.at(-1));
+	assert.ok(
+		postRolloverTurn1.findIndex(isRecordMessage) > 1,
+		"chronologicalRetainedTail placed retained messages ahead of the recovery record",
+	);
+
+	h.settingsManager.applyOverrides({ compaction: { reserveTokens: 32_000 } });
+	h.faux.setResponses([recordTurn(fauxAssistantMessage("Post-rollover switched."))]);
+	await h.session.prompt("Switch reserve after rollover.");
+	h.faux.setResponses([recordTurn(fauxAssistantMessage("Post-rollover stayed switched."))]);
+	await h.session.prompt("Confirm post-rollover prefix stability.");
+
+	const afterSwitch = requireValue(requests.at(-2));
+	const afterStay = requireValue(requests.at(-1));
+	assert.deepEqual(
+		afterSwitch.slice(0, postRolloverTurn1.length),
+		postRolloverTurn1,
+		"switching reserve after rollover preserves the entire post-rollover prefix",
+	);
+	assert.deepEqual(
+		afterStay.slice(0, afterSwitch.length),
+		afterSwitch,
+		"the post-rollover mid-conversation guidance update stays anchored on subsequent turns",
+	);
+	assert.match(getCurrentSystemPrompt(afterSwitch), /rollover line is 68,001 tokens used/);
+	assert.match(getCurrentSystemPrompt(afterStay), /rollover line is 68,001 tokens used/);
 });
 
 await test("public checkpoint reminder reaches the model after Pi compacts inside a rollover window", async (t) => {
