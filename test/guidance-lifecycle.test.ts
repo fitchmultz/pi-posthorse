@@ -199,7 +199,12 @@ await test("carried guidance under a provider summary block lands after the last
 	const lead = {
 		role: "system" as const,
 		content: "",
-		providerSummary: { block: { text: "one line" } },
+		providerSummary: {
+			provider: "faux",
+			api: "faux",
+			model: "faux-1",
+			block: { text: "one line" },
+		},
 		timestamp: 1,
 	};
 	const keptReply = {
