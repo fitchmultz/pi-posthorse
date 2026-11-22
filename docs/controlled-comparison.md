@@ -1,8 +1,8 @@
-# Controlled comparison: Posthorse and stock Pi compaction on long tasks, November 2026
+# Controlled comparison: Posthorse and official Pi compaction on long tasks, November 2026
 
 This comparison counts 144 unattended coding sessions on two models. Each session implemented one
-Python library for up to two hours in a 128,000-token window. A session used stock Pi compaction,
-Posthorse, or stock Pi with one paragraph of the Posthorse guidance.
+Python library for up to two hours in a 128,000-token window. A session used official Pi compaction,
+Posthorse, or official Pi with one paragraph of the Posthorse guidance.
 
 - **The agent kept working more often on Posthorse.** On `gpt-6.1-sol` the agent ended its turn
   with failing tests in 10 of 24 stock sessions and in 4 of 24 Posthorse sessions. On
@@ -20,7 +20,7 @@ Posthorse, or stock Pi with one paragraph of the Posthorse guidance.
   copy. In 11 sol sessions the first summary weakened the end condition. In 6 of them the agent
   then ended its turn with only a list of the failures, 17 times in all. A Posthorse record
   carries the first message word for word.
-- **The paragraph alone did not produce the difference.** With it, stock Pi sessions on terra
+- **The paragraph alone did not produce the difference.** With it, official Pi sessions on terra
   ended as they did without it. On sol it changed what the agent said when it stopped: 8 of 24
   sessions still ended a turn unfinished, against 10 without the paragraph and 4 on Posthorse.
 - **No difference** in the planted duty to commit after every whole-suite run, and in files read
@@ -76,7 +76,7 @@ before the runs.
 
 The third side was added after the first results. On the stock side the agent ended its turn with
 work left more often, and one paragraph of the Posthorse guidance could explain that without any
-other part of Posthorse. The third side gives stock Pi that paragraph and nothing else:
+other part of Posthorse. The third side gives official Pi that paragraph and nothing else:
 
 ```text
 Pi compacts context automatically, so the context window is not a deadline. Do not reduce scope,
@@ -97,7 +97,7 @@ for `gpt-6.1-terra`.
 - **Model.** `gpt-6.1-sol` first, then `gpt-6.1-terra`, both at Pi's default thinking level
   (medium), through a ChatGPT subscription login.
 - **Context window.** 128,000 tokens on every side. The real window of both models is 500,000
-  tokens. At 128,000 a large library crosses several boundaries in two hours. Stock Pi compacts
+  tokens. At 128,000 a large library crosses several boundaries in two hours. Official Pi compacts
   and Posthorse rolls over at the same point, 111,616 tokens.
 - **Size.** Three sessions per library and side: 24 sessions per side and model.
 - **Limits.** A session ends after 2 hours of agent time. When the agent ends its turn, the
@@ -246,7 +246,7 @@ way.
 
 ### The paragraph alone changed what the stops say, not how many sessions stopped
 
-The third side is stock Pi with the one paragraph in its system prompt.
+The third side is official Pi with the one paragraph in its system prompt.
 
 |                                                         | stock    | stock + paragraph | Posthorse |
 | ------------------------------------------------------- | -------- | ----------------- | --------- |
@@ -441,7 +441,7 @@ reached a compaction stopped four times in 24 minutes and also passed 10%.
 
 ### The paragraph alone did not keep terra working
 
-The third side is stock Pi with the one paragraph in its system prompt. Its sessions ended as the
+The third side is official Pi with the one paragraph in its system prompt. Its sessions ended as the
 stock sessions did.
 
 |                                                             | stock           | stock + paragraph | Posthorse       |
@@ -583,7 +583,7 @@ Every item is in the per-run data. No rerun hides one.
   in tests passing is inside the noise.
 - **Two models from one provider.** Both are OpenAI models at one thinking level. The
   [field study](field-study.md) found that models differ in how they use the notes.
-- **Stock Pi at its defaults.** The stock side uses Pi's default compaction settings and summary
+- **Official Pi at its defaults.** The stock side uses Pi's default compaction settings and summary
   prompt. Other settings or a custom summary prompt can behave differently.
 - **An ambiguous rule for dulwich.** Dulwich keeps two helper modules for its tests inside the
   package, `dulwich/tests/utils.py` and `dulwich/tests/test_object_store.py`, and Commit0 removes

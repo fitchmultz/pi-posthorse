@@ -2,8 +2,8 @@
 
 This study measures what agents did around 24,940 context boundaries in one person's Pi sessions.
 It answers three questions. Do agents use the notes, the history tool, and the recovery record as
-intended? What happens to the work after a rollover? What does a rollover cost compared with stock
-Pi compaction?
+intended? What happens to the work after a rollover? What does a rollover cost compared with
+official Pi compaction?
 
 The study is observational. It is not a controlled comparison on matched tasks, and it does not
 measure whether the work after a rollover was correct. [Limits](#limits) lists what the numbers
@@ -24,7 +24,7 @@ Posthorse changed during this period, so the journals hold four designs:
 
 | Design                                                                                | Versions    | Dates          | Boundaries |
 | ------------------------------------------------------------------------------------- | ----------- | -------------- | ---------: |
-| Stock Pi compaction: a model-written summary plus a recent tail                       | none        | Feb 20 – Nov 1 |      6,894 |
+| Official Pi compaction: a model-written summary plus a recent tail                    | none        | Feb 20 – Nov 1 |      6,894 |
 | Agent handoff: the reminder told the agent to save state and call `new_context`       | 0.1 – 0.9   | Sep 1 – Nov 9  |     11,016 |
 | Automatic rollover with a retained tail; the record came first and did not name notes | 0.10.0 – .1 | Oct 21 – Nov 1 |      4,992 |
 | Automatic rollover; the record follows the tail and says which note to read (current) | 0.10.2+     | Nov 1 – Nov 10 |      1,658 |

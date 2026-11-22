@@ -1,6 +1,6 @@
 # Posthorse
 
-Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks without an automatic model-generated summary of the work. Stock Pi already preserves the session journal and retains a recent tail during compaction; Posthorse adds explicit notes and history retrieval, with a handoff or bounded recovery record instead of the automatic summary.
+Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks without an automatic model-generated summary of the work. Official Pi already preserves the session journal and retains a recent tail during compaction; Posthorse adds explicit notes and history retrieval, with a handoff or bounded recovery record instead of the automatic summary.
 
 ![A Pi conversation rolls into a fresh context window. Task notes and the complete session transcript remain available.](https://raw.githubusercontent.com/fitchmultz/pi-posthorse/main/.github/readme/context-rollover.png)
 
@@ -33,7 +33,7 @@ is useful. See [idle sessions and cache expiry](https://github.com/fitchmultz/pi
 
 See the [changelog](https://github.com/fitchmultz/pi-posthorse/blob/main/CHANGELOG.md) for release history. Default-branch documentation may describe changes not yet published.
 
-Recoverable history is not guaranteed model recall. See the [practical guarantees and limits](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/context-recovery.md) for the stock-Pi comparison, search scope, checkpoints, privacy, concurrency and cost, or the [rollover reference](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#how-it-works) for implementation details.
+Recoverable history is not guaranteed model recall. See the [practical guarantees and limits](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/context-recovery.md) for the official-Pi comparison, search scope, checkpoints, privacy, concurrency and cost, or the [rollover reference](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/reference.md#how-it-works) for implementation details.
 
 The [field study](https://github.com/fitchmultz/pi-posthorse/blob/main/docs/field-study.md) measures what agents did around 24,940 context boundaries in daily use: note and history use, repeated work, stops, wait time, and cost. It is observational, not a controlled comparison with stock compaction.
 
