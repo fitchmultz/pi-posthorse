@@ -11,6 +11,7 @@ import {
 import { contextStart, isWindow } from "./boundary.ts";
 import { createEpochCache, type EpochValue, type SessionContext } from "./epoch-cache.ts";
 import { sessionEntry, type SessionHost } from "./host.ts";
+import { messagesHeldByProviderSummary } from "./provider-summary.ts";
 
 type ReminderFacts = {
 	readonly windowId: string;
@@ -27,6 +28,9 @@ export type ContextMessage = {
 };
 export type StaleReminderPredicate = (message: ContextMessage) => boolean;
 
+function reminderWindowMatches(details: unknown, windowId: string): boolean {
+	return isRecord(details) && details.windowId === windowId;
+}
 function reminderMatches(details: unknown, fingerprint: ReminderFingerprint): boolean {
 	if (!isRecord(details)) {
 		return false;
@@ -79,6 +83,47 @@ export function reminderFingerprint(
 	const windowId = marker.present ? marker.windowId : reminders.read(ctx).windowId;
 	return typeof windowId === "string" ? fingerprintOf(windowId, host) : undefined;
 }
+export type RemovableReminderPredicate = (message: ContextMessage, index: number) => boolean;
+/**
+ * Classifies reminders in `messages` for stale checks and prefix-safe removal.
+ *
+ * A reminder from an ended window was never sent in the new window (unless held under a provider
+ * summary block), so filtering it keeps the new window's prefix consistent from its first request.
+ * A current-window reminder that became stale after a model, reserve, or compaction-setting change
+ * may only be removed from the trailing unsent tail after the last assistant reply; removing an
+ * earlier one would mutate the sent prefix and trigger provider prefix mismatches or cache misses.
+ */
+export function reminderFilter(
+	messages: readonly ContextMessage[],
+	ctx: SessionContext,
+	host: PolicyContext,
+	reminders: ReminderLookup,
+): {
+	readonly stale: StaleReminderPredicate;
+	readonly removable: RemovableReminderPredicate;
+} {
+	const never = () => false;
+	if (!messages.some(isReminderMessage)) {
+		return { stale: never, removable: never };
+	}
+	const budget = budgetFor(host);
+	const compactionDisabled =
+		budget === undefined ? !host.getCompactionSettings().enabled : budget.state === "disabled";
+	const fingerprint = reminderFingerprint(ctx, host, reminders, messages);
+	if (fingerprint === undefined) {
+		return { stale: never, removable: never };
+	}
+	const stale: StaleReminderPredicate = (message) =>
+		isReminderMessage(message) &&
+		(compactionDisabled || !reminderMatches(message.details, fingerprint));
+	const held = messagesHeldByProviderSummary(messages);
+	const lastAssistant = messages.findLastIndex((message) => message.role === "assistant");
+	const removable: RemovableReminderPredicate = (message, index) =>
+		index >= held &&
+		stale(message) &&
+		(index > lastAssistant || !reminderWindowMatches(message.details, fingerprint.windowId));
+	return { stale, removable };
+}
 /**
  * Reminders that no longer describe this window or budget leave the context. When Pi compaction is
  * off, no reminder can fire again, so every reminder is stale.
@@ -89,19 +134,7 @@ export function staleReminderPredicate(
 	host: PolicyContext,
 	reminders: ReminderLookup,
 ): StaleReminderPredicate {
-	if (!messages.some(isReminderMessage)) {
-		return () => false;
-	}
-	const budget = budgetFor(host);
-	const compactionDisabled =
-		budget === undefined ? !host.getCompactionSettings().enabled : budget.state === "disabled";
-	const fingerprint = reminderFingerprint(ctx, host, reminders, messages);
-	if (fingerprint === undefined) {
-		return () => false;
-	}
-	return (message) =>
-		isReminderMessage(message) &&
-		(compactionDisabled || !reminderMatches(message.details, fingerprint));
+	return reminderFilter(messages, ctx, host, reminders).stale;
 }
 const REMINDER_BUFFER_TOKENS = 32_000;
 type ReminderDecision =

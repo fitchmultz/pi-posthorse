@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PolicyContext } from "../src/contracts.ts";
 import {
+	reminderFilter,
 	reminderFingerprint,
 	staleReminderPredicate,
 	type ContextMessage,
@@ -83,4 +84,65 @@ await test("disabled compaction makes every reminder stale", () => {
 		assert.equal(stale(reminder(fingerprint)), true);
 		assert.equal(stale(reminder({ ...fingerprint, windowId: "window-0" })), true);
 	}
+});
+
+await test("already-sent current-window reminders stay in place across budget or setting changes", () => {
+	const earlier = reminder({ ...fingerprint, contextWindow: 272_000 });
+	const trailing = reminder({ ...fingerprint, contextWindow: 272_000 });
+	const messages: ContextMessage[] = [
+		{ role: "system" },
+		{ role: "user" },
+		earlier,
+		{ role: "assistant" },
+		trailing,
+		{ role: "user" },
+	];
+	for (const policy of [host(), host({ enabled: false })]) {
+		const { stale, removable } = reminderFilter(messages, ctx, policy, lookup("window-1"));
+		assert.equal(stale(earlier), true);
+		assert.equal(stale(trailing), true);
+		assert.equal(
+			removable(earlier, 2),
+			false,
+			"a current-window reminder before an assistant reply is part of the sent prefix",
+		);
+		assert.equal(
+			removable(trailing, 4),
+			true,
+			"a stale reminder in the trailing unsent tail after the last assistant reply is removable",
+		);
+	}
+});
+
+await test("ended-window reminders are removable without a provider summary block and held with one", () => {
+	const old = reminder({ ...fingerprint, windowId: "window-0" });
+	const withoutBlock: ContextMessage[] = [
+		{ role: "system" },
+		{ role: "compactionSummary" },
+		old,
+		{ role: "assistant" },
+		{ role: "user" },
+	];
+	const unheld = reminderFilter(withoutBlock, ctx, host(), lookup("window-1"));
+	assert.equal(unheld.stale(old), true);
+	assert.equal(
+		unheld.removable(old, 2),
+		true,
+		"an ended-window reminder was never part of the new window's prefix",
+	);
+
+	const withBlock = [
+		{ role: "system", providerSummary: { block: { text: "one line" } } },
+		old,
+		{ role: "assistant" },
+		{ role: "compactionSummary" },
+		{ role: "user" },
+	];
+	const held = reminderFilter(withBlock, ctx, host(), lookup("window-1"));
+	assert.equal(held.stale(old), true);
+	assert.equal(
+		held.removable(old, 1),
+		false,
+		"a provider summary block holds every message before the recovery record",
+	);
 });
