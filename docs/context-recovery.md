@@ -10,9 +10,9 @@ installed package, consult the changelog for that version. Default-branch docume
 changes not yet published; a source version or changelog heading alone does not confirm npm
 availability.
 
-## What changes compared with stock Pi?
+## What changes compared with official Pi?
 
-Stock Pi already preserves the session journal when it compacts. Its normal compaction combines a
+Official Pi already preserves the session journal when it compacts. Its normal compaction combines a
 model-generated summary with a recent-message tail, selected using `compaction.keepRecentTokens`.
 Posthorse does not introduce transcript persistence, and stock compaction does not simply erase
 all recent messages.

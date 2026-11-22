@@ -1,6 +1,6 @@
 # Posthorse
 
-Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks without an automatic model-generated summary of the work. Stock Pi already preserves the session journal and retains a recent tail during compaction; Posthorse adds explicit notes and history retrieval, with a handoff or bounded recovery record instead of the automatic summary.
+Posthorse starts fresh context windows for long [Pi](https://github.com/earendil-works/pi) tasks without an automatic model-generated summary of the work. Official Pi already preserves the session journal and retains a recent tail during compaction; Posthorse adds explicit notes and history retrieval, with a handoff or bounded recovery record instead of the automatic summary.
 
 ![A Pi conversation rolls into a fresh context window. Task notes and the complete session transcript remain available.](https://raw.githubusercontent.com/fitchmultz/pi-posthorse/main/.github/readme/context-rollover.png)
 
