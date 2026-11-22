@@ -239,7 +239,7 @@ await test("suppressing a trailing stale reminder stays durable across later rep
 	assert.equal(first.removable(earlierReminder, 2), false, "already-sent earlier reminder stays");
 	assert.equal(first.removable(trailingReminder, 4), true, "trailing stale reminder is dropped");
 	assert.deepEqual(first.newlySuppressedIds, ["r2"]);
-	persistSuppressedReminders(pi, journalCtx, reminders, first.newlySuppressedIds);
+	persistSuppressedReminders(pi, first.newlySuppressedIds);
 	assert.equal(recorded.length, 1);
 	assert.equal(recorded[0]?.type, SUPPRESSED_REMINDER_TYPE);
 
@@ -266,6 +266,23 @@ await test("suppressing a trailing stale reminder stays durable across later rep
 		);
 	}
 	assert.equal(recorded.length, 1);
+
+	// Another turn appended past the cached leaf must still retain r2 via incremental cache extension.
+	appendAtLeaf({ type: "message", id: "a3", message: { role: "assistant", content: "reply 3" } });
+	appendAtLeaf({ type: "message", id: "u4", message: { role: "user", content: "four" } });
+	const req3Messages: ContextMessage[] = [
+		...req2Messages,
+		{ role: "assistant" },
+		{ role: "user" },
+	];
+	const third = reminderFilter(req3Messages, journalCtx, host({ enabled: true }), reminders);
+	assert.equal(third.removable(earlierReminder, 2), false, "r1 remains kept on later turns");
+	assert.equal(
+		third.removable(trailingReminder, 4),
+		true,
+		"r2 stays suppressed across incremental epoch-cache turns",
+	);
+	assert.deepEqual(third.newlySuppressedIds, []);
 
 	// Navigating via /tree to a sibling branch before suppression leaves r2 unsuppressed there.
 	leafId = beforeSuppressLeaf ?? null;

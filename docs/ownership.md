@@ -63,8 +63,12 @@ the extension API; it never rewrites a journal file.
 - Evidence reconciliation and note-state replay share a lexical path key. Dot segments and
   separator spelling do not split a file's effects into different notes. This key does not resolve
   old journal paths against the current filesystem.
-- Reminders belong to a window and budget. Old reminders remain in history but leave model input,
-  except inside the unchanged prefix protected by a provider summary block.
+- Reminders belong to a window and budget. Ended-window reminders and unsent trailing reminders
+  leave model input, except inside the unchanged prefix protected by a provider summary block.
+  Already-sent current-window reminders stay in place so the sent prompt prefix remains
+  append-only. When an unsent trailing current-window reminder is filtered out, a durable
+  `posthorse-suppressed-reminder` custom entry records its journal entry ID so later replies or
+  setting changes never re-insert it mid-history.
 - A cancelled compaction can leave an inert `posthorse-boundary` marker. Only the compaction entry
   establishes a boundary.
 - Entry types, version markers, and receipt wording are storage formats. Changing their producers

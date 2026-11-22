@@ -30,11 +30,6 @@ type ReminderFacts = {
 export type ReminderLookup = {
 	readonly reset: () => void;
 	readonly read: (ctx: SessionContext) => ReminderFacts;
-	readonly recordSuppressed?: (
-		ctx: SessionContext,
-		entryIds: readonly string[],
-		retainInMemory: boolean,
-	) => void;
 };
 export type ContextMessage = {
 	readonly role: string;
@@ -269,20 +264,15 @@ export function reminderFilter(
 /** Persist filtered trailing current-window reminder IDs so subsequent turns never re-insert them. */
 export function persistSuppressedReminders(
 	pi: Pick<ExtensionAPI, "appendEntry">,
-	ctx: SessionContext,
-	reminders: ReminderLookup,
 	entryIds: readonly string[],
 ): void {
 	if (entryIds.length === 0) {
 		return;
 	}
-	const leafBefore = ctx.sessionManager.getLeafId?.() ?? null;
 	pi.appendEntry(SUPPRESSED_REMINDER_TYPE, {
 		version: 1,
 		entryIds: [...entryIds],
 	} satisfies SuppressedReminderRecord);
-	const leafAfter = ctx.sessionManager.getLeafId?.() ?? null;
-	reminders.recordSuppressed?.(ctx, entryIds, leafBefore === leafAfter);
 }
 /**
  * Reminders that no longer describe this window or budget leave the context. When Pi compaction is
@@ -386,19 +376,6 @@ function collectSuppressedIds(
 	}
 	return suppressed;
 }
-function withMemorySuppressed(
-	facts: ReminderFacts,
-	memory: ReadonlySet<string> | undefined,
-): ReminderFacts {
-	if (memory === undefined || memory.size === 0) {
-		return facts;
-	}
-	const merged = new Set(facts.suppressedIds);
-	for (const id of memory) {
-		merged.add(id);
-	}
-	return { ...facts, suppressedIds: merged };
-}
 type ScanProgress = {
 	readonly boundary?: EntryLike | undefined;
 	readonly window?: EntryLike | undefined;
@@ -419,7 +396,6 @@ function scanAncestry(
 	manager: SessionHost,
 	leaf: EntryLike | undefined,
 	previous: EpochValue<ReminderFacts> | undefined,
-	memory: ReadonlySet<string> | undefined,
 ): ReminderFacts {
 	const reversed: EntryLike[] = [];
 	let progress: ScanProgress = { kept: false };
@@ -431,14 +407,11 @@ function scanAncestry(
 			previous.identity.leaf === entry
 		) {
 			const tail = reversed.reverse();
-			return withMemorySuppressed(
-				{
-					windowId: previous.value.windowId,
-					reminders: [...previous.value.reminders, ...onlyReminders(tail)],
-					suppressedIds: collectSuppressedIds(tail, previous.value.suppressedIds),
-				},
-				memory,
-			);
+			return {
+				windowId: previous.value.windowId,
+				reminders: [...previous.value.reminders, ...onlyReminders(tail)],
+				suppressedIds: collectSuppressedIds(tail, previous.value.suppressedIds),
+			};
 		}
 		reversed.push(entry);
 		progress = advanceBoundary(entry, progress);
@@ -449,43 +422,14 @@ function scanAncestry(
 	}
 	const entries = reversed.reverse();
 	const active = entries.slice(contextStart(entries).start);
-	return withMemorySuppressed(
-		{
-			windowId: progress.window?.id ?? "initial",
-			reminders: onlyReminders(active),
-			suppressedIds: collectSuppressedIds(active),
-		},
-		memory,
-	);
+	return {
+		windowId: progress.window?.id ?? "initial",
+		reminders: onlyReminders(active),
+		suppressedIds: collectSuppressedIds(active),
+	};
 }
 export function createReminderLookup(): ReminderLookup {
-	let memorySuppressed = new WeakMap<object, Set<string>>();
-	const cache = createEpochCache<ReminderFacts>((ctx, identity, previous) =>
-		scanAncestry(
-			ctx.sessionManager,
-			identity.leaf,
-			previous,
-			memorySuppressed.get(ctx.sessionManager),
-		),
+	return createEpochCache<ReminderFacts>((ctx, identity, previous) =>
+		scanAncestry(ctx.sessionManager, identity.leaf, previous),
 	);
-	return {
-		reset() {
-			cache.reset();
-			memorySuppressed = new WeakMap();
-		},
-		read: cache.read,
-		recordSuppressed(ctx, entryIds, retainInMemory) {
-			if (retainInMemory) {
-				let ids = memorySuppressed.get(ctx.sessionManager);
-				if (ids === undefined) {
-					ids = new Set();
-					memorySuppressed.set(ctx.sessionManager, ids);
-				}
-				for (const id of entryIds) {
-					ids.add(id);
-				}
-			}
-			cache.reset();
-		},
-	};
 }

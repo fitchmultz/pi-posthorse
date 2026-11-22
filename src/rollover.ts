@@ -124,7 +124,7 @@ function registerReminderFilter(
 			? event.messages.filter((message, index) => !removable(message, index))
 			: event.messages;
 		if (newlySuppressedIds.length > 0) {
-			persistSuppressedReminders(pi, ctx, reminders, newlySuppressedIds);
+			persistSuppressedReminders(pi, newlySuppressedIds);
 		}
 		const ordered = chronologicalRetainedTail(filtered, ctx, stale);
 		if (ordered !== event.messages) {
