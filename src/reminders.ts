@@ -1,4 +1,6 @@
-import type { ExtensionContext, TurnEndEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, TurnEndEvent } from "@earendil-works/pi-coding-agent";
+import { Type, type Static } from "typebox";
+import { Check } from "typebox/value";
 import { budgetFor, type Budget } from "./budget.ts";
 import {
 	LEGACY_WINDOW_TYPE,
@@ -10,20 +12,34 @@ import {
 } from "./contracts.ts";
 import { contextStart, isWindow } from "./boundary.ts";
 import { createEpochCache, type EpochValue, type SessionContext } from "./epoch-cache.ts";
-import { sessionEntry, type SessionHost } from "./host.ts";
+import { sessionEntry, sessionProjection, type SessionHost } from "./host.ts";
 import { messagesHeldByProviderSummary } from "./provider-summary.ts";
+
+export const SUPPRESSED_REMINDER_TYPE = "posthorse-suppressed-reminder";
+const suppressedReminderSchema = Type.Object({
+	version: Type.Literal(1),
+	entryIds: Type.Array(Type.String()),
+});
+type SuppressedReminderRecord = Static<typeof suppressedReminderSchema>;
 
 type ReminderFacts = {
 	readonly windowId: string;
 	readonly reminders: readonly EntryLike[];
+	readonly suppressedIds: ReadonlySet<string>;
 };
 export type ReminderLookup = {
 	readonly reset: () => void;
 	readonly read: (ctx: SessionContext) => ReminderFacts;
+	readonly recordSuppressed?: (
+		ctx: SessionContext,
+		entryIds: readonly string[],
+		retainInMemory: boolean,
+	) => void;
 };
 export type ContextMessage = {
 	readonly role: string;
 	readonly customType?: string | undefined;
+	readonly content?: unknown;
 	readonly details?: unknown;
 };
 export type StaleReminderPredicate = (message: ContextMessage) => boolean;
@@ -51,6 +67,15 @@ function hasReminder(entries: readonly EntryLike[], fingerprint: ReminderFingerp
 }
 function isReminderMessage(message: ContextMessage): boolean {
 	return message.role === "custom" && isReminderType(message.customType);
+}
+function reminderContentKey(message: {
+	readonly customType?: string | undefined;
+	readonly content?: unknown;
+	readonly details?: unknown;
+}): string {
+	// Live CustomMessage timestamps (Date.now) and persisted entry ISO timestamps can differ by 1ms,
+	// so match reminders by type, payload, and fingerprint in chronological order.
+	return JSON.stringify([message.customType, message.content, message.details]);
 }
 /** A host may project a legacy fork's display marker; its window id outranks the journal scan. */
 function contextMarker(messages: readonly ContextMessage[]): {
@@ -83,46 +108,181 @@ export function reminderFingerprint(
 	const windowId = marker.present ? marker.windowId : reminders.read(ctx).windowId;
 	return typeof windowId === "string" ? fingerprintOf(windowId, host) : undefined;
 }
+type JournalReminder = { readonly id: string; readonly key: string };
+function activeJournalReminders(
+	ctx: SessionContext,
+	state: ReminderFacts,
+): readonly JournalReminder[] {
+	const projection = sessionProjection(ctx.sessionManager);
+	if (projection !== undefined && projection.length > 0) {
+		const projected: JournalReminder[] = [];
+		for (const item of projection) {
+			const id = item.sourceEntry.id;
+			const first = item.messages[0];
+			if (
+				typeof id === "string" &&
+				id !== "" &&
+				item.sourceEntry.type === "custom_message" &&
+				isReminderType(item.sourceEntry.customType) &&
+				first !== undefined
+			) {
+				projected.push({ id, key: reminderContentKey(first) });
+			}
+		}
+		return projected;
+	}
+	return state.reminders.flatMap((entry) =>
+		typeof entry.id === "string" && entry.id !== ""
+			? [{ id: entry.id, key: reminderContentKey(entry) }]
+			: [],
+	);
+}
+function matchReminderEntryIds(
+	messages: readonly ContextMessage[],
+	journal: readonly JournalReminder[],
+): Map<number, string> {
+	const matched = new Map<number, string>();
+	if (journal.length === 0) {
+		return matched;
+	}
+	let cursor = 0;
+	for (let index = 0; index < messages.length && cursor < journal.length; index++) {
+		const message = messages[index];
+		if (message === undefined || !isReminderMessage(message)) {
+			continue;
+		}
+		const key = reminderContentKey(message);
+		const found = journal.findIndex((entry, at) => at >= cursor && entry.key === key);
+		if (found >= 0) {
+			const entry = journal[found];
+			if (entry !== undefined) {
+				matched.set(index, entry.id);
+			}
+			cursor = found + 1;
+		}
+	}
+	return matched;
+}
 export type RemovableReminderPredicate = (message: ContextMessage, index: number) => boolean;
+export type ReminderFilterResult = {
+	readonly stale: StaleReminderPredicate;
+	readonly removable: RemovableReminderPredicate;
+	readonly newlySuppressedIds: readonly string[];
+};
+function collectNewlySuppressedIds(
+	messages: readonly ContextMessage[],
+	state: {
+		readonly held: number;
+		readonly lastAssistant: number;
+		readonly windowId: string;
+		readonly stale: StaleReminderPredicate;
+		readonly suppressedIds: ReadonlySet<string>;
+		readonly entryIds: ReadonlyMap<number, string>;
+	},
+): string[] {
+	const newlySuppressed: string[] = [];
+	const seen = new Set<string>();
+	for (let index = state.held; index < messages.length; index++) {
+		const message = messages[index];
+		if (
+			message === undefined ||
+			index <= state.lastAssistant ||
+			!state.stale(message) ||
+			!reminderWindowMatches(message.details, state.windowId)
+		) {
+			continue;
+		}
+		const entryId = state.entryIds.get(index);
+		if (entryId !== undefined && !state.suppressedIds.has(entryId) && !seen.has(entryId)) {
+			seen.add(entryId);
+			newlySuppressed.push(entryId);
+		}
+	}
+	return newlySuppressed;
+}
 /**
- * Classifies reminders in `messages` for stale checks and prefix-safe removal.
+ * Classifies reminders in `messages` for stale checks and monotone, prefix-safe removal.
  *
  * A reminder from an ended window was never sent in the new window (unless held under a provider
  * summary block), so filtering it keeps the new window's prefix consistent from its first request.
  * A current-window reminder that became stale after a model, reserve, or compaction-setting change
- * may only be removed from the trailing unsent tail after the last assistant reply; removing an
- * earlier one would mutate the sent prefix and trigger provider prefix mismatches or cache misses.
+ * may only be removed from the trailing unsent tail after the last assistant reply; once omitted,
+ * its journal entry id is marked suppressed so later assistant replies or setting reversals never
+ * re-insert it mid-history.
  */
 export function reminderFilter(
 	messages: readonly ContextMessage[],
 	ctx: SessionContext,
 	host: PolicyContext,
 	reminders: ReminderLookup,
-): {
-	readonly stale: StaleReminderPredicate;
-	readonly removable: RemovableReminderPredicate;
-} {
+): ReminderFilterResult {
 	const never = () => false;
 	if (!messages.some(isReminderMessage)) {
-		return { stale: never, removable: never };
+		return { stale: never, removable: never, newlySuppressedIds: [] };
 	}
 	const budget = budgetFor(host);
 	const compactionDisabled =
 		budget === undefined ? !host.getCompactionSettings().enabled : budget.state === "disabled";
 	const fingerprint = reminderFingerprint(ctx, host, reminders, messages);
 	if (fingerprint === undefined) {
-		return { stale: never, removable: never };
+		return { stale: never, removable: never, newlySuppressedIds: [] };
 	}
 	const stale: StaleReminderPredicate = (message) =>
 		isReminderMessage(message) &&
 		(compactionDisabled || !reminderMatches(message.details, fingerprint));
+	const hasCurrentWindow = messages.some(
+		(message) =>
+			isReminderMessage(message) &&
+			reminderWindowMatches(message.details, fingerprint.windowId),
+	);
+	const facts = hasCurrentWindow ? reminders.read(ctx) : undefined;
+	const suppressedIds = facts?.suppressedIds ?? new Set<string>();
+	const entryIds =
+		facts === undefined
+			? new Map<number, string>()
+			: matchReminderEntryIds(messages, activeJournalReminders(ctx, facts));
 	const held = messagesHeldByProviderSummary(messages);
 	const lastAssistant = messages.findLastIndex((message) => message.role === "assistant");
-	const removable: RemovableReminderPredicate = (message, index) =>
-		index >= held &&
-		stale(message) &&
-		(index > lastAssistant || !reminderWindowMatches(message.details, fingerprint.windowId));
-	return { stale, removable };
+	const removable: RemovableReminderPredicate = (message, index) => {
+		if (index < held || !isReminderMessage(message)) {
+			return false;
+		}
+		const entryId = entryIds.get(index);
+		if (entryId !== undefined && suppressedIds.has(entryId)) {
+			return true;
+		}
+		return (
+			stale(message) &&
+			(index > lastAssistant || !reminderWindowMatches(message.details, fingerprint.windowId))
+		);
+	};
+	const newlySuppressedIds = collectNewlySuppressedIds(messages, {
+		held,
+		lastAssistant,
+		windowId: fingerprint.windowId,
+		stale,
+		suppressedIds,
+		entryIds,
+	});
+	return { stale, removable, newlySuppressedIds };
+}
+/** Persist filtered trailing current-window reminder IDs so subsequent turns never re-insert them. */
+export function persistSuppressedReminders(
+	pi: Pick<ExtensionAPI, "appendEntry">,
+	ctx: SessionContext,
+	reminders: ReminderLookup,
+	entryIds: readonly string[],
+): void {
+	if (entryIds.length === 0) {
+		return;
+	}
+	const leafBefore = ctx.sessionManager.getLeafId?.() ?? null;
+	pi.appendEntry(SUPPRESSED_REMINDER_TYPE, {
+		version: 1,
+		entryIds: [...entryIds],
+	} satisfies SuppressedReminderRecord);
+	const leafAfter = ctx.sessionManager.getLeafId?.() ?? null;
+	reminders.recordSuppressed?.(ctx, entryIds, leafBefore === leafAfter);
 }
 /**
  * Reminders that no longer describe this window or budget leave the context. When Pi compaction is
@@ -208,6 +368,37 @@ function onlyReminders(entries: readonly EntryLike[]): EntryLike[] {
 		(entry) => entry.type === "custom_message" && isReminderType(entry.customType),
 	);
 }
+function collectSuppressedIds(
+	entries: readonly EntryLike[],
+	base?: ReadonlySet<string>,
+): Set<string> {
+	const suppressed = new Set<string>(base);
+	for (const entry of entries) {
+		if (
+			entry.type === "custom" &&
+			entry.customType === SUPPRESSED_REMINDER_TYPE &&
+			Check(suppressedReminderSchema, entry.data)
+		) {
+			for (const id of entry.data.entryIds) {
+				suppressed.add(id);
+			}
+		}
+	}
+	return suppressed;
+}
+function withMemorySuppressed(
+	facts: ReminderFacts,
+	memory: ReadonlySet<string> | undefined,
+): ReminderFacts {
+	if (memory === undefined || memory.size === 0) {
+		return facts;
+	}
+	const merged = new Set(facts.suppressedIds);
+	for (const id of memory) {
+		merged.add(id);
+	}
+	return { ...facts, suppressedIds: merged };
+}
 type ScanProgress = {
 	readonly boundary?: EntryLike | undefined;
 	readonly window?: EntryLike | undefined;
@@ -228,6 +419,7 @@ function scanAncestry(
 	manager: SessionHost,
 	leaf: EntryLike | undefined,
 	previous: EpochValue<ReminderFacts> | undefined,
+	memory: ReadonlySet<string> | undefined,
 ): ReminderFacts {
 	const reversed: EntryLike[] = [];
 	let progress: ScanProgress = { kept: false };
@@ -238,10 +430,15 @@ function scanAncestry(
 			previous !== undefined &&
 			previous.identity.leaf === entry
 		) {
-			return {
-				windowId: previous.value.windowId,
-				reminders: [...previous.value.reminders, ...onlyReminders(reversed.reverse())],
-			};
+			const tail = reversed.reverse();
+			return withMemorySuppressed(
+				{
+					windowId: previous.value.windowId,
+					reminders: [...previous.value.reminders, ...onlyReminders(tail)],
+					suppressedIds: collectSuppressedIds(tail, previous.value.suppressedIds),
+				},
+				memory,
+			);
 		}
 		reversed.push(entry);
 		progress = advanceBoundary(entry, progress);
@@ -251,14 +448,44 @@ function scanAncestry(
 		}
 	}
 	const entries = reversed.reverse();
-	return {
-		windowId: progress.window?.id ?? "initial",
-		reminders: onlyReminders(entries.slice(contextStart(entries).start)),
-	};
+	const active = entries.slice(contextStart(entries).start);
+	return withMemorySuppressed(
+		{
+			windowId: progress.window?.id ?? "initial",
+			reminders: onlyReminders(active),
+			suppressedIds: collectSuppressedIds(active),
+		},
+		memory,
+	);
 }
 export function createReminderLookup(): ReminderLookup {
+	let memorySuppressed = new WeakMap<object, Set<string>>();
 	const cache = createEpochCache<ReminderFacts>((ctx, identity, previous) =>
-		scanAncestry(ctx.sessionManager, identity.leaf, previous),
+		scanAncestry(
+			ctx.sessionManager,
+			identity.leaf,
+			previous,
+			memorySuppressed.get(ctx.sessionManager),
+		),
 	);
-	return { reset: cache.reset, read: cache.read };
+	return {
+		reset() {
+			cache.reset();
+			memorySuppressed = new WeakMap();
+		},
+		read: cache.read,
+		recordSuppressed(ctx, entryIds, retainInMemory) {
+			if (retainInMemory) {
+				let ids = memorySuppressed.get(ctx.sessionManager);
+				if (ids === undefined) {
+					ids = new Set();
+					memorySuppressed.set(ctx.sessionManager, ids);
+				}
+				for (const id of entryIds) {
+					ids.add(id);
+				}
+			}
+			cache.reset();
+		},
+	};
 }

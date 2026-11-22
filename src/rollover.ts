@@ -34,6 +34,7 @@ type RolloverResources = {
 };
 import {
 	createReminderLookup,
+	persistSuppressedReminders,
 	reminderDecision,
 	reminderFilter,
 	type ReminderLookup,
@@ -113,10 +114,18 @@ function registerReminderFilter(
 	reminders: ReminderLookup,
 ): void {
 	pi.on("context_with_system", (event, ctx) => {
-		const { stale, removable } = reminderFilter(event.messages, ctx, policy(ctx), reminders);
+		const { stale, removable, newlySuppressedIds } = reminderFilter(
+			event.messages,
+			ctx,
+			policy(ctx),
+			reminders,
+		);
 		const filtered = event.messages.some(removable)
 			? event.messages.filter((message, index) => !removable(message, index))
 			: event.messages;
+		if (newlySuppressedIds.length > 0) {
+			persistSuppressedReminders(pi, ctx, reminders, newlySuppressedIds);
+		}
 		const ordered = chronologicalRetainedTail(filtered, ctx, stale);
 		if (ordered !== event.messages) {
 			return { messages: ordered };

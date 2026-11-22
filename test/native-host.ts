@@ -2963,7 +2963,8 @@ await test("public enabled-to-disabled policy preserves already-sent reminders a
 	assert.match(getCurrentSystemPrompt(afterDisable), /Pi compaction is disabled/);
 	assert.deepEqual(reminders(), [original]);
 
-	// A stale reminder in the trailing unsent tail (no subsequent assistant reply) is still removed.
+	// A stale reminder in the trailing unsent tail (no subsequent assistant reply) is filtered out
+	// and stays omitted across subsequent assistant replies, re-enabling compaction, and disk resume.
 	const trailing = await fixture(t, {
 		enabled: false,
 		seed(manager) {
@@ -2978,20 +2979,62 @@ await test("public enabled-to-disabled policy preserves already-sent reminders a
 		},
 	});
 	const seededOriginal = structuredClone(reminderEntries(trailing.sessionManager)[0]);
-	let trailingInput = "";
-	trailing.faux.setResponses([
-		(ctx) => {
-			trailingInput = [
-				getCurrentSystemPrompt(ctx.messages),
-				...ctx.messages.filter((message) => message.role !== "system").map(textOf),
-			].join("\n");
-			return fauxAssistantMessage("Done");
-		},
-	]);
+	const trailingRequests: TranscriptMessages[] = [];
+	const recordTrailing = (text: string) => (ctx: TranscriptContext) => {
+		trailingRequests.push(structuredClone(ctx.messages));
+		return fauxAssistantMessage(text);
+	};
+	trailing.faux.setResponses([recordTrailing("First reply without reminder.")]);
 	await trailing.session.prompt("Continue after unsent reminder.");
-	assert.match(trailingInput, /Pi compaction is disabled/);
-	assert.doesNotMatch(trailingInput, /UNSENT_TRAILING_REMINDER/);
-	assert.deepEqual(reminderEntries(trailing.sessionManager), [seededOriginal]);
+	trailing.faux.setResponses([recordTrailing("Second reply keeps reminder out.")]);
+	await trailing.session.prompt("Follow-up after assistant reply.");
+
+	assert.equal(trailingRequests.length, 2);
+	const trailingReq1 = requireValue(trailingRequests[0]);
+	const trailingReq2 = requireValue(trailingRequests[1]);
+	assert.match(getCurrentSystemPrompt(trailingReq1), /Pi compaction is disabled/);
+	assert.doesNotMatch(JSON.stringify(trailingReq1), /UNSENT_TRAILING_REMINDER/);
+	assert.doesNotMatch(
+		JSON.stringify(trailingReq2),
+		/UNSENT_TRAILING_REMINDER/,
+		"an omitted trailing reminder must not reappear after the next assistant reply",
+	);
+	assert.deepEqual(
+		trailingReq2.slice(0, trailingReq1.length),
+		trailingReq1,
+		"omitting an unsent trailing reminder keeps subsequent requests strictly append-only",
+	);
+
+	// Re-enabling compaction and resuming from disk must keep the suppressed reminder out and keep
+	// mid-conversation guidance updates anchored without prefix drift.
+	const resumedTrailing = await resumeFixture(t, trailing, { enabled: true });
+	resumedTrailing.faux.setResponses([recordTrailing("Resumed with compaction re-enabled.")]);
+	await resumedTrailing.session.prompt("Continue after restart with compaction enabled.");
+	resumedTrailing.faux.setResponses([recordTrailing("Second resumed turn.")]);
+	await resumedTrailing.session.prompt("Verify prefix stays append-only after re-enable.");
+
+	assert.equal(trailingRequests.length, 4);
+	const resumedReq1 = requireValue(trailingRequests[2]);
+	const resumedReq2 = requireValue(trailingRequests[3]);
+	assert.doesNotMatch(
+		JSON.stringify(resumedReq1),
+		/UNSENT_TRAILING_REMINDER/,
+		"re-enabling compaction and resuming from disk must not re-insert a suppressed reminder",
+	);
+	assert.doesNotMatch(JSON.stringify(resumedReq2), /UNSENT_TRAILING_REMINDER/);
+	assert.deepEqual(
+		JSON.parse(JSON.stringify(resumedReq1.slice(0, trailingReq2.length))),
+		JSON.parse(JSON.stringify(trailingReq2)),
+		"resuming preserves the prefix with the reminder suppressed",
+	);
+	assert.deepEqual(
+		resumedReq2.slice(0, resumedReq1.length),
+		resumedReq1,
+		"anchored mid-conversation guidance updates stay stable when a suppression marker is present",
+	);
+	assert.match(getCurrentSystemPrompt(resumedReq1), /rollover line is 83,617 tokens used/);
+	assert.match(getCurrentSystemPrompt(resumedReq2), /rollover line is 83,617 tokens used/);
+	assert.deepEqual(reminderEntries(resumedTrailing.sessionManager), [seededOriginal]);
 });
 
 await test("non-provider-summary sessions keep prompt prefixes append-only across reminder updates and 272K/500K model switches", async (t) => {
