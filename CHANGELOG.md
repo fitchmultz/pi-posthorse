@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.10.39 - 2026-11-22
+
+<!-- npm-release:unreleased:start -->
+<!-- npm-release:unreleased:end -->
+
+- docs: use official Pi instead of stock Pi (PPH-206) (#236) ([00cfd62](https://github.com/fitchmultz/pi-posthorse/commit/00cfd62128409e3d4812318b22b8bb67779f2fcc))
+
+### What's Changed
+
+- docs: use official Pi instead of stock Pi (PPH-206) by @fitchmultz in https://github.com/fitchmultz/pi-posthorse/pull/236
+
+**Full Changelog**: https://github.com/fitchmultz/pi-posthorse/compare/v0.10.38...v0.10.39
+
 ## 0.10.38 - 2026-11-22
 
 <!-- npm-release:unreleased:start -->
