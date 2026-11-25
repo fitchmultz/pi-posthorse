@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Require Pi 1.6.1 or later (PEA-238).
+
 ## 0.10.39 - 2026-11-22
 
 <!-- npm-release:unreleased:start -->
