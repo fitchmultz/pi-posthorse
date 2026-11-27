@@ -143,7 +143,7 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit
           npm run hydrate:model-data
-          PI_OFFLINE=1 PI_TELEMETRY=0 npm run build:offline
+          PI_OFFLINE=1 npm run build:offline
           git diff --exit-code
           node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "$PI_FORK_REF"
           git diff --exit-code
