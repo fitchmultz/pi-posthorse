@@ -3367,7 +3367,6 @@ await assert.rejects(notes.execute("fault", { op: "write", path: "durable.md", c
 					TMPDIR: dir,
 					PI_CODING_AGENT_DIR: join(dir, "agent"),
 					PI_OFFLINE: "1",
-					PI_TELEMETRY: "0",
 					NODE_DISABLE_COMPILE_CACHE: "1",
 					NODE_OPTIONS: process.env.NODE_OPTIONS,
 					PI_PACKAGE_DIR: process.env.PI_PACKAGE_DIR,
